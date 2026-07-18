@@ -19,11 +19,19 @@
   --muted:   oklch(0.635 0.016 265);
   --line:    oklch(0.30 0.015 265);
 
-  --yellow:  oklch(0.84 0.165 88);
-  --red:     oklch(0.62 0.205 32);
-  --blue:    oklch(0.66 0.160 250);
+  /* The brand triplet, same values the marks are drawn in (assets/mark-*.svg).
+     These were a fourth palette before: --red was actually orange (L .62 vs .545) and
+     --blue was sky (L .66 vs .40). The interface must be painted in the brand, not
+     near it. Yellow and navy carry Rob's nudge (see BRAND) — warmer, more electric. */
+  --yellow:  oklch(0.836 0.170 84);   /* #fdbe0c */
+  --red:     oklch(0.545 0.209 27);   /* #ce1c22 — anchor, unchanged */
+  --blue:    oklch(0.402 0.180 269);  /* #2436a7 */
 
-  --accent-live: var(--blue);
+  /* UI accents are NOT the marks. The brand navy sits at L .40 and reads as a black
+     smudge on this panel (1.77:1) — it belongs on the stage, not on a label. The accent
+     keeps the brand HUE and lifts the lightness until it passes 3:1. Same family, legible.
+     Yellow and red are already light enough to serve both jobs unchanged. */
+  --accent-live: oklch(0.72 0.145 269);
   --accent-beat: var(--yellow);
   --accent-warn: var(--red);
   --accent-live-ink: oklch(0.14 0.012 265);
@@ -476,7 +484,7 @@ button,.tinSelect{touch-action:manipulation}
       <button class="btn wide" id="addStop" style="margin-top:var(--sp-1)">+ colour</button>
       <canvas id="ramp" aria-label="Palette ramp"></canvas>
       <div class="row"><label>Background</label><span data-mnt="bgL"></span></div>
-      <div class="row"><label title="Spectral brightness drifts the palette hue">Hue drift</label><span data-mnt="hueDrift"></span></div>
+      <div class="row"><label title="Spectral brightness breathes the palette saturation. Hue never moves">Colour shimmer</label><span data-mnt="satDrift"></span></div>
       <div class="row" style="margin-top:var(--sp-2)"><label>Chromatic</label><span data-mnt="chroma"></span></div>
       <div class="row"><label>Aberration angle</label><span data-mnt="chromaAng"></span></div>
     </fieldset>
@@ -649,13 +657,13 @@ const state = {
   cam2:{ mirror:1, duotone:0.75, posterize:0.4, contrast:0.35, gain:0.45,
          layer:0, blend:'screen', over:0 },   /* the "layer in the mix" role */
   cam:{ persp:0.35, zoom:1, tilt:0.1, spin:0.022, yaw:0 },
-  bgL:0.13, hueDrift:0.35,
+  bgL:0.13, satDrift:0.35,
   /* Physics is the third register (§8.2): target × transport × local interaction.
      Forces move the body in world space ON TOP of whatever the modes ask for, so a
      режим stays a target provider and never has to know about collisions. */
   phys:{ on:1, dim3:0, follow:3.4, collide:0.55, radius:0.13, swirl:0.16, gravity:0, attract:0, flock:0, damp:0.90 },
   post:{ chroma:0, chromaAng:0 },
-  stops:[ {c:'#2d2f83',p:0}, {c:'#f6c60a',p:0.5}, {c:'#ce1c22',p:1} ],
+  stops:[ {c:'#2436a7',p:0}, {c:'#fdbe0c',p:0.5}, {c:'#ce1c22',p:1} ],
   formation:{ text:'BRYK', font:'', on:false }
 };
 
@@ -681,11 +689,17 @@ function oklabToSrgb(L){ const l=Math.pow(L[0]+0.3963377774*L[1]+0.2158037573*L[
           l2s(-0.0041960863*l-0.7034186147*m+1.7076147010*s)]; }
 
 /* Interpolate in OKLCH (polar), not OKLab (cartesian). A straight line in Lab between
-   two hues on opposite sides of the wheel passes through the low-chroma middle — blue to
-   yellow comes out beige, which is exactly the mud §2.5 says to avoid. Going round the
-   short arc of the hue circle keeps chroma up the whole way, so the transition stays in
-   the brand family. Achromatic stops (C≈0) keep their neighbour's hue instead of
-   dragging the arc to an arbitrary angle. */
+   two hues on opposite sides of the wheel passes through the low-chroma middle — navy to
+   yellow comes out beige, which is exactly the mud §2.5 says to avoid. The short arc
+   keeps chroma up the whole way. Achromatic stops (C≈0) keep their neighbour's hue
+   instead of dragging the arc to an arbitrary angle.
+   Correction 2026-07-18: the old comment here claimed the short arc would produce green.
+   It does not. navy 275.9° → yellow 90.9° takes the short arc UP through magenta
+   (t=.25 → #803c90 violet, t=.5 → #c95277 pink, t=.75 → #f68140 orange). Green would come
+   from the LONG arc. The canon's conclusion stands, its stated reason did not.
+   And note what this function is FOR: the ramp feeds continuous media (camera duotone,
+   spectrum, asset tint). Bodies never read it — a body takes a stop's colour whole
+   (rebuildTextures). Set, not gradient. */
 const labToLch = l => { const C=Math.hypot(l[1],l[2]); return [l[0], C, Math.atan2(l[2],l[1])]; };
 const lchToLab = c => [c[0], c[1]*Math.cos(c[2]), c[1]*Math.sin(c[2])];
 function mixLch(a,b,t){
@@ -701,13 +715,33 @@ function mixLch(a,b,t){
 let RAMP = new Array(256).fill('#888'), RAMP_RGB = [];
 function normStops(){
   let st=state.stops;
-  if(!Array.isArray(st)||st.length<2) st=state.stops=[{c:'#3f6fe0',p:0},{c:'#e4552f',p:1}];
+  /* fallback is brand, not a stray blue/orange pair — a corrupt scene must not be the
+     one thing on stage that is off-palette */
+  if(!Array.isArray(st)||st.length<2) st=state.stops=[{c:'#2436a7',p:0},{c:'#ce1c22',p:1}];
   st.forEach(s=>{ s.p=clamp(+s.p||0,0,1);
     if(typeof s.c!=='string'||!/^#?[0-9a-fA-F]{6}$/.test(s.c)) s.c='#888888';
     if(!s.c.startsWith('#')) s.c='#'+s.c; });
   st.sort((a,b)=>a.p-b.p); return st;
 }
-let hueShift = 0, lastBakedShift = 0, lastBake = 0;
+/* Drift modulates CHROMA, never hue (Rob, 2026-07-18: «можно насыщенность вместо hue
+   менять, просто чтобы эти цвета немножечко мерцали; цвет лучше не стоит менять»).
+   Hue rotation is what bred the olive and maroon bodies that belong to no brand set:
+   at drift 1.0 the swing was ±34°, so navy 276° wandered 242–310 and yellow 91° wandered
+   57–125, straight through the greens the canon forbids. Chroma cannot leave the family —
+   a desaturated navy is still navy.
+   The authored colour is the CEILING: the set breathes DOWN from it and returns, so what
+   you see at rest is the brand value itself, not a permanent offset from it. That was the
+   other half of the old bug (zero point baked away from zero). */
+let satShift = 0, lastBakedShift = 0, lastBake = 0;
+const SAT_SWING = 0.45;               /* full-depth swing, as a fraction of a stop's own C */
+/* The ceiling is the authored chroma itself, deliberately. An earlier version allowed a
+   15% boost and it clipped: our three sit near the sRGB edge already, so pushing C past
+   them clamps a channel and the CLAMP drags the hue (measured: yellow 83.6°→82.1°,
+   red 26.7°→28.8°). Small next to the ±34° it replaced, but the brief was that hue does
+   not move, so it does not move. Consequence, stated plainly: the bright half of the
+   spectrum holds full brand colour rather than over-saturating it, and the shimmer is a
+   dip. That is the right way round — the brand value is the truth, music dims it. */
+const driftC = C => clamp(C*(1+satShift*SAT_SWING), 0, C);
 function buildRamp(){
   const st=normStops().map(s=>({lch:labToLch(srgbToOklab(hex2rgb(s.c))),p:s.p}));
   RAMP_RGB=[];
@@ -716,7 +750,7 @@ function buildRamp(){
     for(let k=0;k<st.length-1;k++) if(t>=st[k].p&&t<=st[k+1].p){ a=st[k]; b=st[k+1]; break; }
     const f=(b.p>a.p)?(t-a.p)/(b.p-a.p):0;
     const lch=mixLch(a.lch,b.lch,f);
-    if(hueShift) lch[2]+=hueShift;            /* drift is a hue rotation — natural in polar */
+    if(satShift) lch[1]=driftC(lch[1]);       /* drift breathes chroma; hue is locked */
     const rgb=oklabToSrgb(lchToLab(lch));
     RAMP_RGB.push(rgb);
     RAMP[i]='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')';
@@ -756,24 +790,30 @@ function buildStops(){
 }
 $('#addStop').addEventListener('click',()=>{
   const st=normStops(); if(st.length>=10)return;      /* Rob: 8 and more — 10 is the wall */
-  /* widest gap, and the new colour is sampled FROM the ramp so adding a stop
-     does not change the gradient — it only gives you a new handle. */
+  /* Widest gap. The new colour comes from the brand SET, not from the ramp: sampling the
+     interpolant promoted a blend to a full stop, and one click was enough to make an
+     in-between colour a real body colour. That is the «как будто градиент» Rob called out.
+     Round-robin through the three marks so a fourth stop is still one of ours. */
   let gi=0,gw=0;
   for(let i=0;i<st.length-1;i++){ const w=st[i+1].p-st[i].p; if(w>gw){gw=w;gi=i;} }
   const p=+(st[gi].p+gw/2).toFixed(2);
-  const rgb=RAMP_RGB[Math.round(p*255)]||[136,136,136];
-  const hx='#'+rgb.map(v=>v.toString(16).padStart(2,'0')).join('');
-  state.stops.push({c:hx,p}); buildRamp(); buildStops(); rebuildTextures();
+  const fam=[BRAND.navy,BRAND.yellow,BRAND.red];
+  state.stops.push({c:fam[st.length%fam.length],p}); buildRamp(); buildStops(); rebuildTextures();
 });
 
+/* Every preset is built from the three marks and nothing else. The old list seeded six
+   off-brand colours (#e4552f, #f2c53d, #3f6fe0, #7fd4ff, #2b1b5a, #fff3d0) into the app,
+   so cycling presets walked you straight out of the identity. Variety now comes from
+   WHICH marks and in what order, not from new hues — that is the «набор, а не градиент»
+   law applied to the preset bank itself. */
 const PALETTES=[
-  [{c:'#2d2f83',p:0},{c:'#f6c60a',p:0.5},{c:'#ce1c22',p:1}],       /* the identity */
-  [{c:'#ce1c22',p:0},{c:'#f6c60a',p:1}],
-  [{c:'#2d2f83',p:0},{c:'#ce1c22',p:1}],
-  [{c:'#e4552f',p:0},{c:'#f2c53d',p:0.62},{c:'#fff3d0',p:1}],
-  [{c:'#1b2f8a',p:0},{c:'#3f6fe0',p:0.5},{c:'#7fd4ff',p:1}],
-  [{c:'#f2c53d',p:0},{c:'#e4552f',p:0.4},{c:'#2b1b5a',p:1}],
-  [{c:'#ffffff',p:0},{c:'#f2c53d',p:0.5},{c:'#111318',p:1}]
+  [{c:'#2436a7',p:0},{c:'#fdbe0c',p:0.5},{c:'#ce1c22',p:1}],       /* the identity */
+  [{c:'#ce1c22',p:0},{c:'#fdbe0c',p:1}],                            /* hot pair */
+  [{c:'#2436a7',p:0},{c:'#ce1c22',p:1}],                            /* cold to hot */
+  [{c:'#2436a7',p:0},{c:'#fdbe0c',p:1}],                            /* widest contrast */
+  [{c:'#fdbe0c',p:0},{c:'#ce1c22',p:0.5},{c:'#2436a7',p:1}],        /* reversed run */
+  [{c:'#ce1c22',p:0},{c:'#2436a7',p:0.5},{c:'#fdbe0c',p:1}],        /* red-led */
+  [{c:'#fdbe0c',p:0},{c:'#2436a7',p:1}]                             /* two-tone, no red */
 ];
 let palIdx=0;
 function nextPalette(){ palIdx=(palIdx+1)%PALETTES.length;
@@ -807,8 +847,18 @@ let textures = [];
      tri     #f6c60a   134.13 × 203.11   points 31.31,0 · 134.13,63.25 · 0,203.11
      wedge   #2d2f83    99.01 × 324.55   points 99.01,316.97 · 40.48,324.55 · 0,7.58 · 58.53,0
    ══════════════════════════════════════════════════════════════════════════ */
+/* Rob's nudge, 2026-07-18: «жёлтый подвести в более тёплый, синий в более digital
+   звонкий». Red is the anchor and does not move — it is the most saturated of the three
+   and any shift breaks recognition.
+   yellow #f6c60a → #fdbe0c   hue −7°, drops the lemon-green undertone that surfaces
+                              right next to the navy; reads as warm gold. 84° is the last
+                              honest point: below it the red channel clips out of sRGB.
+   navy   #2d2f83 → #2436a7   L +0.043, C +0.042, hue −7° off violet toward true blue.
+                              The old value gave 1.77:1 on our stage and went black on a
+                              projector; this gives 2.10:1 and reads as screen-blue.
+   If navy still loses the room, the lever is bgL (state.bgL), NOT a fourth colour. */
 const BRAND = {
-  red:'#ce1c22', yellow:'#f6c60a', navy:'#2d2f83',
+  red:'#ce1c22', yellow:'#fdbe0c', navy:'#2436a7',
   tri:   { w:134.13, h:203.11, pts:[[31.31,0],[134.13,63.25],[0,203.11]] },
   wedge: { w:99.01,  h:324.55, pts:[[99.01,316.97],[40.48,324.55],[0,7.58],[58.53,0]] }
 };
@@ -990,10 +1040,10 @@ function rebuildTextures(){
     for(let ci=0;ci<st.length;ci++){
       const c=document.createElement('canvas'); c.width=c.height=TEX_PX;
       const x=c.getContext('2d');
-      /* the stop's own colour, with the live hue drift applied in polar space so the
-         whole set turns together and stays a family */
+      /* the stop's own colour. Drift breathes its CHROMA, so the whole set dims and
+         lifts together and never leaves the brand hue (see driftC) */
       let lch=labToLch(srgbToOklab(hex2rgb(st[ci].c)));
-      if(hueShift) lch=[lch[0],lch[1],lch[2]+hueShift];
+      if(satShift) lch=[lch[0],driftC(lch[1]),lch[2]];
       const rgb=oklabToSrgb(lchToLab(lch));
       const col='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')';
       if(face.kind==='prim'){
@@ -1626,7 +1676,7 @@ const GLOBAL_PARAMS = [
   { key:'cam.tilt',    label:'tilt',        min:-1, max:1,   step:0.01, get:()=>state.cam.tilt,  set:v=>state.cam.tilt=v },
   { key:'cam.yaw',     label:'yaw',         min:-3.2,max:3.2,step:0.01, get:()=>state.cam.yaw,   set:v=>state.cam.yaw=v },
   { key:'face',        label:'face heading',min:0,  max:1,   step:0.01, get:()=>state.face,      set:v=>state.face=v },
-  { key:'hueDrift',    label:'hue drift',   min:0,  max:1,   step:0.01, get:()=>state.hueDrift,  set:v=>state.hueDrift=v }
+  { key:'satDrift',    label:'shimmer',     min:0,  max:1,   step:0.01, get:()=>state.satDrift,  set:v=>state.satDrift=v }
 ];
 
 const CURVE = { lin:v=>v, exp:v=>v*v, sqrt:v=>Math.sqrt(v),
@@ -1694,7 +1744,7 @@ function applyMatrix(f){
 }
 function restoreMatrix(acc){ for(const [,s] of acc) s.p.set(s.base); }
 const SCRUB_FOR = { 'size':'size','cam.persp':'persp','cam.zoom':'zoom','cam.tilt':'tilt',
-  'face':'face','hueDrift':'hueDrift' };
+  'face':'face','satDrift':'satDrift' };
 /* Any edit OUTSIDE the matrix must rewrite the base, or the drive overwrites the
    user's hand on the very next frame (the classic EQJ trap). */
 function rebase(key,v){ /* bases are keyed layer::path — clear every match for this path */
@@ -2136,7 +2186,7 @@ function captureScene(){
     shapes:{...state.shapes}, assetW:state.assetW, assetTint:state.assetTint,
     camW:state.camW, cam2:{...state.cam2}, mixSeed:state.mixSeed,
     count:state.count, size:state.size, radius:state.radius, stroke:state.stroke, face:state.face,
-    cam:{...state.cam}, bgL:state.bgL, hueDrift:state.hueDrift,
+    cam:{...state.cam}, bgL:state.bgL, satDrift:state.satDrift,
     post:{...state.post}, phys:{...state.phys},
     stops:state.stops.map(s=>({...s})),
     formation:{...state.formation},
@@ -2159,8 +2209,12 @@ function applyScene(sc){
   state.post=m(def.post,sc.post);
   state.phys=m(def.phys,sc.phys);
   state.formation=m(def.formation,sc.formation);
-  for(const k of ['assetW','assetTint','camW','mixSeed','count','size','radius','stroke','face','bgL','hueDrift'])
+  for(const k of ['assetW','assetTint','camW','mixSeed','count','size','radius','stroke','face','bgL','satDrift'])
     if(sc[k]!=null) state[k]=sc[k];
+  /* migration: `hueDrift` became `satDrift` when drift stopped rotating hue and started
+     breathing chroma (2026-07-18). The depth means the same thing on the same 0..1 range,
+     so an old scene carries straight over. Key renamed, never deleted from the reader. */
+  if(sc.satDrift==null && sc.hueDrift!=null) state.satDrift=sc.hueDrift;
   if(Array.isArray(sc.stops)&&sc.stops.length>=2) state.stops=sc.stops.map(s=>({...s}));
   if(Array.isArray(sc.layers)){
     layers=[]; uid=0;
@@ -2257,7 +2311,7 @@ function buildMatrix(){
 function syncAllScrubs(){
   const map={ count:state.count, size:state.size, radius:state.radius, stroke:state.stroke,
     face:state.face, persp:state.cam.persp, zoom:state.cam.zoom, tilt:state.cam.tilt,
-    spin:state.cam.spin, bgL:state.bgL, hueDrift:state.hueDrift,
+    spin:state.cam.spin, bgL:state.bgL, satDrift:state.satDrift,
     chroma:state.post.chroma, chromaAng:state.post.chromaAng,
     wRect:state.shapes.rect, wCircle:state.shapes.circle, wTri:state.shapes.tri,
     wAsset:state.assetW, assetTint:state.assetTint, camW:state.camW,
@@ -2310,8 +2364,8 @@ mount('spin',{min:-0.5,max:0.5,step:0.005,value:state.cam.spin,allowExtend:true,
   onInput:v=>state.cam.spin=v});
 mount('bgL',{min:0.05,max:0.4,step:0.005,value:state.bgL,label:'Background lightness',
   onInput:v=>{ state.bgL=v; document.documentElement.style.setProperty('--bg','oklch('+v+' 0.012 265)'); }});
-mount('hueDrift',{min:0,max:1,step:0.01,value:state.hueDrift,label:'Hue drift',
-  onInput:v=>{ state.hueDrift=v; rebase('hueDrift',v); }});
+mount('satDrift',{min:0,max:1,step:0.01,value:state.satDrift,label:'Colour shimmer',
+  onInput:v=>{ state.satDrift=v; rebase('satDrift',v); }});
 mount('chroma',{min:0,max:1,step:0.01,value:0,label:'Chromatic aberration',
   onInput:v=>state.post.chroma=v});
 mount('chromaAng',{min:0,max:360,step:1,value:0,label:'Aberration angle',
@@ -2710,19 +2764,18 @@ function frame(){
     ? 'color-mix(in srgb, var(--accent-beat) '+Math.round(lampV*100)+'%, var(--line))' : 'var(--line)';
   lamp.style.transform='scale('+(1+lampV*0.18)+')';
 
-  /* ── hue drift from spectral centroid, mapped through the palette ── */
-  /* Zero point was baked at hd=0.5, so hueDrift=0 gave a permanent −0.6 rad (−34°)
-     rotation: you picked blue and got violet, and turning drift down was the MAXIMUM
-     of the error, not its absence. Drift must swing symmetrically around the authored
-     palette and vanish at 0. */
-  const wantShift = state.hueDrift * ((f.centroid||0) - 0.5) * 1.2;
+  /* ── colour shimmer from spectral brightness: chroma, not hue ── */
+  /* Zero point was baked at 0.5, so drift=0 gave a permanent offset: you picked blue and
+     got violet, and turning drift down was the MAXIMUM of the error, not its absence.
+     Drift must swing symmetrically around the authored palette and vanish at 0. */
+  const wantShift = state.satDrift * ((f.centroid||0) - 0.5) * 2;
   /* The centroid jitters every frame, so a 0.004 gate meant rebuildTextures() — which
      allocates a canvas per face × per stop — ran continuously. Rebuild only on a
      VISIBLE change, and never more than ~8×/sec. */
-  if(Math.abs(wantShift-hueShift)>0.002){
-    hueShift=lerp(hueShift,wantShift,0.08);
-    if(Math.abs(hueShift-lastBakedShift)>0.03 && t-lastBake>0.12){
-      lastBakedShift=hueShift; lastBake=t; buildRamp(); rebuildTextures(); }
+  if(Math.abs(wantShift-satShift)>0.002){
+    satShift=lerp(satShift,wantShift,0.08);
+    if(Math.abs(satShift-lastBakedShift)>0.03 && t-lastBake>0.12){
+      lastBakedShift=satShift; lastBake=t; buildRamp(); rebuildTextures(); }
   }
 
   /* ── drive: modulate, draw, restore the bases ── */
@@ -2918,6 +2971,11 @@ window.__bryk = { state, core:()=>core, pool:()=>pool, layers:()=>layers, scrubs
   move:id=>triggerMove(id), moving:()=>!!MOVE, pending:()=>PENDING.length,
   quant:v=>{ if(v!=null){ QUANT=v; const s2=document.getElementById('quantSel'); if(s2)s2.value=v; } return QUANT; },
   matrix:()=>matrix, logo:()=>LOGO, insideLogo:(x,y)=>insideLogo(x,y), patterns:()=>PATTERNS, behaviours:()=>BEHAVIOURS, manners:()=>MANNERS,
+  /* Drift is driven by the spectral centroid, and the synthetic fixture holds its
+     centroid dead still at ~0.498 — so the shimmer cannot be exercised through the audio
+     path in a probe. Same reason setCount/setFace exist: drive it directly, then measure. */
+  setSat(v){ satShift=v; buildRamp(); rebuildTextures(); return satShift; },
+  sat:()=>satShift,
   setCount(n){ state.count=n; SCRUBS.count.set(n); rebuildPool(); },
   setFace(v){ state.face=v; SCRUBS.face.set(v); rebase('face',v); },
   setLayerW(i,w){ if(layers[i]){ layers[i].w=w; renderLayers(); } },
