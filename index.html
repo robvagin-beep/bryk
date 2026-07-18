@@ -1275,11 +1275,38 @@ function baseParticle(i,seed){
        them never reads as one shape stamped N times at one angle */
     size:0.55+r()*1.25, roll:(r()*2-1)*Math.PI, spin:(r()*2-1)*0.5 }; }
 /* minimal polyhedra for the `form` pattern (particle-dance keeps a larger table) */
-const FORMS={ octa:{ verts:[{x:0,y:1,z:0},{x:1,y:0,z:0},{x:0,y:0,z:1},{x:-1,y:0,z:0},{x:0,y:0,z:-1},{x:0,y:-1,z:0}],
-    edges:[[0,1],[0,2],[0,3],[0,4],[5,1],[5,2],[5,3],[5,4],[1,2],[2,3],[3,4],[4,1]] },
-  cube:{ verts:[{x:-1,y:-1,z:-1},{x:1,y:-1,z:-1},{x:1,y:1,z:-1},{x:-1,y:1,z:-1},
-                {x:-1,y:-1,z:1},{x:1,y:-1,z:1},{x:1,y:1,z:1},{x:-1,y:1,z:1}],
-    edges:[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]] } };
+/* FORMS — carried over whole from particle-dance-builder:238-256. BRYK shipped two of the
+   eight (octa, cube) with hardcoded edges, so `form` had almost nothing to be a variety of.
+   The source's own vertex data, verbatim. */
+const FORMS = {
+  cross:{ verts:[{x:0,y:0,z:0},{x:1,y:0,z:0},{x:-1,y:0,z:0},{x:0,y:1,z:0},{x:0,y:-1,z:0},{x:0,y:0,z:1},{x:0,y:0,z:-1}],
+          edges:[[0,1],[0,2],[0,3],[0,4],[0,5],[0,6]], faces:null },
+  cube:{ verts:[{x:-1,y:-1,z:-1},{x:1,y:-1,z:-1},{x:1,y:1,z:-1},{x:-1,y:1,z:-1},{x:-1,y:-1,z:1},{x:1,y:-1,z:1},{x:1,y:1,z:1},{x:-1,y:1,z:1}],
+         edges:[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]],
+         faces:[[0,1,2,3],[4,5,6,7],[0,1,5,4],[3,2,6,7],[1,2,6,5],[0,3,7,4]] },
+  octa:{ verts:[{x:1,y:0,z:0},{x:-1,y:0,z:0},{x:0,y:1,z:0},{x:0,y:-1,z:0},{x:0,y:0,z:1},{x:0,y:0,z:-1}],
+         edges:[[0,2],[2,1],[1,3],[3,0],[0,4],[2,4],[1,4],[3,4],[0,5],[2,5],[1,5],[3,5]],
+         faces:[[0,2,4],[2,1,4],[1,3,4],[3,0,4],[0,2,5],[2,1,5],[1,3,5],[3,0,5]] },
+  pyramid:{ verts:[{x:-1,y:-1,z:-1},{x:1,y:-1,z:-1},{x:1,y:-1,z:1},{x:-1,y:-1,z:1},{x:0,y:1.3,z:0}],
+            edges:[[0,1],[1,2],[2,3],[3,0],[0,4],[1,4],[2,4],[3,4]],
+            faces:[[0,1,2,3],[0,1,4],[1,2,4],[2,3,4],[3,0,4]] },
+  check:{ verts:[{x:-0.95,y:0.15,z:0},{x:-0.15,y:-0.6,z:0},{x:1.0,y:0.72,z:0}], edges:[[0,1],[1,2]], faces:null },
+  tetra:{ verts:[{x:1,y:1,z:1},{x:-1,y:-1,z:1},{x:-1,y:1,z:-1},{x:1,y:-1,z:-1}],
+          faces:[[0,1,2],[0,1,3],[0,2,3],[1,2,3]] },
+  icosa:{ verts:[{x:0,y:0.526,z:0.851},{x:0,y:0.526,z:-0.851},{x:0,y:-0.526,z:0.851},{x:0,y:-0.526,z:-0.851},{x:0.526,y:0.851,z:0},{x:0.526,y:-0.851,z:0},{x:-0.526,y:0.851,z:0},{x:-0.526,y:-0.851,z:0},{x:0.851,y:0,z:0.526},{x:0.851,y:0,z:-0.526},{x:-0.851,y:0,z:0.526},{x:-0.851,y:0,z:-0.526}] },
+  custom:{ verts:[{x:1,y:0,z:0},{x:-1,y:0,z:0},{x:0,y:1,z:0},{x:0,y:-1,z:0},{x:0,y:0,z:1},{x:0,y:0,z:-1}] }
+};
+/* edges: explicit if given, else auto by nearest-neighbour distance (regular polyhedra +
+   custom point clouds). particle-dance:257-262. Without this tetra and icosa have no
+   edges at all and `form` draws a cloud of unconnected dots. */
+function formEdges(F){
+  if(F.edges) return F.edges; if(F._e) return F._e;
+  const v=F.verts, n=v.length; let mn=Infinity;
+  for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){ const dx=v[i].x-v[j].x,dy=v[i].y-v[j].y,dz=v[i].z-v[j].z, d=dx*dx+dy*dy+dz*dz; if(d>1e-9&&d<mn) mn=d; }
+  const th=mn*1.12, e=[];
+  for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){ const dx=v[i].x-v[j].x,dy=v[i].y-v[j].y,dz=v[i].z-v[j].z, d=dx*dx+dy*dy+dz*dz; if(d>1e-9&&d<=th) e.push([i,j]); }
+  F._e = e.length ? e : [[0, Math.min(1,n-1)]]; return F._e;
+}
 const rotY=(p,a)=>({x:p.x*Math.cos(a)+p.z*Math.sin(a), y:p.y, z:-p.x*Math.sin(a)+p.z*Math.cos(a)});
 function axisPoint(p,t,o){
   const axes=Math.max(2,Math.round(o.axes||9));
@@ -1318,7 +1345,11 @@ function patternPoint(p,pattern,t,o){
   if(pattern==='spiral'){ const u=idx/n, strand=idx%2;
     const a=u*TAU*(2+twist*4)+strand*Math.PI+ph*.5, rad=.5*amp;
     return {x:Math.cos(a)*rad*spread, y:(u-.5)*2.8*spread, z:Math.sin(a)*rad*spread}; }
-  if(pattern==='form'){ const F=FORMS[o.formShape]||FORMS.octa, EE=F.edges, E=EE.length;
+  /* formEdges, not F.edges: tetra and icosa carry no explicit edge list, so reading the
+     field directly gave undefined and the form collapsed. The source derives them by
+     nearest-neighbour distance (particle-dance:257-262), which is why it ships eight
+     shapes and we shipped the two that happened to have edges written out. */
+  if(pattern==='form'){ const F=FORMS[o.formShape]||FORMS.octa, EE=formEdges(F), E=EE.length;
     const e=EE[idx%E], perEdge=Math.ceil(n/E), kk=(idx/E|0), tt=(kk+0.5)/perEdge;
     const va=F.verts[e[0]], vb=F.verts[e[1]], sc=o.formSize||1.15;
     const base={x:lerp(va.x,vb.x,tt)*sc, y:lerp(va.y,vb.y,tt)*sc, z:lerp(va.z,vb.z,tt)*sc};
@@ -1456,6 +1487,10 @@ const AXIS_PARAMS=[
   {key:'scaleGrad', label:'size falloff', min:0,  max:1,   step:0.01, def:0.18},
   {key:'tilt3d',    label:'plane tilt',   min:-1.5,max:1.5,step:0.01, def:0}
 ];
+/* the eight shapes, reachable. `formShape` was read by patternPoint and set by nobody,
+   so seven of the eight forms could not be selected at all. */
+const FORM_KEYS=["cross", "cube", "octa", "pyramid", "check", "tetra", "icosa", "custom"];
+const FORM_PARAM=[{key:'formShape',label:'shape',min:0,max:7,step:1,def:2}];
 const PAT_PARAMS=[
   /* spread 1 = fills the frame edge to edge. The pattern bank was authored for a ±1.5
      world; here it is scaled by the live viewport, so a scene reaches the corners
@@ -1781,9 +1816,15 @@ for(const [id,label,desc,drive] of [
    one genuinely varied bank got one. */
 for(const [id,label] of PATTERNS)
   PRESETS.push(P_('pat-'+id,'particle-dance:patternPoint.'+id,'particles',label,
-    'particle-dance · '+label, PAT_PARAMS, PAT_PARAMS.map(x=>x.key), {},
+    'particle-dance · '+label,
+    /* `form` is the one pattern that picks a polyhedron, so it and only it shows the
+       shape control — the rest would carry a slider that does nothing, which is the
+       exact defect `keys` exists to prevent. */
+    id==='form' ? PAT_PARAMS.concat(FORM_PARAM) : PAT_PARAMS,
+    (id==='form' ? PAT_PARAMS.concat(FORM_PARAM) : PAT_PARAMS).map(x=>x.key), {},
     (i,N,t,P,ctx)=>{ const b=pool[i]; if(!b||!b.pd)return {x:0,y:0,z:0};
-      const q=patternPoint(b.pd, id, t, {...P, spread:1, count:N, seed:ctx.seed});
+      const q=patternPoint(b.pd, id, t, {...P, spread:1, count:N, seed:ctx.seed,
+        formShape:FORM_KEYS[clamp(Math.round(P.formShape||0),0,FORM_KEYS.length-1)]});
       const kx=ctx.vx/1.5*P.spread, ky=ctx.vy/1.5*P.spread;
       return { x:q.x*kx, y:q.y*ky, z:q.z*Math.min(kx,ky) }; }, 'amplitude'));
 

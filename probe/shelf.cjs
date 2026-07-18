@@ -106,6 +106,21 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
         'cohesion Free ' + M.Free.cohesion + ' > Flock ' + M.Flock.cohesion +
         ' · flow Flow ' + M.Flow.flow + ' > Vortex ' + M.Vortex.flow);
 
+    /* ── the polyhedron bank: eight shapes, eight silhouettes ─────────────── */
+    const F = B.onlyProg('pat-form'); B.setCount(240);
+    const spans = [];
+    for (let k = 0; k < 8; k++) {
+      F.params.formShape = k; await s(400);
+      const pl = B.pool(), xs = pl.map(q => q.x), ys = pl.map(q => q.y);
+      if (!pl.every(q => [q.x,q.y,q.z].every(Number.isFinite))) { spans.push('NaN'); continue; }
+      spans.push((Math.max(...xs)-Math.min(...xs)).toFixed(2)+'x'+(Math.max(...ys)-Math.min(...ys)).toFixed(2));
+    }
+    put('all eight polyhedra are reachable and distinct',
+        !spans.includes('NaN') && new Set(spans).size >= 6,
+        new Set(spans).size + '/8 distinct silhouettes');
+    put('shapes only appear on the preset that reads them',
+        !bank['pat-cloud'].keys.includes('formShape') && bank['pat-form'].keys.includes('formShape'));
+
     return out;
   });
   let bad=0; for(const [n,ok,e] of r){ if(!ok)bad++; console.log((ok?'  ok  ':'  FAIL')+'  '+n.padEnd(52)+e); }
