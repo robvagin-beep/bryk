@@ -6,7 +6,12 @@
  * Projects/). Override with BRYK_PLAYWRIGHT if that moves.
  *
  * Covers: console · panel canon · geometry · contrast · WCAG 1.4.12 · engine wiring ·
- * mode blending · formation · palette · post pass · matrix drive+restore · FPS budget.
+ * layer blending · formation · palette · post pass · matrix drive+restore · FPS budget.
+ *
+ * Model note (2026-07-18): the app moved from a fixed `MODES` array to the EQJ layer
+ * stack (`layers[]` of program instances + the `PROGRAMS` bank). This probe was written
+ * against MODES and went stale at that rewrite — `B.modes`/`B.setMode`/`B.soloMode` no
+ * longer exist. Ported here. The stale expectation was the failure, not the engine.
  */
 'use strict';
 const path = require('path');
@@ -94,17 +99,30 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const B = window.__bryk, r = [];
     const put = (n, c, e) => r.push([n, !!c, e == null ? '' : String(e)]);
+    /* Layer-model helpers. `onlyProg` is the engine's own solo path; `setW` goes through
+       setLayerW so the panel re-renders exactly as it does under the hand. */
+    const solo = p => B.onlyProg(p);
+    const layerOf = p => B.layers().find(L => L.prog === p);
+    const setW = (p, w) => { let i = B.layers().findIndex(L => L.prog === p);
+      if (i < 0) { B.addLayer(p); i = B.layers().findIndex(L => L.prog === p); }
+      B.setLayerW(i, w); };
 
     put('pool matches count', B.pool().length === Math.round(B.state.count), B.pool().length);
     put('no NaN in the pool', B.pool().every(b => [b.x,b.y,b.z].every(Number.isFinite)));
     put('ramp is 256 wide', B.ramp().length === 256);
-    /* Don't count modes — that number is a design choice and will keep moving. Check
-       the two things that must hold: the pattern slots exist, and every pattern in the
-       bank produces finite, bounded, non-degenerate points (particle-dance's own
-       assertCore contract: non-finite or |p|>5 is a failure there too). */
-    put('pattern slots present', B.modes.some(m => m.id === 'patA') && B.modes.some(m => m.id === 'patB'),
-        B.modes.map(m => m.id).join(','));
-    put('a formation mode is present', B.modes.some(m => m.id === 'word'));
+    /* Don't count programs — that number is a design choice and will keep moving. Check
+       the two things that must hold: every pattern in the bank is reachable, and every
+       one of them produces finite, bounded, non-degenerate points (particle-dance's own
+       assertCore contract: non-finite or |p|>5 is a failure there too).
+       Under the layer model the old fixed patA/patB slots are gone BY DESIGN — a pattern
+       is reached by adding a layer, not by occupying one of two reserved seats. So the
+       slot check becomes a reachability check. */
+    const bank = B.programs();
+    put('pattern program reaches the whole bank',
+        !!bank.pattern && Array.isArray(bank.pattern.variants) &&
+        bank.pattern.variants.length === B.patterns().length,
+        ((bank.pattern || {}).variants || []).length + '/' + B.patterns().length + ' variants');
+    put('a formation program is present', !!bank.word);
     put('boot does not arm', B.armed() === false);
 
     const cv = document.getElementById('cv'), g = cv.getContext('2d');
@@ -128,15 +146,15 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
         'state ' + B.state.size + ' / scrub ' + B.scrubs.size.get());
 
     // presence is a blend, not a stack
-    B.soloMode('ring'); await sleep(900);
+    solo('ring'); await sleep(900);
     const a = { ...B.pool()[5] };
-    B.setMode('word', 1); await sleep(900);
+    setW('word', 1); await sleep(900);
     const b = B.pool()[5];
-    put('a second mode at equal weight moves the blend',
+    put('a second layer at equal weight moves the blend',
         Math.hypot(b.x - a.x, b.y - a.y) > 0.05, Math.hypot(b.x - a.x, b.y - a.y).toFixed(3));
 
     // formation lands
-    B.soloMode('word'); await sleep(1400);
+    solo('word'); await sleep(1400);
     const pts = B.formation();
     const near = B.pool().filter(p => pts.some(q => Math.hypot(q[0]-p.x, q[1]-p.y) < 0.06)).length;
     put('bodies land on the word', near > B.pool().length * 0.7, near + '/' + B.pool().length);
@@ -154,12 +172,12 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
 
     // ── the whole pattern bank, one by one ───────────────────────────────────
     {
-      const A = B.modes.find(m => m.id === 'patA');
-      const keep = A.pattern;
-      B.soloMode('patA'); B.setCount(200); await sleep(400);
+      solo('pattern'); B.setCount(200); await sleep(400);
+      const A = layerOf('pattern');            /* the layer solo() just created/raised */
+      const keep = A.variant;
       const bad = [];
       for (const [id] of B.patterns()) {
-        A.pattern = id; await sleep(260);
+        A.variant = id; await sleep(260);
         const pl = B.pool();
         const finite = pl.every(b => [b.x,b.y,b.z].every(Number.isFinite));
         const bounded = Math.max(...pl.map(b => Math.max(Math.abs(b.x),Math.abs(b.y),Math.abs(b.z)))) < 6;
@@ -169,7 +187,7 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
       }
       put('every pattern is finite, bounded and non-degenerate', bad.length === 0,
           B.patterns().length + ' patterns' + (bad.length ? ' — ' + bad.join(' | ') : ''));
-      A.pattern = keep;
+      A.variant = keep;
     }
 
     // ── Motion Primer behaviours / manners drive the force block ─────────────
@@ -210,12 +228,17 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
         B.state.phys.attract === 0);
 
     // ── scenes round-trip, and a loaded scene is NOT reverted by the drive ───
-    B.state.size = 77; B.state.shapes.tri = 2.5; B.setMode('tunnel', 0.66);
+    B.state.size = 77; B.state.shapes.tri = 2.5; setW('tunnel', 0.66);
     const snap = B.scene.capture();
-    B.state.size = 12; B.state.shapes.tri = 0; B.setMode('tunnel', 0);
+    B.state.size = 12; B.state.shapes.tri = 0; setW('tunnel', 0);
     B.scene.apply(snap); await sleep(600);
+    /* The name says "weights", so verify the weight — applyScene rebuilds the stack, so
+       the layer must be re-found by program, never held across the apply. */
+    const tun = layerOf('tunnel');
     put('scene restores scalars, weights and panel', B.state.size === 77 &&
-        B.state.shapes.tri === 2.5 && Math.abs(B.scrubs.size.get() - 77) < 0.001);
+        B.state.shapes.tri === 2.5 && Math.abs(B.scrubs.size.get() - 77) < 0.001 &&
+        !!tun && Math.abs(tun.w - 0.66) < 0.001,
+        'tunnel w ' + (tun ? tun.w : 'no layer'));
     B.scene.apply({ v: 0, size: 40 }); await sleep(700);
     put('a loaded scene survives the next drive frame', B.state.size === 40, 'size ' + B.state.size);
     put('an old scene gets defaults, not undefined',
@@ -248,13 +271,13 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   const perf = await page.evaluate(async () => {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const B = window.__bryk; const rows = [];
-    B.soloMode('tunnel'); await sleep(600);
+    B.onlyProg('tunnel'); await sleep(600);
     for (const [n, face, post] of [[300,0,0],[1000,0,0],[300,0.8,0],[1000,0.8,0],[500,0.8,0.5]]) {
       B.setCount(n); B.setFace(face); B.state.post.chroma = post;
       await sleep(1600);
       rows.push({ n, face, post, fps: B.fps() });
     }
-    B.setCount(160); B.setFace(0); B.state.post.chroma = 0; B.soloMode('grid');
+    B.setCount(160); B.setFace(0); B.state.post.chroma = 0; B.onlyProg('grid');
     return rows;
   });
   /* FPS is INFORMATIONAL and never gates — same rule Synthex Engine settled on.
@@ -276,7 +299,7 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   const budget = await page.evaluate(async () => {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const B = window.__bryk, rows = [];
-    B.soloMode('tunnel'); B.setFace(0.8);
+    B.onlyProg('tunnel'); B.setFace(0.8);
     for (const n of [200, 600, 1200]) {
       B.setCount(n); await sleep(900);
       let peak = 0;
@@ -284,7 +307,7 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
         await new Promise(r => requestAnimationFrame(r)); }
       rows.push({ n, peak, cap: B.quadBudget });
     }
-    B.setCount(160); B.setFace(0); B.soloMode('grid');
+    B.setCount(160); B.setFace(0); B.onlyProg('grid');
     return rows;
   });
   for (const r of budget) {
