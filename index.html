@@ -2768,7 +2768,14 @@ function frame(){
   /* Zero point was baked at 0.5, so drift=0 gave a permanent offset: you picked blue and
      got violet, and turning drift down was the MAXIMUM of the error, not its absence.
      Drift must swing symmetrically around the authored palette and vanish at 0. */
-  const wantShift = state.satDrift * ((f.centroid||0) - 0.5) * 2;
+  /* Gate on loudness. A silent input reports centroid 0, and 0 through (c−0.5)*2 is −1,
+     so with nothing playing the palette would sit permanently desaturated — the exact bug
+     this section replaced, wearing a new hat. No signal must mean NO drift, so that what
+     you see at rest is the authored brand colour and nothing else.
+     Measured: silence rmsSlow 0, fixture rmsSlow 0.35–0.44. The gate sits an order of
+     magnitude below the quietest real signal. */
+  const sigGate = clamp((f.env && f.env.rmsSlow || 0)/0.03, 0, 1);
+  const wantShift = state.satDrift * ((f.centroid||0) - 0.5) * 2 * sigGate;
   /* The centroid jitters every frame, so a 0.004 gate meant rebuildTextures() — which
      allocates a canvas per face × per stop — ran continuously. Rebuild only on a
      VISIBLE change, and never more than ~8×/sec. */
