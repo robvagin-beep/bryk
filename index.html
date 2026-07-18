@@ -1,0 +1,2929 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BRYK</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   BRYK — a VJ instrument for DJ sets. Single file, zero dependencies.
+   Dark by decision (2026-07-18): it runs at a party, on a projector.
+   Panel grammar ported from Synthex Engine v1; DSP from audio-core.js;
+   render core from image-shuffler; mod-matrix contract from EQJ/MUSICVIZ.
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root{
+  --bg:      oklch(0.13 0.012 265);
+  --panel:   oklch(0.165 0.012 265);
+  --paper:   oklch(0.205 0.013 265);
+  --ink:     oklch(0.94 0.008 265);
+  --muted:   oklch(0.635 0.016 265);
+  --line:    oklch(0.30 0.015 265);
+
+  --yellow:  oklch(0.84 0.165 88);
+  --red:     oklch(0.62 0.205 32);
+  --blue:    oklch(0.66 0.160 250);
+
+  --accent-live: var(--blue);
+  --accent-beat: var(--yellow);
+  --accent-warn: var(--red);
+  --accent-live-ink: oklch(0.14 0.012 265);
+
+  --fz-s:9px; --fz-m:10px; --fz-l:11px;
+  --sp-0:2px; --sp-1:4px; --sp-2:8px; --sp-3:12px;
+  --r-ctl:4px; --r-mid:6px; --r-outer:10px; --r-full:99px;
+
+  --tint:      color-mix(in srgb, var(--ink) 9%, transparent);
+  --tint-hi:   color-mix(in srgb, var(--ink) 15%, transparent);
+  --tint-card: color-mix(in srgb, var(--ink) 5%, transparent);
+  --sec-zone:  color-mix(in srgb, var(--ink) 3.5%, transparent);
+
+  --ease-out: cubic-bezier(0.23,1,0.32,1);
+  --dur-press:100ms; --dur-pop:180ms;
+  --panel-w:276px; --h-row:22px; --h-btn:30px;
+  --grotesk:'Inter',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);
+  font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink)}
+
+/* ═══ chrome: two fixed columns, stage between (engine:95–104) ═══ */
+#panel,#rightcol{position:fixed;top:0;bottom:0;width:var(--panel-w);background:var(--panel);
+  display:flex;flex-direction:column;overflow:hidden;z-index:10}
+#panel{left:0;border-right:1px solid var(--line)}
+#rightcol{right:0;border-left:1px solid var(--line)}
+.ptitle{flex:none;padding:var(--sp-3) 14px var(--sp-2);font-family:var(--grotesk);
+  font-size:var(--fz-l);font-weight:600;letter-spacing:.01em}
+.pbody{flex:1;min-height:0;overflow-y:auto;padding:0 14px var(--sp-3);
+  scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.pbody::-webkit-scrollbar{width:7px}
+.pbody::-webkit-scrollbar-thumb{background:var(--line);border-radius:var(--r-full)}
+.pbody::-webkit-scrollbar-track{background:transparent}
+
+#stage{position:fixed;top:0;left:var(--panel-w);right:var(--panel-w);bottom:0;overflow:hidden}
+#stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+/* `#stage canvas` is id+element (0,1,1) and outranks a bare id (0,1,0) — written as
+   `#glcv{display:none}` these two never applied at all, and only the inline style the
+   render loop writes was keeping them down. Match the specificity. */
+#stage #glcv{pointer-events:none;display:none}
+#stage #camcv{display:none}
+/* z-order swap: the camera layer can sit under or over the geometry. Free — it is a
+   stacking change, not a re-render. */
+body.camover #camcv{z-index:2}
+body.camover #cv{z-index:1}
+#vid{position:fixed;width:2px;height:2px;opacity:0;pointer-events:none;left:-10px;top:-10px}
+
+/* ═══ groups ═══ */
+fieldset{position:relative;min-inline-size:0;border:0;margin:0 -14px;padding:var(--sp-3) 14px 14px;
+  background:var(--sec-zone);box-shadow:inset 0 -1px var(--line)}
+legend{display:block;float:left;width:100%;padding:0;margin:0 0 var(--sp-2);
+  font-family:var(--grotesk);font-size:var(--fz-l);line-height:1.3;letter-spacing:.01em;
+  font-weight:600;color:var(--ink)}
+legend + *{clear:both}
+
+/* ═══ rows ═══ */
+.row{display:grid;grid-template-columns:1fr minmax(96px,120px);gap:var(--sp-2);
+  align-items:center;margin:var(--sp-1) 0;min-height:var(--h-row)}
+.row>label{font-size:var(--fz-m);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row.full{grid-template-columns:1fr}
+.row.toggle{grid-template-columns:1fr auto}
+.row.is-disabled{opacity:.42;pointer-events:none}
+
+/* ═══ scrub (engine:224–238, resistance curve reworked per apple-design) ═══ */
+.scrub{position:relative;display:flex;align-items:center;height:var(--h-row);box-sizing:border-box;
+  background:var(--paper);border:1px solid var(--line);border-radius:var(--r-ctl);
+  overflow:hidden;cursor:ew-resize;user-select:none;touch-action:none;width:100%}
+.scrub .sfill{position:absolute;left:0;top:0;bottom:0;width:0;
+  background:color-mix(in srgb, var(--accent-live) 22%, transparent);pointer-events:none}
+.scrub .slive{position:absolute;top:2px;bottom:2px;width:2px;margin-left:-1px;
+  background:var(--accent-beat);opacity:.95;pointer-events:none}
+.scrub .sval{position:relative;margin-left:auto;padding:0 var(--sp-2);
+  font:var(--fz-m) ui-monospace,monospace;color:var(--ink);
+  font-variant-numeric:tabular-nums;pointer-events:none;white-space:nowrap}
+.scrub .sedit{position:absolute;inset:0;width:100%;box-sizing:border-box;border:0;
+  background:var(--panel);color:var(--ink);font:var(--fz-m) ui-monospace,monospace;
+  padding:0 var(--sp-2);text-align:right;-moz-appearance:textfield}
+.scrub .sedit::-webkit-inner-spin-button{display:none}
+.scrub:focus-visible{outline:2px solid var(--accent-live);outline-offset:1px;border-color:var(--accent-live)}
+.scrub.is-disabled{opacity:.42;pointer-events:none}
+@media (prefers-reduced-motion:no-preference){ .scrub .slive{transition:left var(--dur-press) var(--ease-out)} }
+@media (hover:hover) and (pointer:fine){ .scrub:hover{border-color:var(--muted)} }
+
+.tinSelect,.tinText{font:var(--fz-m) ui-monospace,monospace;border:1px solid var(--line);
+  border-radius:var(--r-ctl);background:var(--paper);color:var(--ink);padding:0 6px;
+  height:var(--h-row);line-height:calc(var(--h-row) - 2px);width:100%;margin:0}
+select.tinSelect{appearance:none;-webkit-appearance:none;padding-right:22px;cursor:pointer;
+  background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),
+                   linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:calc(100% - 12px) 9px,calc(100% - 8px) 9px;
+  background-size:4px 4px;background-repeat:no-repeat}
+
+.btn{font:var(--fz-m) ui-monospace,monospace;height:var(--h-btn);padding:0 var(--sp-2);
+  background:var(--tint);border:1px solid transparent;border-radius:var(--r-mid);
+  color:var(--muted);cursor:pointer;letter-spacing:.02em}
+.btn.wide{display:block;width:100%;text-align:center}
+.btn.on{background:var(--accent-live);border-color:var(--accent-live);color:var(--accent-live-ink)}
+.btn.warn{border-color:var(--accent-warn);color:var(--accent-warn)}
+.btn.is-disabled{opacity:.42;pointer-events:none}
+.seg{display:flex;gap:var(--sp-1);margin:var(--sp-2) 0 0}
+.seg .btn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.seg.wrap{flex-wrap:wrap}
+.seg.wrap .btn{flex:0 1 calc(33.33% - 3px)}
+
+.nudge{display:flex;align-items:center;gap:var(--sp-1)}
+.nudge .nb{flex:none;width:var(--h-row);height:var(--h-row);padding:0;line-height:1;
+  border:1px solid var(--line);background:var(--paper);border-radius:var(--r-ctl);
+  color:var(--ink);font-size:var(--fz-l)}
+.nudge .phbar{flex:1;min-width:0;height:var(--h-row);position:relative;
+  background:var(--paper);border:1px solid var(--line);border-radius:var(--r-ctl);overflow:hidden}
+.nudge .phbar i{position:absolute;top:2px;bottom:2px;width:2px;margin-left:-1px;left:0;
+  background:var(--accent-beat);opacity:.9}
+.nudge.is-disabled{opacity:.42;pointer-events:none}
+
+input.sw{appearance:none;-webkit-appearance:none;width:30px;height:16px;margin:0;flex:none;
+  cursor:pointer;border:1px solid var(--line);border-radius:var(--r-full);
+  background:var(--paper);position:relative}
+input.sw::before{content:'';position:absolute;top:2px;left:2px;width:10px;height:10px;
+  border-radius:50%;background:var(--muted);
+  transition:left var(--dur-press) var(--ease-out),background-color var(--dur-press) var(--ease-out),
+             transform var(--dur-press) var(--ease-out)}
+input.sw:checked{border-color:var(--accent-live);background:var(--accent-live)}
+input.sw:checked::before{left:16px;background:var(--accent-live-ink)}
+input.sw:active::before{transform:scale(.88)}
+
+/* ═══ compact audio header ═══ */
+.srcrow{display:grid;grid-template-columns:1fr auto;gap:var(--sp-1);align-items:center}
+.srcrow .btn{height:var(--h-row);padding:0 var(--sp-2);font-size:var(--fz-s)}
+/* collapsible group — the legend is the control, so the affordance sits on the label */
+legend[data-toggle]{cursor:pointer;user-select:none}
+legend[data-toggle]::before{content:'▾ ';color:var(--muted)}
+fieldset.closed legend[data-toggle]::before{content:'▸ '}
+fieldset.closed > *:not(legend){display:none!important}
+
+/* ═══ drop overlay ═══ */
+#drop{position:fixed;inset:0;z-index:40;display:none;align-items:center;justify-content:center;
+  background:color-mix(in srgb, var(--bg) 72%, transparent);
+  font-family:var(--grotesk);font-size:14px;color:var(--ink);
+  border:2px dashed var(--accent-live)}
+body.dragging #drop{display:flex}
+
+/* ═══ beat / spectrum / meters ═══ */
+#beat{display:flex;align-items:center;gap:var(--sp-2);margin:var(--sp-2) 0 var(--sp-1)}
+#lamp{flex:none;width:var(--h-btn);height:var(--h-btn);border-radius:50%;background:var(--line);
+  will-change:transform,background-color}
+#bpmOut{font-size:18px;font-variant-numeric:tabular-nums;line-height:1}
+#bmeta{margin-left:auto;text-align:right;font-size:var(--fz-s);color:var(--muted);line-height:1.5}
+#spec{display:block;width:100%;height:52px;margin-top:var(--sp-2);background:var(--paper);
+  border:1px solid var(--line);border-radius:var(--r-ctl);margin:var(--sp-1) 0}
+#specLabels{display:flex;justify-content:space-between;font-size:var(--fz-s);color:var(--muted)}
+/* margin-top leaves room for the .warming caption, which sits above the grid —
+   at --sp-1 it landed on the "16k Hz" axis label */
+#meters{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:var(--sp-1) var(--sp-2);
+  align-items:center;margin-top:var(--sp-3)}
+#meters .ml{font-size:var(--fz-s);color:var(--muted);white-space:nowrap}
+#meters .mt{height:4px;background:var(--tint);border-radius:var(--r-full);overflow:hidden}
+#meters .mt i{display:block;height:100%;width:100%;background:var(--accent-live);
+  transform-origin:left;transform:scaleX(0);will-change:transform}
+#meters .mt.a i{background:var(--accent-beat)}
+#meters.warming{position:relative}
+#meters.warming .mt i,#meters.warming .mt.a i{background:var(--muted)}
+#meters.warming::after{content:'warming…';position:absolute;right:0;top:calc(-1 * var(--sp-3));
+  font-size:var(--fz-s);color:var(--muted);letter-spacing:.05em}
+
+#status{display:flex;align-items:flex-start;gap:var(--sp-1);margin-top:var(--sp-3);
+  font-size:var(--fz-s);color:var(--muted);line-height:1.5;min-height:2.2em}
+#status i{flex:none;width:6px;height:6px;border-radius:50%;background:var(--muted);margin-top:5px}
+#status[data-kind="ok"] i{background:var(--accent-live)}
+#status[data-kind="live"] i{background:var(--accent-beat)}
+#status[data-kind="err"] i{background:var(--accent-warn)}
+#status[data-kind="err"]{color:var(--accent-warn)}
+.note{font-size:var(--fz-s);color:var(--muted);margin:var(--sp-1) 0 0;line-height:1.5}
+.note b{color:var(--ink);font-weight:400}
+kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radius:var(--r-ctl);
+  padding:0 4px;color:var(--ink)}
+
+/* ═══ mode cards — one PRESENCE fader outside, params behind a disclosure ═══ */
+.mcard{border:1px solid var(--line);border-radius:var(--r-mid);padding:var(--sp-2);
+  margin:var(--sp-2) 0;background:var(--tint-card)}
+.mcard.solo{border-color:var(--accent-beat)}
+.mcard .mhd{display:flex;align-items:center;gap:var(--sp-1);margin-bottom:var(--sp-1)}
+.mcard .mname{flex:1;min-width:0;font-size:var(--fz-m);color:var(--ink);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;
+  background:none;border:0;text-align:left;padding:0;font-family:inherit}
+.mcard .mname::before{content:'▸ ';color:var(--muted)}
+.mcard.open .mname::before{content:'▾ '}
+.mtgl{background:var(--tint);border:1px solid transparent;border-radius:var(--r-ctl);
+  color:var(--muted);cursor:pointer;font-size:var(--fz-s);padding:var(--sp-0) var(--sp-1);flex:none}
+.mtgl.on{color:var(--accent-live-ink);background:var(--ink);border-color:var(--ink)}
+.mtgl.s.on{background:var(--accent-beat);border-color:var(--accent-beat)}
+.mcard .mparams{display:none;margin-top:var(--sp-2);
+  padding-top:var(--sp-2);box-shadow:inset 0 1px var(--line)}
+.mcard.open .mparams{display:block}
+
+/* ═══ layer stack — EQJ .lrow grammar ═══ */
+#addLayerBar{margin-bottom:var(--sp-2)}
+#addLayerBar .btn{flex:0 1 calc(50% - 2px);height:24px;font-size:var(--fz-s)}
+.lrow{border:1px solid var(--line);border-radius:var(--r-mid);padding:var(--sp-2);
+  margin:var(--sp-1) 0;background:var(--tint-card)}
+.lrow.act{border-color:var(--accent-live);background:var(--tint)}
+.lrow.mut{opacity:.5}
+.lrow .l1{display:flex;align-items:center;gap:var(--sp-1);margin-bottom:var(--sp-1)}
+.lrow .lname{flex:1;min-width:0;background:none;border:0;padding:0;text-align:left;
+  font:var(--fz-m) ui-monospace,monospace;color:var(--ink);cursor:pointer;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lrow .lname .ln{color:var(--muted)}
+.lrow .lctl{display:flex;gap:var(--sp-0);flex:none}
+.ltiny{width:20px;height:20px;padding:0;line-height:1;font-size:var(--fz-s);
+  background:var(--tint);border:1px solid transparent;border-radius:var(--r-ctl);
+  color:var(--muted);cursor:pointer}
+.ltiny.lx:hover{color:var(--accent-warn)}
+.lrow .l2{display:grid;grid-template-columns:auto 1fr auto auto;gap:var(--sp-1);align-items:center}
+.lrow .lprog{font-size:var(--fz-s);color:var(--muted);white-space:nowrap}
+.lrow .l2 .tinSelect{width:auto;min-width:92px}
+.ltog{background:var(--tint);border:1px solid transparent;border-radius:var(--r-ctl);
+  color:var(--muted);cursor:pointer;font-size:var(--fz-s);padding:var(--sp-0) var(--sp-1)}
+.ltog.on{color:var(--accent-live-ink);background:var(--ink);border-color:var(--ink)}
+.ltog.lsolo.on{background:var(--accent-beat);border-color:var(--accent-beat)}
+.lrow .lparams{margin-top:var(--sp-2);padding-top:var(--sp-2);box-shadow:inset 0 1px var(--line)}
+.rlayer{font-weight:400;color:var(--muted);font-family:ui-monospace,monospace;font-size:var(--fz-s)}
+@media (hover:hover) and (pointer:fine){
+  .ltiny:hover{background:var(--tint-hi);color:var(--ink)}
+  .ltog:not(.on):hover{background:var(--tint-hi);color:var(--ink)} }
+
+/* ═══ colour bank ═══ */
+.crow{display:grid;grid-template-columns:22px 74px 1fr 24px;gap:6px;align-items:center;
+  margin:var(--sp-1) 0;font-size:var(--fz-m);color:var(--muted)}
+.spick{width:22px;height:22px;padding:0;border:1px solid var(--line);border-radius:var(--r-ctl);
+  background:none;cursor:pointer}
+.spick::-webkit-color-swatch-wrapper{padding:1px}
+.spick::-webkit-color-swatch{border:none;border-radius:var(--r-ctl)}
+.crow input[type=range]{accent-color:var(--accent-live);height:2px;width:100%;margin:0}
+.crow .xdel{padding:0;height:20px;line-height:1;font-size:var(--fz-l);
+  background:var(--tint);border:1px solid transparent;border-radius:var(--r-ctl);
+  color:var(--muted);cursor:pointer}
+#ramp{display:block;width:100%;height:20px;border:1px solid var(--line);
+  border-radius:var(--r-ctl);margin:var(--sp-2) 0 0}
+
+/* ═══ corner ═══ */
+#corner{position:fixed;right:0;bottom:0;z-index:30;padding:16px;
+  display:flex;flex-direction:column;align-items:flex-end;gap:var(--sp-1)}
+#tray{display:flex;flex-direction:column;gap:var(--sp-1);padding:var(--sp-2);min-width:184px;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r-outer);
+  transform-origin:100% 100%;opacity:0;transform:scale(.92) translateY(6px);pointer-events:none;
+  transition:opacity var(--dur-pop) var(--ease-out), transform var(--dur-pop) var(--ease-out)}
+#corner:hover #tray,#corner:focus-within #tray{opacity:1;transform:none;pointer-events:auto}
+#tray .trow{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-2);
+  font-size:var(--fz-s);color:var(--muted)}
+#tray .thead{font-family:var(--grotesk);font-size:var(--fz-s);color:var(--muted);
+  letter-spacing:.06em;text-transform:uppercase}
+#uiBtn{flex:none;width:34px;height:34px;padding:0;border-radius:var(--r-full);
+  border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  font:14px/1 ui-monospace,monospace;cursor:pointer;display:flex;align-items:center;justify-content:center}
+#uiBtn[aria-pressed="true"]{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+body.noui #panel,body.noui #rightcol{display:none}
+body.noui #stage{left:0;right:0}
+body.noui #uiBtn{opacity:.18}
+@media (hover:hover) and (pointer:fine){ body.noui #corner:hover #uiBtn{opacity:1} }
+body.noui #corner:focus-within #uiBtn{opacity:1}
+body.blackout #stage{visibility:hidden}
+
+/* ═══ states ═══ */
+.btn,#lamp,.mtgl{transition:transform var(--dur-press) var(--ease-out),
+  background-color var(--dur-press) var(--ease-out),color var(--dur-press) var(--ease-out)}
+.btn:active,.mtgl:active{transform:scale(.97)}
+@media (hover:hover) and (pointer:fine){
+  .btn:not(.on):not(.is-disabled):hover{background:var(--tint-hi);color:var(--ink)}
+  .mtgl:not(.on):hover{background:var(--tint-hi);color:var(--ink)}
+  .tinSelect:hover,.tinText:hover{border-color:var(--muted)}
+}
+#panel :focus-visible,#rightcol :focus-visible,#corner :focus-visible{
+  outline:2px solid var(--accent-live);outline-offset:1px}
+button,.tinSelect{touch-action:manipulation}
+@media (prefers-reduced-motion:reduce){
+  .btn,#lamp,.mtgl,.scrub .slive,input.sw::before{transition:none}
+  #tray{transition:opacity 120ms linear;transform:none}
+  #corner:hover #tray,#corner:focus-within #tray{transform:none}
+}
+@media (prefers-contrast:more){ fieldset{box-shadow:inset 0 -1px var(--ink)} }
+</style>
+</head>
+<body>
+
+<!-- LEFT · Synthex grammar: STATIC — object, construction, vector.
+     Reads as one sentence: what bodies → how placed → into what word → in what space
+     → under what forces. (PANEL_MAP.md:24) -->
+<aside id="panel">
+  <div class="ptitle">Build</div>
+  <div class="pbody">
+    <fieldset><legend>Bodies</legend>
+      <p class="note" style="margin-top:0">Weights, not a choice — every face above zero
+        is in the mix. Drop PNG or SVG anywhere to add more.</p>
+
+      <div class="row"><label>triangle</label><span data-mnt="wTri"></span></div>
+      <div class="row"><label>wedge</label><span data-mnt="wWedge"></span></div>
+      <div class="row"><label>circle</label><span data-mnt="wCircle"></span></div>
+      <div class="row"><label>dropped assets</label><span data-mnt="wAsset"></span></div>
+      <div class="row"><label title="0 keeps the asset colour, 1 paints it into the palette">Asset tint</label><span data-mnt="assetTint"></span></div>
+      <div class="seg">
+        <button class="btn" id="reroll" title="Re-deal which body wears which face">RANDOMISE</button>
+        <button class="btn" id="dropBtn" title="Add PNG / SVG">ADD FILES</button>
+        <button class="btn" id="clearAssets" title="Remove dropped assets">CLEAR</button>
+      </div>
+      <input type="file" id="fileIn" accept="image/*" multiple hidden>
+      <p class="note" id="assetNote">No assets — primitives only.</p>
+      <div class="row" style="margin-top:var(--sp-2)"><label>Count</label><span data-mnt="count"></span></div>
+      <div class="row"><label>Size</label><span data-mnt="size"></span></div>
+          <div class="row"><label title="Applies to inserted pictures and the video card — primitives stay sharp">Picture radius</label><span data-mnt="radius"></span></div>
+      <div class="row"><label>Outline only</label><span data-mnt="stroke"></span></div>
+      <div class="row"><label title="0 = billboard, 1 = turns into its own heading">Face heading</label><span data-mnt="face"></span></div>
+      <div class="row"><label title="0 = every body the same calibre, 1 = full spread">Size variation</label><span data-mnt="varSize"></span></div>
+      <div class="row"><label title="0 = all at one angle, 1 = every body its own tilt">Tilt variation</label><span data-mnt="varTilt"></span></div>
+    </fieldset>
+
+    <fieldset id="gLayers"><legend>Layers</legend>
+      <div class="seg wrap" id="addLayerBar" role="group" aria-label="Add layer"></div>
+      <div id="layers"></div>
+      <p class="note">A layer is a way of placing bodies, with a PRESENCE weight.
+        <b>share</b> splits the pool so two forms stay legible instead of averaging into
+        one. Click a layer to focus it — the mapping rack on the right edits <b>its</b> rows.</p>
+    </fieldset>
+
+    <fieldset id="gForm"><legend>Formation</legend>
+      <div class="row full"><input class="tinText" id="fText" value="BRYK" aria-label="Formation text" spellcheck="false"></div>
+      <div class="row full" style="margin-top:var(--sp-1)"><select id="fFont" class="tinSelect" aria-label="Formation font"></select></div>
+      <button class="btn wide" id="fFonts" style="margin-top:var(--sp-1)">list installed fonts</button>
+      <p class="note" id="fNote">Add a <b>Word</b> layer to build this text out of bodies.</p>
+      <div class="row" style="margin-top:var(--sp-2)"><label title="Bodies are pushed out of the mark, so streams part around it">Logo as void</label><span data-mnt="logoAvoid"></span></div>
+      <div class="row"><label>Logo size</label><span data-mnt="logoScale"></span></div>
+      <p class="note">Add a <b>Logo</b> layer to gather bodies <b>into</b> the mark — or
+        raise <b>Logo as void</b> and let the flow route <b>around</b> it.</p>
+    </fieldset>
+
+    <fieldset id="gSpace"><legend>Space</legend>
+      <div class="row"><label title="0 = flat orthographic, up = depth opens out">Perspective</label><span data-mnt="persp"></span></div>
+      <div class="row"><label>Zoom</label><span data-mnt="zoom"></span></div>
+      <div class="row"><label>Tilt</label><span data-mnt="tilt"></span></div>
+      <div class="row"><label>Auto spin</label><span data-mnt="spin"></span></div>
+      <p class="note">Drag the stage to orbit, wheel to zoom, double-click to reset.</p>
+    </fieldset>
+
+    <fieldset id="gPhys"><legend>Forces</legend>
+      <div class="row"><label title="Motion Primer behaviours — a whole force set at once">Behaviour</label>
+        <select id="behSel" class="tinSelect" aria-label="Behaviour"><option value="">—</option></select></div>
+      <div class="row"><label title="Manner of the swarm — cohesion vs separation vs flow">Manner</label>
+        <select id="mannerSel" class="tinSelect" aria-label="Manner"><option value="">—</option></select></div>
+      <div class="row"><label title="Bodies gain velocity and start noticing each other">Physics on</label><span data-mnt="physOn"></span></div>
+      <div class="row"><label title="Off = they avoid each other in the plane. On = in full depth.">Interact in 3D</label><span data-mnt="dim3"></span></div>
+      <div class="row"><label title="How hard the layout pulls">Follow</label><span data-mnt="follow"></span></div>
+      <div class="row"><label>Damping</label><span data-mnt="damp"></span></div>
+      <div class="row"><label title="Bodies push each other apart">Collide</label><span data-mnt="collide"></span></div>
+      <div class="row"><label>Body radius</label><span data-mnt="pradius"></span></div>
+      <div class="row"><label title="Curl field — divergence-free, so they swirl">Swirl</label><span data-mnt="swirl"></span></div>
+      <div class="row"><label title="Magnet to centre, stronger the closer they get">Attract</label><span data-mnt="attract"></span></div>
+      <div class="row"><label>Gravity</label><span data-mnt="gravity"></span></div>
+      <div class="row"><label title="Cohesion toward the local mean">Flock</label><span data-mnt="flock"></span></div>
+    </fieldset>
+  </div>
+</aside>
+
+<main id="stage">
+  <canvas id="camcv"></canvas>
+  <canvas id="cv"></canvas>
+  <canvas id="glcv"></canvas>
+</main>
+<video id="vid" autoplay muted playsinline aria-hidden="true"></video>
+
+<!-- RIGHT · EQJ grammar: the consequence chain, in signal order —
+     source → clock → beat → meters → MOD RACK → moves → look → scenes.
+     (mvj-inject:710–719; the music panel is the FIRST child of #rightcol there.) -->
+<aside id="rightcol">
+  <div class="ptitle">Drive</div>
+  <div class="pbody">
+    <fieldset id="gAudio"><legend>Sound</legend>
+      <div class="srcrow">
+        <select id="inSel" class="tinSelect" aria-label="Audio input"></select>
+        <button class="btn" id="arm" title="Open the selected input">ARM</button>
+      </div>
+      <div id="beat">
+        <div id="lamp" aria-hidden="true"></div>
+        <div id="bpmOut">—</div>
+        <div id="bmeta"><div id="conf">conf —</div><div id="src">—</div></div>
+      </div>
+      <div class="row"><label>BPM</label><span data-mnt="bpm"></span></div>
+      <div class="row"><label title="Live ± on top of the clock. Detection keeps running.">Trim&nbsp;±</label><span data-mnt="trim"></span></div>
+      <div class="row"><label>Phase</label>
+        <div class="nudge">
+          <button class="btn nb" id="phMinus" aria-label="Nudge downbeat back" title="Pull the downbeat back ( [ )">−</button>
+          <div class="phbar" id="phBar" aria-hidden="true"><i></i></div>
+          <button class="btn nb" id="phPlus" aria-label="Nudge downbeat forward" title="Push the downbeat forward ( ] )">+</button>
+        </div>
+      </div>
+      <div class="seg">
+        <button class="btn" id="tap" title="Tap 4× in time (T)">TAP</button>
+        <button class="btn" id="auto" title="Hand the clock back to the detector">AUTO</button>
+        <button class="btn" id="sync" title="Slam the downbeat to now">SYNC</button>
+      </div>
+      <canvas id="spec" aria-label="Live frequency spectrum, logarithmic"></canvas>
+      <div id="specLabels"><span>20</span><span>200</span><span>2k</span><span>16k Hz</span></div>
+      <div id="meters"></div>
+      <div id="status" data-kind="idle" role="status" aria-live="polite"><i></i><span id="statusText">clock — internal BPM</span></div>
+      <p class="note" id="armNote">A gesture is required before the browser will start an AudioContext.</p>
+    </fieldset>
+
+    <fieldset id="gCam"><legend data-toggle>Camera · video</legend>
+      <div class="srcrow">
+        <select id="camSel" class="tinSelect" aria-label="Camera device"></select>
+        <button class="btn" id="camBtn" title="Open the camera">OPEN</button>
+      </div>
+      <p class="note" id="camNote">No camera. Shapes fall back to palette fills — no black holes.</p>
+      <div class="row"><label title="Weight of camera-filled faces in the body mix">In shapes</label><span data-mnt="camW"></span></div>
+      <div class="row"><label title="Opacity of the full-frame video layer">As layer</label><span data-mnt="camLayer"></span></div>
+      <div class="row full"><select id="camBlend" class="tinSelect" aria-label="Camera layer blend">
+        <option value="screen">screen</option><option value="normal">normal</option>
+        <option value="multiply">multiply</option><option value="overlay">overlay</option>
+        <option value="difference">difference</option><option value="lighten">lighten</option>
+      </select></div>
+      <div class="row"><label title="Layer sits above the geometry">Over geometry</label><span data-mnt="camOver"></span></div>
+      <div class="row"><label>Mirror</label><span data-mnt="camMirror"></span></div>
+      <div class="row"><label title="Maps the video into the palette. A raw club webcam reads as a mistake.">Duotone</label><span data-mnt="camDuo"></span></div>
+      <div class="row"><label>Contrast</label><span data-mnt="camContrast"></span></div>
+      <div class="row"><label>Gain</label><span data-mnt="camGain"></span></div>
+    </fieldset>
+
+    <fieldset id="gRack"><legend>Mod rack <span id="rackLayer" class="rlayer">—</span></legend>
+      <div id="rack"></div>
+      <button class="btn wide" id="addRow" style="margin-top:var(--sp-1)">+ mapping</button>
+      <p class="note">feature ▸ parameter ▸ depth ▸ curve. Rows belong to the focused
+        layer. Several rows on one target <b>sum</b> their deviations from the base.</p>
+    </fieldset>
+
+    <fieldset id="gMoves"><legend>Moves</legend>
+      <div class="seg wrap">
+        <button class="btn" data-move="magnet" title="Build-up sucks in, the drop throws out (1)">MAGNET</button>
+        <button class="btn" data-move="gather" title="Chaos, then a hard snap to the grid (2)">GATHER</button>
+        <button class="btn" data-move="crowd" title="Camera to full frame for two bars (3)">CROWD</button>
+        <button class="btn" data-move="snap" title="Freeze into the grid and release (4)">SNAP</button>
+      </div>
+      <div class="row" style="margin-top:var(--sp-2)"><label title="Everything you fire lands on the music, not on your reaction time">Quantise</label>
+        <select id="quantSel" class="tinSelect" aria-label="Quantise">
+          <option value="off">off — instant</option><option value="beat">beat</option>
+          <option value="bar" selected>bar</option><option value="phrase">phrase</option>
+        </select></div>
+      <div class="row"><label title="Re-deal the body mix every bar">Auto-randomise</label><span data-mnt="autoRoll"></span></div>
+    </fieldset>
+
+    <fieldset id="gLook"><legend>Look</legend>
+      <div id="stops"></div>
+      <button class="btn wide" id="addStop" style="margin-top:var(--sp-1)">+ colour</button>
+      <canvas id="ramp" aria-label="Palette ramp"></canvas>
+      <div class="row"><label>Background</label><span data-mnt="bgL"></span></div>
+      <div class="row"><label title="Spectral brightness drifts the palette hue">Hue drift</label><span data-mnt="hueDrift"></span></div>
+      <div class="row" style="margin-top:var(--sp-2)"><label>Chromatic</label><span data-mnt="chroma"></span></div>
+      <div class="row"><label>Aberration angle</label><span data-mnt="chromaAng"></span></div>
+    </fieldset>
+
+    <fieldset id="gScenes"><legend>Scenes</legend>
+      <div class="seg" id="banks"></div>
+      <div class="seg">
+        <button class="btn" id="saveBtn" title="Then pick a slot">SAVE</button>
+        <button class="btn" id="expBtn" title="Download this scene as json">EXPORT</button>
+        <button class="btn" id="impBtn" title="Load a scene json">IMPORT</button>
+      </div>
+      <input type="file" id="sceneFile" accept="application/json" hidden>
+    </fieldset>
+  </div>
+</aside>
+
+<div id="drop" aria-hidden="true">Drop PNG or SVG to add faces to the mix</div>
+
+<div id="corner">
+  <div id="tray" role="group" aria-label="Display options">
+    <div class="thead">Display</div>
+    <div class="trow"><span>Chrome</span><span><kbd>H</kbd></span></div>
+    <div class="trow"><span>Blackout</span><span><kbd>B</kbd></span></div>
+    <div class="trow"><span>Fullscreen</span><span><kbd>F</kbd></span></div>
+    <div class="trow"><span>Next palette</span><span><kbd>P</kbd></span></div>
+    <div class="trow"><span>Formation</span><span><kbd>W</kbd></span></div>
+    <div class="trow"><label for="fpsSw">Show FPS</label><input type="checkbox" id="fpsSw" class="sw"></div>
+    <div class="trow"><span id="fps">—</span><span id="bodies">—</span></div>
+  </div>
+  <button id="uiBtn" aria-pressed="false" title="Hide interface (H)">◐</button>
+</div>
+
+<script src="audio-core.js"></script>
+<script>
+(function(){
+'use strict';
+const $ = s => document.querySelector(s);
+const clamp = (v,a,b) => v<a?a:v>b?b:v;
+const lerp = (a,b,t) => a+(b-a)*t;
+const TAU = Math.PI*2;
+
+/* ══════════════════════════════════════════════════════════════════════════
+   1 · scrub — Synthex Engine v1, resistance curve reworked per apple-design
+   ══════════════════════════════════════════════════════════════════════════ */
+const RESIST_PX = 26;
+function resist(over){ const c=0.55;
+  const soft=(over*RESIST_PX*c)/(RESIST_PX+c*over);
+  const t=Math.min(1, over/(RESIST_PX*2));
+  return soft*(1-t)+over*t; }
+
+const SCRUBS = {};
+const fmtStep=(v,s)=>{ v=+v; if(isNaN(v))return '0';
+  return (Math.abs(s)>=1)?''+Math.round(v):v.toFixed(s<=0.005?3:2); };
+
+function mkScrub(cfg){
+  /* CANON (Synthex row() :3787): every non-toggle control extends. It is not a
+     per-control decision — hand-setting it is exactly why 14 of them ended up without
+     it, PRESENCE included. The toggle signature (0,1,1) is the only exemption. */
+  if(cfg.allowExtend==null) cfg.allowExtend = !(cfg.min===0 && cfg.max===1 && cfg.step===1);
+  let min=cfg.min,max=cfg.max,step=cfg.step||0.01,
+      v=(cfg.value!=null?+cfg.value:min),editing=false;
+  const el=document.createElement('div');
+  el.className='scrub'; el.tabIndex=0; el.setAttribute('role','slider');
+  if(cfg.label) el.setAttribute('aria-label',cfg.label);
+  const fill=document.createElement('i'); fill.className='sfill';
+  const val=document.createElement('span'); val.className='sval';
+  const edit=document.createElement('input');
+  edit.className='sedit'; edit.type='text'; edit.inputMode='decimal'; edit.style.display='none';
+  const live=document.createElement('i'); live.className='slive'; live.style.display='none';
+  el.append(fill,val,edit,live);
+
+  function paint(){
+    val.textContent=fmtStep(v,step);
+    const f=(max>min)?clamp((v-min)/(max-min),0,1):0;
+    if(min<0&&max>0){ const z=(0-min)/(max-min);
+      fill.style.left=(Math.min(z,f)*100)+'%'; fill.style.width=(Math.abs(f-z)*100)+'%'; }
+    else { fill.style.left='0'; fill.style.width=(f*100)+'%'; }
+    el.setAttribute('aria-valuenow',fmtStep(v,step));
+    el.setAttribute('aria-valuemin',min); el.setAttribute('aria-valuemax',max);
+  }
+  function setV(nv,commit,silent){ if(isNaN(nv))return; v=+nv;
+    if(cfg.allowExtend){ if(v>max)max=v; if(v<min)min=v; } else v=clamp(v,min,max);
+    paint(); if(!silent&&cfg.onInput)cfg.onInput(v); if(commit&&cfg.onCommit)cfg.onCommit(v); }
+
+  let down=null;
+  el.addEventListener('pointerdown',e=>{ if(editing)return;
+    down={x:e.clientX,v,drag:false,w:el.getBoundingClientRect().width||120,
+          span:(max-min)||1,mn:min,mx:max};
+    try{el.setPointerCapture(e.pointerId);}catch(_){} e.preventDefault(); });
+  el.addEventListener('pointermove',e=>{ if(!down)return;
+    const dx=e.clientX-down.x; if(Math.abs(dx)>3)down.drag=true; if(!down.drag)return;
+    const sens=(e.shiftKey?0.25:1), raw=down.v+(dx/down.w)*down.span*sens; let q;
+    if(cfg.allowExtend){
+      if(raw>down.mx){ const o=(raw-down.mx)/down.span*down.w/sens; q=down.mx+(resist(o)/down.w)*down.span*sens; }
+      else if(raw<down.mn){ const u=(down.mn-raw)/down.span*down.w/sens; q=down.mn-(resist(u)/down.w)*down.span*sens; }
+      else q=raw;
+      q=Math.round(q/step)*step;
+    } else q=clamp(Math.round(raw/step)*step,min,max);
+    setV(q,false); });
+  const endDrag=()=>{ if(!down)return; const d=down.drag; down=null;
+    if(d){ if(cfg.onCommit)cfg.onCommit(v); } else enterEdit(); };
+  el.addEventListener('pointerup',endDrag);
+  el.addEventListener('lostpointercapture',()=>{ if(down){ const d=down.drag; down=null;
+    if(d&&cfg.onCommit)cfg.onCommit(v); } });
+
+  function enterEdit(){ editing=true; edit.value=fmtStep(v,step); edit.style.display='';
+    val.style.visibility='hidden'; edit.focus(); edit.select(); }
+  function leaveEdit(commit){ editing=false; edit.style.display='none'; val.style.visibility='';
+    if(commit){ const nv=parseFloat(edit.value); if(!isNaN(nv))setV(nv,true); } }
+  edit.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){ e.preventDefault(); leaveEdit(true); el.focus(); }
+    else if(e.key==='Escape'){ e.preventDefault(); leaveEdit(false); el.focus(); }
+    else if(e.key==='ArrowUp'||e.key==='ArrowDown'){ e.preventDefault();
+      let c=parseFloat(edit.value); if(isNaN(c))c=v;
+      setV(c+(e.key==='ArrowUp'?1:-1)*step*(e.shiftKey?10:1),false); edit.value=fmtStep(v,step); } });
+  edit.addEventListener('blur',()=>{ if(editing)leaveEdit(true); });
+  el.addEventListener('keydown',e=>{ if(editing)return; let d=0;
+    if(e.key==='ArrowRight'||e.key==='ArrowUp')d=1;
+    else if(e.key==='ArrowLeft'||e.key==='ArrowDown')d=-1;
+    else if(e.key==='Enter'||e.key===' '){ e.preventDefault(); enterEdit(); return; }
+    else return;
+    e.preventDefault(); const nv=v+d*step*(e.shiftKey?10:1);
+    setV(cfg.allowExtend?nv:clamp(nv,min,max),true); });
+  paint();
+  return { el, set(nv){ if(nv==null||isNaN(nv))return; v=+nv;
+      if(cfg.allowExtend){ if(v>max)max=v; if(v<min)min=v; } paint(); },
+    get(){ return v; }, isEditing(){ return editing; },
+    setDisabled(on){ el.classList.toggle('is-disabled',!!on);
+      el.setAttribute('aria-disabled',on?'true':'false'); el.tabIndex=on?-1:0; },
+    setLive(nv){ if(nv==null||isNaN(nv)){ if(live.style.display!=='none')live.style.display='none'; return; }
+      const f=(max>min)?clamp((nv-min)/(max-min),0,1):0;
+      live.style.left=(f*100)+'%'; if(live.style.display==='none')live.style.display='block'; } };
+}
+function mount(slot,cfg){ const host=document.querySelector('[data-mnt="'+slot+'"]');
+  /* CANON row() :3777 — the (0,1,1) signature IS a toggle and must render as a switch,
+     not as a number field showing 0/1. Route it automatically so the call sites stay
+     declarative and nobody has to remember. */
+  if(cfg.min===0 && cfg.max===1 && cfg.step===1) return mountToggle(slot,cfg,host);
+  const sc=mkScrub(cfg); if(host)host.appendChild(sc.el); SCRUBS[slot]=sc; return sc; }
+
+function mountToggle(slot,cfg,host){
+  host=host||document.querySelector('[data-mnt="'+slot+'"]');
+  const el=document.createElement('input');
+  el.type='checkbox'; el.className='sw'; el.checked=!!cfg.value;
+  if(cfg.label)el.setAttribute('aria-label',cfg.label);
+  el.addEventListener('change',()=>{ if(cfg.onInput)cfg.onInput(el.checked?1:0); });
+  if(host){ host.appendChild(el); const row=host.closest('.row'); if(row)row.classList.add('toggle'); }
+  const api={ el,
+    set(v){ el.checked=!!v; }, get(){ return el.checked?1:0; },
+    isEditing(){ return false; },
+    setDisabled(on){ el.disabled=!!on; const r=el.closest('.row'); if(r)r.classList.toggle('is-disabled',!!on); },
+    setLive(){} };                       /* a switch has no live riser — nothing to show */
+  SCRUBS[slot]=api; return api;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   2 · state
+   ══════════════════════════════════════════════════════════════════════════ */
+const state = {
+  /* Shapes are a MIX, not a choice. Each primitive carries a weight; a body draws its
+     shape from that distribution using a seeded hash, so the scene keeps a stable
+     identity until you re-roll it. Dropped PNG/SVG assets join the same draw as extra
+     faces — geometry and imagery are the same kind of thing to the renderer. */
+  shapes:{ tri:1, wedge:1, circle:1 },
+  assetW:1,                 /* weight of dropped assets against the primitives */
+  mixSeed:1,
+  count:180, size:34, radius:14, stroke:0, face:0,
+  assetTint:0.55, logoScale:3.2, logoAvoid:0, varSize:0.7, varTilt:1,
+  camW:0,                   /* weight of camera faces in the shape mix */
+  cam2:{ mirror:1, duotone:0.75, posterize:0.4, contrast:0.35, gain:0.45,
+         layer:0, blend:'screen', over:0 },   /* the "layer in the mix" role */
+  cam:{ persp:0.35, zoom:1, tilt:0.1, spin:0.022, yaw:0 },
+  bgL:0.13, hueDrift:0.35,
+  /* Physics is the third register (§8.2): target × transport × local interaction.
+     Forces move the body in world space ON TOP of whatever the modes ask for, so a
+     режим stays a target provider and never has to know about collisions. */
+  phys:{ on:1, dim3:0, follow:3.4, collide:0.55, radius:0.13, swirl:0.16, gravity:0, attract:0, flock:0, damp:0.90 },
+  post:{ chroma:0, chromaAng:0 },
+  stops:[ {c:'#2d2f83',p:0}, {c:'#f6c60a',p:0.5}, {c:'#ce1c22',p:1} ],
+  formation:{ text:'BRYK', font:'', on:false }
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   3 · colour — OKLab ramp (the engine already blends perceptually; we keep that)
+   ══════════════════════════════════════════════════════════════════════════ */
+const hex2rgb = h => { h=h.replace('#',''); if(h.length===3)h=h.split('').map(c=>c+c).join('');
+  return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; };
+const s2l = v => (v/=255, v<=0.04045 ? v/12.92 : Math.pow((v+0.055)/1.055,2.4));
+const l2s = v => Math.round(255*clamp(v<=0.0031308 ? v*12.92 : 1.055*Math.pow(v,1/2.4)-0.055,0,1));
+function srgbToOklab(rgb){ const r=s2l(rgb[0]),g=s2l(rgb[1]),b=s2l(rgb[2]);
+  const l=Math.cbrt(0.4122214708*r+0.5363325363*g+0.0514459929*b);
+  const m=Math.cbrt(0.2119034982*r+0.6806995451*g+0.1073969566*b);
+  const s=Math.cbrt(0.0883024619*r+0.2817188376*g+0.6299787005*b);
+  return [0.2104542553*l+0.7936177850*m-0.0040720468*s,
+          1.9779984951*l-2.4285922050*m+0.4505937099*s,
+          0.0259040371*l+0.7827717662*m-0.8086757660*s]; }
+function oklabToSrgb(L){ const l=Math.pow(L[0]+0.3963377774*L[1]+0.2158037573*L[2],3);
+  const m=Math.pow(L[0]-0.1055613458*L[1]-0.0638541728*L[2],3);
+  const s=Math.pow(L[0]-0.0894841775*L[1]-1.2914855480*L[2],3);
+  return [l2s(+4.0767416621*l-3.3077115913*m+0.2309699292*s),
+          l2s(-1.2684380046*l+2.6097574011*m-0.3413193965*s),
+          l2s(-0.0041960863*l-0.7034186147*m+1.7076147010*s)]; }
+
+/* Interpolate in OKLCH (polar), not OKLab (cartesian). A straight line in Lab between
+   two hues on opposite sides of the wheel passes through the low-chroma middle — blue to
+   yellow comes out beige, which is exactly the mud §2.5 says to avoid. Going round the
+   short arc of the hue circle keeps chroma up the whole way, so the transition stays in
+   the brand family. Achromatic stops (C≈0) keep their neighbour's hue instead of
+   dragging the arc to an arbitrary angle. */
+const labToLch = l => { const C=Math.hypot(l[1],l[2]); return [l[0], C, Math.atan2(l[2],l[1])]; };
+const lchToLab = c => [c[0], c[1]*Math.cos(c[2]), c[1]*Math.sin(c[2])];
+function mixLch(a,b,t){
+  const L=lerp(a[0],b[0],t), C=lerp(a[1],b[1],t);
+  let ha=a[2], hb=b[2];
+  if(a[1]<0.004) ha=hb;                      // grey has no hue — borrow, don't average
+  else if(b[1]<0.004) hb=ha;
+  let d=hb-ha;
+  while(d> Math.PI) d-=TAU;                  // shorter arc
+  while(d<-Math.PI) d+=TAU;
+  return [L, C, ha+d*t];
+}
+let RAMP = new Array(256).fill('#888'), RAMP_RGB = [];
+function normStops(){
+  let st=state.stops;
+  if(!Array.isArray(st)||st.length<2) st=state.stops=[{c:'#3f6fe0',p:0},{c:'#e4552f',p:1}];
+  st.forEach(s=>{ s.p=clamp(+s.p||0,0,1);
+    if(typeof s.c!=='string'||!/^#?[0-9a-fA-F]{6}$/.test(s.c)) s.c='#888888';
+    if(!s.c.startsWith('#')) s.c='#'+s.c; });
+  st.sort((a,b)=>a.p-b.p); return st;
+}
+let hueShift = 0, lastBakedShift = 0, lastBake = 0;
+function buildRamp(){
+  const st=normStops().map(s=>({lch:labToLch(srgbToOklab(hex2rgb(s.c))),p:s.p}));
+  RAMP_RGB=[];
+  for(let i=0;i<256;i++){
+    const t=i/255; let a=st[0],b=st[st.length-1];
+    for(let k=0;k<st.length-1;k++) if(t>=st[k].p&&t<=st[k+1].p){ a=st[k]; b=st[k+1]; break; }
+    const f=(b.p>a.p)?(t-a.p)/(b.p-a.p):0;
+    const lch=mixLch(a.lch,b.lch,f);
+    if(hueShift) lch[2]+=hueShift;            /* drift is a hue rotation — natural in polar */
+    const rgb=oklabToSrgb(lchToLab(lch));
+    RAMP_RGB.push(rgb);
+    RAMP[i]='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')';
+  }
+  drawRamp();
+}
+const rampAt = t => RAMP[Math.round(clamp(t,0,1)*255)];
+
+const rampCv=$('#ramp');
+function drawRamp(){
+  const g=rampCv.getContext('2d'), w=rampCv.width=rampCv.clientWidth*2, h=rampCv.height=40;
+  if(!w)return;
+  for(let x=0;x<w;x++){ g.fillStyle=rampAt(x/(w-1)); g.fillRect(x,0,1,h); }
+}
+function buildStops(){
+  const host=$('#stops'); host.innerHTML='';
+  const st=normStops();
+  st.forEach(s=>{
+    const r=document.createElement('div'); r.className='crow';
+    r.innerHTML='<input type="color" class="spick" value="'+s.c+'" aria-label="Stop colour">'
+      +'<input class="tinText" value="'+s.c+'" aria-label="Stop hex" spellcheck="false">'
+      +'<input type="range" min="0" max="1" step="0.01" value="'+s.p+'" aria-label="Stop position">'
+      +'<button class="xdel" title="Remove colour" aria-label="Remove colour">×</button>';
+    const [pick,hex,pos,del]=r.children;
+    pick.addEventListener('input',()=>{ s.c=pick.value; hex.value=s.c; buildRamp(); rebuildTextures(); });
+    hex.addEventListener('change',()=>{ const v=hex.value.trim();
+      if(/^#?[0-9a-fA-F]{6}$/.test(v)){ s.c=v.startsWith('#')?v:'#'+v; pick.value=s.c;
+        buildRamp(); rebuildTextures(); } else hex.value=s.c; });
+    pos.addEventListener('input',()=>{ s.p=+pos.value; buildRamp(); rebuildTextures(); });
+    pos.addEventListener('change',buildStops);
+    /* visibility, not display: the grid must not jump when 3 → 2 stops */
+    del.style.visibility = st.length>2 ? 'visible' : 'hidden';
+    del.addEventListener('click',()=>{ if(state.stops.length<=2)return;
+      state.stops.splice(state.stops.indexOf(s),1); buildRamp(); buildStops(); rebuildTextures(); });
+    host.appendChild(r);
+  });
+}
+$('#addStop').addEventListener('click',()=>{
+  const st=normStops(); if(st.length>=10)return;      /* Rob: 8 and more — 10 is the wall */
+  /* widest gap, and the new colour is sampled FROM the ramp so adding a stop
+     does not change the gradient — it only gives you a new handle. */
+  let gi=0,gw=0;
+  for(let i=0;i<st.length-1;i++){ const w=st[i+1].p-st[i].p; if(w>gw){gw=w;gi=i;} }
+  const p=+(st[gi].p+gw/2).toFixed(2);
+  const rgb=RAMP_RGB[Math.round(p*255)]||[136,136,136];
+  const hx='#'+rgb.map(v=>v.toString(16).padStart(2,'0')).join('');
+  state.stops.push({c:hx,p}); buildRamp(); buildStops(); rebuildTextures();
+});
+
+const PALETTES=[
+  [{c:'#2d2f83',p:0},{c:'#f6c60a',p:0.5},{c:'#ce1c22',p:1}],       /* the identity */
+  [{c:'#ce1c22',p:0},{c:'#f6c60a',p:1}],
+  [{c:'#2d2f83',p:0},{c:'#ce1c22',p:1}],
+  [{c:'#e4552f',p:0},{c:'#f2c53d',p:0.62},{c:'#fff3d0',p:1}],
+  [{c:'#1b2f8a',p:0},{c:'#3f6fe0',p:0.5},{c:'#7fd4ff',p:1}],
+  [{c:'#f2c53d',p:0},{c:'#e4552f',p:0.4},{c:'#2b1b5a',p:1}],
+  [{c:'#ffffff',p:0},{c:'#f2c53d',p:0.5},{c:'#111318',p:1}]
+];
+let palIdx=0;
+function nextPalette(){ palIdx=(palIdx+1)%PALETTES.length;
+  state.stops=PALETTES[palIdx].map(s=>({...s})); buildRamp(); buildStops(); rebuildTextures(); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   4 · textures — every body is a textured quad, so primitives, glyphs and
+   (later) camera all enter through one door. Procedural primitives are drawn
+   once per palette change, not per frame.
+   ══════════════════════════════════════════════════════════════════════════ */
+/* One texture per palette entry — bodies take a brand colour DIRECTLY, they do not
+   sample a blend of it. Interpolating between three distinct dominants is the wrong
+   model for this brand: blue→yellow through OKLab comes out beige, through the short
+   OKLCH arc it comes out green, and neither belongs. The palette is a SET, and the
+   ramp stays what it is — a gradient, for previews and for hue drift. */
+let TEX_N = 3;
+const TEX_PX = 192;
+let textures = [];
+/* Primitives are SHARP. Rounding is not part of the identity — it belongs to inserted
+   pictures, where a soft corner reads as a card. `r` is therefore ignored here and only
+   the asset branch uses state.radius.
+   Every face is generated in several variants (`vi`) so the same shape is never
+   literally repeated: triangles get asymmetric vertices, diamonds get uneven axes,
+   squares get a slight shear. Bodies pick a variant by seed, so a crowd reads as many
+   related objects rather than one object stamped N times. */
+/* ══════════════════════════════════════════════════════════════════════════
+   BRAND MARKS — geometry and colour taken verbatim from the identity files
+   (assets/mark-*.svg). Not approximations: these are the artwork's own points,
+   normalised into a unit box and re-proportioned by their real aspect.
+     circle  #ce1c22   130.28 × 130.28
+     tri     #f6c60a   134.13 × 203.11   points 31.31,0 · 134.13,63.25 · 0,203.11
+     wedge   #2d2f83    99.01 × 324.55   points 99.01,316.97 · 40.48,324.55 · 0,7.58 · 58.53,0
+   ══════════════════════════════════════════════════════════════════════════ */
+const BRAND = {
+  red:'#ce1c22', yellow:'#f6c60a', navy:'#2d2f83',
+  tri:   { w:134.13, h:203.11, pts:[[31.31,0],[134.13,63.25],[0,203.11]] },
+  wedge: { w:99.01,  h:324.55, pts:[[99.01,316.97],[40.48,324.55],[0,7.58],[58.53,0]] }
+};
+/* Draw a mark inside a TEX_PX box, keeping its true aspect and centring it.
+   `jig` nudges the vertices per variant so a crowd of them is related, not cloned. */
+function markPath(x,m,S,jig){
+  const k=Math.min(S/m.w,S/m.h)*0.96, ox=(S-m.w*k)/2, oy=(S-m.h*k)/2;
+  x.beginPath();
+  m.pts.forEach((p,i)=>{
+    const j=jig?((shapeRnd(i*3.7+jig*11.3)-0.5)*0.07*S):0;
+    const X=ox+p[0]*k+j, Y=oy+p[1]*k+(jig?((shapeRnd(i*5.1+jig*7.9)-0.5)*0.07*S):0);
+    i?x.lineTo(X,Y):x.moveTo(X,Y);
+  });
+  x.closePath();
+}
+const SHAPE_VARIANTS = 4;
+function roundRect(x,w,h,r){ r=Math.min(r,w/2,h/2); x.beginPath();
+  x.moveTo(r,0); x.arcTo(w,0,w,h,r); x.arcTo(w,h,0,h,r); x.arcTo(0,h,0,0,r); x.arcTo(0,0,w,0,r); x.closePath(); }
+function shapeRnd(seed){ let x=Math.sin(seed*127.1)*43758.5453; return x-Math.floor(x); }
+function pathFor(x,shape,w,h,vi){
+  vi=vi||0;
+  if(shape==='circle'){ const r=Math.min(w,h)/2*0.96;
+    x.beginPath(); x.ellipse(w/2,h/2,r,r,0,0,TAU); return; }
+  if(shape==='tri')   { markPath(x,BRAND.tri,  Math.min(w,h), vi); return; }
+  if(shape==='wedge') { markPath(x,BRAND.wedge,Math.min(w,h), vi); return; }
+  /* fallback square, kept for dropped pictures */
+  x.beginPath(); x.rect(0,0,w,h);
+}
+let ASSETS=[];              /* dropped PNG/SVG, already rasterised */
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Camera rail (§2.2 / §7.2.4)
+
+   One decode per frame into an offscreen snapshot; everything downstream reads that
+   snapshot. The shape mask is applied ONCE per shape inside the texture canvas, not
+   once per body — that is what makes "a hundred flying circles full of live video"
+   cost the same as three.
+
+   Styling is not optional. A club camera is dark and noisy; raw webcam on a projector
+   reads as a mistake. Posterising into the active palette turns the noise into texture
+   and puts the video in the same colour world as the geometry. "Clean video" is the
+   option, not the default.
+   ══════════════════════════════════════════════════════════════════════════ */
+const CAM = { on:false, stream:null, deviceId:'', ready:false, w:0, h:0, fail:'', seeded:false };
+const vid=$('#vid');
+const camSnap=document.createElement('canvas'), camSnapX=camSnap.getContext('2d',{willReadFrequently:true});
+const camStyled=document.createElement('canvas'), camStyledX=camStyled.getContext('2d');
+const CAM_PX=320;
+
+function camStop(){
+  if(CAM.stream){ CAM.stream.getTracks().forEach(t=>t.stop()); CAM.stream=null; }
+  CAM.on=false; CAM.ready=false; vid.srcObject=null;
+  $('#camcv').style.display='none';
+  rebuildTextures();
+}
+function camStart(deviceId){
+  const c={ video: deviceId? {deviceId:{exact:deviceId}} : {facingMode:'user'}, audio:false };
+  return navigator.mediaDevices.getUserMedia(c).then(s=>{
+    CAM.stream=s; CAM.deviceId=deviceId||''; vid.srcObject=s; CAM.fail='';
+    return vid.play().catch(()=>{});
+  }).then(()=>{
+    CAM.on=true;
+    /* First successful open lands on a scene that READS — otherwise the camera opens
+       with both weights at zero and nothing appears, which looks like it is tracking
+       something invisible. Only seeded once: if the user has already dialled the
+       camera in, their numbers stand. */
+    if(!CAM.seeded){
+      CAM.seeded=true;
+      state.camW=1.4;                 /* video-filled faces join the mix straight away */
+      state.cam2.layer=0.22;          /* a whisper of full-frame behind the geometry */
+      state.cam2.duotone=0.8;         /* club cameras are dark and noisy — posterise it */
+      state.cam2.contrast=0.55; state.cam2.gain=0.55;
+      state.cam2.over=0; state.cam2.blend='screen';
+      state.radius=18;                /* the video card is a picture, so it gets a corner */
+      document.body.classList.remove('camover');
+      const bl=$('#camBlend'); if(bl)bl.value='screen';
+      syncAllScrubs();
+    }
+    refreshCams(); rebuildTextures();
+  });
+}
+function refreshCams(){
+  const sel=$('#camSel'); if(!sel)return;
+  const keep=sel.value;
+  if(!(navigator.mediaDevices&&navigator.mediaDevices.enumerateDevices))return;
+  navigator.mediaDevices.enumerateDevices().then(ds=>{
+    sel.innerHTML='';
+    const o0=document.createElement('option'); o0.value=''; o0.textContent='default camera';
+    sel.appendChild(o0);
+    for(const d of ds.filter(d=>d.kind==='videoinput')){
+      const o=document.createElement('option'); o.value=d.deviceId;
+      o.textContent=d.label||('camera '+(d.deviceId||'').slice(0,6));
+      sel.appendChild(o);
+    }
+    if([...sel.options].some(o=>o.value===keep)) sel.value=keep;
+  }).catch(()=>{});
+}
+
+/* one decode → snapshot → styled snapshot. Called once per frame, never per body. */
+function camTick(){
+  if(!CAM.on||vid.readyState<2||!vid.videoWidth){ CAM.ready=false; return; }
+  const vw=vid.videoWidth, vh=vid.videoHeight;
+  if(camSnap.width!==CAM_PX||camSnap.height!==CAM_PX){ camSnap.width=camSnap.height=CAM_PX;
+    camStyled.width=camStyled.height=CAM_PX; }
+  /* cover-fit into a square (image-shuffler formula) */
+  const s=Math.max(CAM_PX/vw,CAM_PX/vh), dw=vw*s, dh=vh*s;
+  camSnapX.save();
+  if(state.cam2.mirror){ camSnapX.translate(CAM_PX,0); camSnapX.scale(-1,1); }
+  camSnapX.drawImage(vid,(CAM_PX-dw)/2,(CAM_PX-dh)/2,dw,dh);
+  camSnapX.restore();
+
+  const C=state.cam2;
+  camStyledX.clearRect(0,0,CAM_PX,CAM_PX);
+  camStyledX.filter='contrast('+(1+C.contrast*1.6)+') brightness('+(0.6+C.gain)+')'
+    + (C.posterize>0.02 ? ' saturate('+(1-C.posterize*0.9)+')' : '');
+  camStyledX.drawImage(camSnap,0,0);
+  camStyledX.filter='none';
+  if(C.duotone>0.02){
+    /* map luminance into the palette: darks → first stop, lights → last.
+       multiply then screen is a two-pass duotone that keeps midtones readable. */
+    const st=normStops();
+    camStyledX.globalCompositeOperation='multiply';
+    camStyledX.fillStyle=st[st.length-1].c; camStyledX.globalAlpha=C.duotone;
+    camStyledX.fillRect(0,0,CAM_PX,CAM_PX);
+    camStyledX.globalCompositeOperation='screen';
+    camStyledX.fillStyle=st[0].c;
+    camStyledX.fillRect(0,0,CAM_PX,CAM_PX);
+    camStyledX.globalAlpha=1; camStyledX.globalCompositeOperation='source-over';
+  }
+  CAM.ready=true;
+}
+
+/* camera-faced textures: the shape path clips the styled snapshot, once per shape */
+const camTex={};
+function camTexFor(shape){
+  if(!camTex[shape]){ const c=document.createElement('canvas'); c.width=c.height=TEX_PX;
+    c.aspect=1; c.face='cam'; camTex[shape]=c; }
+  const c=camTex[shape], x=c.getContext('2d');
+  x.clearRect(0,0,TEX_PX,TEX_PX);
+  if(!CAM.ready) return c;
+  x.save();
+  /* video is a picture: the rect face gets the corner radius, the cut shapes stay sharp */
+  if(shape==='rect') roundRect(x,TEX_PX,TEX_PX,state.radius/100*TEX_PX);
+  else pathFor(x,shape,TEX_PX,TEX_PX,0);
+  x.clip();
+  x.drawImage(camStyled,0,0,TEX_PX,TEX_PX);
+  x.restore();
+  return c;
+}
+
+/* The texture bank is the cartesian product of FACES × palette colours.
+   A face is a primitive (tinted procedurally) or a dropped asset (drawn as-is, and
+   optionally tinted so it joins the palette instead of fighting it). One bank rebuild
+   per palette/shape/radius change; nothing per frame. */
+function faceList(){
+  const out=[];
+  for(const k of ['tri','wedge','circle']){
+    const w=state.shapes[k]||0;
+    if(w>0) for(let v=0;v<SHAPE_VARIANTS;v++) out.push({ kind:'prim', shape:k, vi:v, w:w/SHAPE_VARIANTS });
+  }
+  for(const a of ASSETS) out.push({ kind:'asset', img:a, w:state.assetW });
+  /* camera enters the mix as three more faces (one per primitive), so "a triangle full
+     of the crowd" is just another entry in the same draw */
+  if(CAM.on && state.camW>0)
+    for(const k of ['tri','wedge','circle'])
+      if((state.shapes[k]||0)>0) out.push({ kind:'cam', shape:k, w:state.camW });
+  return out.length?out:[{kind:'prim',shape:'rect',w:1}];
+}
+function rebuildTextures(){
+  textures=[];
+  const st=normStops();
+  const faces=faceList();
+  const r = state.radius/100*TEX_PX;      /* pictures only — primitives stay sharp */
+  for(const face of faces){
+    /* camera faces are LIVE — one shared canvas per shape, redrawn each frame in
+       camTick's wake. They are not multiplied by the palette: the duotone already put
+       the video in the palette, and re-tinting per stop would just muddy it. */
+    if(face.kind==='cam'){ const c=camTexFor(face.shape); c.w=face.w; textures.push(c); continue; }
+    for(let ci=0;ci<st.length;ci++){
+      const c=document.createElement('canvas'); c.width=c.height=TEX_PX;
+      const x=c.getContext('2d');
+      /* the stop's own colour, with the live hue drift applied in polar space so the
+         whole set turns together and stays a family */
+      let lch=labToLch(srgbToOklab(hex2rgb(st[ci].c)));
+      if(hueShift) lch=[lch[0],lch[1],lch[2]+hueShift];
+      const rgb=oklabToSrgb(lchToLab(lch));
+      const col='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')';
+      if(face.kind==='prim'){
+        pathFor(x,face.shape,TEX_PX,TEX_PX,face.vi);   /* sharp — no radius */
+        if(state.stroke>0.5){ x.lineWidth=Math.max(2,TEX_PX*0.045); x.strokeStyle=col; x.stroke(); }
+        else { x.fillStyle=col; x.fill(); }
+      } else {
+        /* cover-fit into the square, then a palette tint through source-atop so the
+           asset reads as part of the set rather than a foreign photo */
+        const im=face.img, s=Math.max(TEX_PX/im.width,TEX_PX/im.height);
+        const dw=im.width*s, dh=im.height*s;
+        /* the ONLY place corner radius applies: an inserted picture */
+        x.save(); roundRect(x,TEX_PX,TEX_PX,r); x.clip();
+        x.drawImage(im,(TEX_PX-dw)/2,(TEX_PX-dh)/2,dw,dh);
+        if(state.assetTint>0){
+          x.globalCompositeOperation='source-atop';
+          x.globalAlpha=state.assetTint; x.fillStyle=col; x.fillRect(0,0,TEX_PX,TEX_PX);
+        }
+        x.restore();
+      }
+      c.aspect=1; c.face=face.kind==='prim'?face.shape:'asset'; c.w=face.w;
+      textures.push(c);
+    }
+  }
+  TEX_N=textures.length;
+  assignFaces();
+}
+
+/* Seeded, weighted assignment. Stable for a given mixSeed — the scene keeps its identity
+   until you re-roll, which is what makes a randomiser useful live rather than noisy. */
+function hash01(n){ const s=Math.sin(n*127.1+state.mixSeed*311.7)*43758.5453; return s-Math.floor(s); }
+function assignFaces(){
+  if(!textures.length)return;
+  const tot=textures.reduce((a,t)=>a+(t.w||1),0);
+  for(let i=0;i<pool.length;i++){
+    let r=hash01(i+1)*tot, k=0;
+    while(k<textures.length-1 && (r-=textures[k].w||1)>0) k++;
+    pool[i].tex=k;
+  }
+}
+function rerollMix(){ state.mixSeed=Math.floor(Math.random()*1e6)+1; assignFaces(); }
+
+/* Formation — text (or any string) rasterised to a mask, then sampled to points.
+   Bodies fly to those points; this is the "Слово" move. */
+let formPts=[], formKey='', formSpacing=0.1;
+/* Adaptive density (Motion Primer §8.1): the mask is sampled so the number of points
+   lands near the number of BODIES. Fixed-step sampling produced ~1600 points for 420
+   bodies, so every body sat on a point five times smaller than itself and the counters
+   of the letters filled in — a smear, not a word. Point count scales as 1/step², so one
+   corrective pass gets close enough. */
+function buildFormation(N){
+  N = N || pool.length || 300;
+  const txt=state.formation.text||'';
+  const font=state.formation.font||'';
+  const key=txt+'|'+font+'|'+N;
+  if(key===formKey && formPts.length) return formPts;
+  formKey=key; formPts=[];
+  if(!txt.trim()) return formPts;
+  const W=420,H=160;
+  const c=document.createElement('canvas'); c.width=W; c.height=H;
+  const x=c.getContext('2d');
+  x.fillStyle='#fff'; x.textAlign='center'; x.textBaseline='middle';
+  let size=120;
+  const fam = font ? '"'+font+'", '+'sans-serif' : 'Inter, system-ui, sans-serif';
+  do { x.font='700 '+size+'px '+fam; if(x.measureText(txt).width<=W*0.9)break; size-=4; } while(size>12);
+  x.fillText(txt,W/2,H/2);
+  const d=x.getImageData(0,0,W,H).data;
+  /* keep the mask's own aspect so letters are not squashed; SPAN is the world width */
+  const SPAN=4.2, ySpan=SPAN*(H/W);
+  const sample=step=>{ const out=[];
+    for(let yy=0;yy<H;yy+=step) for(let xx=0;xx<W;xx+=step)
+      if(d[(yy*W+xx)*4+3]>128) out.push([ (xx/W-0.5)*SPAN, -(yy/H-0.5)*ySpan ]);
+    return out; };
+  const probe=sample(4);
+  if(!probe.length) return formPts;
+  const step=clamp(Math.round(4*Math.sqrt(probe.length/N)),2,26);
+  formPts=sample(step);
+  formSpacing = step/W*SPAN;          /* world distance between neighbouring points */
+  return formPts;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   5 · projection + render triad — image-shuffler core (index.html:168–177,
+   488–543), lifted verbatim in behaviour, retyped for this file's style.
+   ══════════════════════════════════════════════════════════════════════════ */
+const cv=$('#cv'), ctx=cv.getContext('2d');
+let W=0,H=0,DPR=1;
+const rot3Y=(p,a)=>{const c=Math.cos(a),s=Math.sin(a);return{x:p.x*c+p.z*s,y:p.y,z:-p.x*s+p.z*c};};
+const rot3X=(p,a)=>{const c=Math.cos(a),s=Math.sin(a);return{x:p.x,y:p.y*c-p.z*s,z:p.y*s+p.z*c};};
+function project(p,cam){
+  const q=rot3X(rot3Y(p,cam.yaw),cam.tilt);
+  const base=Math.min(W,H)*0.46, d=3.2;
+  const z=Math.max(0.4, d-q.z*(cam.persp||0)), k=base*cam.zoom/z;
+  return { x:W/2+q.x*k, y:H/2-q.y*k, z:q.z, k };
+}
+let scratch=document.createElement('canvas'), sctx=scratch.getContext('2d');
+function texTriInto(g,img,s,d){
+  /* affine solve for one triangle + a 0.6px inflated clip so neighbouring cells
+     do not show hairline seams */
+  const [s0,s1,s2]=s,[d0,d1,d2]=d;
+  const den=(s1[0]-s0[0])*(s2[1]-s0[1])-(s2[0]-s0[0])*(s1[1]-s0[1]);
+  if(!den)return;
+  const a=((d1[0]-d0[0])*(s2[1]-s0[1])-(d2[0]-d0[0])*(s1[1]-s0[1]))/den;
+  const b=((d1[1]-d0[1])*(s2[1]-s0[1])-(d2[1]-d0[1])*(s1[1]-s0[1]))/den;
+  const c=((d2[0]-d0[0])*(s1[0]-s0[0])-(d1[0]-d0[0])*(s2[0]-s0[0]))/den;
+  const e=((d2[1]-d0[1])*(s1[0]-s0[0])-(d1[1]-d0[1])*(s2[0]-s0[0]))/den;
+  const cx=(d0[0]+d1[0]+d2[0])/3, cy=(d0[1]+d1[1]+d2[1])/3, INF=0.6;
+  g.save(); g.beginPath();
+  for(let i=0;i<3;i++){ const P=d[i];
+    const vx=P[0]-cx, vy=P[1]-cy, L=Math.hypot(vx,vy)||1;
+    const X=P[0]+vx/L*INF, Y=P[1]+vy/L*INF;
+    if(i===0)g.moveTo(X,Y); else g.lineTo(X,Y); }
+  g.closePath(); g.clip();
+  g.transform(a,b,c,e, d0[0]-a*s0[0]-c*s0[1], d0[1]-b*s0[0]-e*s0[1]);
+  g.drawImage(img,0,0); g.restore();
+}
+function drawQuadWorld(img,C,right,up,alpha,cam,G){
+  G=G||4; const pts=[];
+  for(let j=0;j<=G;j++) for(let i=0;i<=G;i++){
+    const u=i/G-0.5, v=0.5-j/G;
+    const wp={ x:C.x+right.x*u*2+up.x*v*2, y:C.y+right.y*u*2+up.y*v*2, z:C.z+right.z*u*2+up.z*v*2 };
+    pts.push(project(wp,cam));
+  }
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  for(const p of pts){ if(p.x<x0)x0=p.x; if(p.y<y0)y0=p.y; if(p.x>x1)x1=p.x; if(p.y>y1)y1=p.y; }
+  const bw=Math.ceil(x1-x0)+2, bh=Math.ceil(y1-y0)+2;
+  if(bw<1||bh<1||bw>4096||bh>4096)return;
+  if(scratch.width<bw||scratch.height<bh){ scratch.width=Math.max(scratch.width,bw);
+    scratch.height=Math.max(scratch.height,bh); sctx=scratch.getContext('2d'); }
+  sctx.clearRect(0,0,bw,bh);
+  const S=img.width/G;
+  for(let j=0;j<G;j++) for(let i=0;i<G;i++){
+    const a=pts[j*(G+1)+i], b=pts[j*(G+1)+i+1],
+          c=pts[(j+1)*(G+1)+i], d=pts[(j+1)*(G+1)+i+1];
+    const su=[[i*S,j*S],[(i+1)*S,j*S],[i*S,(j+1)*S]];
+    const su2=[[(i+1)*S,j*S],[(i+1)*S,(j+1)*S],[i*S,(j+1)*S]];
+    texTriInto(sctx,img,su,[[a.x-x0,a.y-y0],[b.x-x0,b.y-y0],[c.x-x0,c.y-y0]]);
+    texTriInto(sctx,img,su2,[[b.x-x0,b.y-y0],[d.x-x0,d.y-y0],[c.x-x0,c.y-y0]]);
+  }
+  /* one composite at the end — per-triangle alpha would double-blend on fades
+     and the 5×5 grid would show through */
+  ctx.globalAlpha=alpha;
+  ctx.drawImage(scratch,0,0,bw,bh,x0,y0,bw,bh);
+  ctx.globalAlpha=1;
+}
+function drawBillboard(img,P,size,rot,alpha){
+  ctx.save(); ctx.globalAlpha=alpha; ctx.translate(P.x,P.y);
+  if(rot)ctx.rotate(rot);
+  ctx.drawImage(img,-size/2,-size/2,size,size); ctx.restore();
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   6 · modes — targets over ONE pool. PRESENCE is a weight: the body's target is
+   the weighted blend of every active mode's target. At w=0 a mode stops pulling
+   at all (it melts out of the process), it does not merely fade as a picture.
+   ══════════════════════════════════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════════════════════════════════
+   PATTERN BANK — ported verbatim from particle-dance-builder/index.html:275–376
+   (`patternPoint`, `axisPoint`, `baseParticle`, `rng`, `randomAxis`).
+
+   These are the "где" of the union: seeded, pure functions of (particle, t, opts).
+   Motion Primer supplies the "как" — its BEHAVIORS/MANNERS become force presets over
+   the physics block (§8.1), because that is what they are: cohesion / separation /
+   flow numbers, not positions. Neither source is paraphrased; the arithmetic is theirs.
+   ══════════════════════════════════════════════════════════════════════════ */
+function pdRng(seed){ let s=(seed>>>0)||1;
+  return ()=>{ s=(s*1664525+1013904223)>>>0; return s/4294967296; }; }
+function randomAxis(seed,index){
+  const r=pdRng(seed+index*65537+313);
+  const a=r()*TAU, z=r()*2-1, m=Math.sqrt(Math.max(0.0001,1-z*z));
+  return {x:Math.cos(a)*m, y:z, z:Math.sin(a)*m, phase:r()*TAU, offset:r()*2-1}; }
+function baseParticle(i,seed){
+  const r=pdRng(seed+i*1013);
+  const a=r()*TAU, u=r()*2-1, rr=Math.cbrt(r());
+  return { id:i, x:Math.cos(a)*Math.sqrt(1-u*u)*rr, y:u*rr, z:Math.sin(a)*Math.sqrt(1-u*u)*rr,
+    phase:r()*TAU, band:Math.floor(r()*7), lane:r()*2-1, axis:Math.floor(r()*13),
+    /* every body is its OWN object: personal calibre and personal tilt, so a field of
+       them never reads as one shape stamped N times at one angle */
+    size:0.55+r()*1.25, roll:(r()*2-1)*Math.PI, spin:(r()*2-1)*0.5 }; }
+/* minimal polyhedra for the `form` pattern (particle-dance keeps a larger table) */
+const FORMS={ octa:{ verts:[{x:0,y:1,z:0},{x:1,y:0,z:0},{x:0,y:0,z:1},{x:-1,y:0,z:0},{x:0,y:0,z:-1},{x:0,y:-1,z:0}],
+    edges:[[0,1],[0,2],[0,3],[0,4],[5,1],[5,2],[5,3],[5,4],[1,2],[2,3],[3,4],[4,1]] },
+  cube:{ verts:[{x:-1,y:-1,z:-1},{x:1,y:-1,z:-1},{x:1,y:1,z:-1},{x:-1,y:1,z:-1},
+                {x:-1,y:-1,z:1},{x:1,y:-1,z:1},{x:1,y:1,z:1},{x:-1,y:1,z:1}],
+    edges:[[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]] } };
+const rotY=(p,a)=>({x:p.x*Math.cos(a)+p.z*Math.sin(a), y:p.y, z:-p.x*Math.sin(a)+p.z*Math.cos(a)});
+function axisPoint(p,t,o){
+  const axes=Math.max(2,Math.round(o.axes||9));
+  const ax=randomAxis(o.seed||1,p.axis%axes), u=p.lane;
+  const pulse=Math.sin(t*(o.dance||1)+ax.phase+p.phase);
+  const orbit={ x:Math.cos(ax.phase)*0.24*pulse, y:Math.sin(ax.phase*1.7)*0.24*Math.cos(pulse),
+                z:Math.sin(ax.phase)*0.24*pulse };
+  const s=o.spread==null?1:o.spread;
+  return { x:(ax.x*u*1.48+orbit.x)*s, y:(ax.y*u*1.06+orbit.y)*s, z:(ax.z*u*1.48+orbit.z)*s }; }
+function patternPoint(p,pattern,t,o){
+  const spread=o.spread==null?1:o.spread, dance=o.dance==null?1:o.dance, idx=p.id, n=Math.max(1,o.count||1);
+  const ph=p.phase+t*dance;
+  const amp=o.amplitude==null?1:o.amplitude, freq=o.frequency==null?1:o.frequency;
+  const twist=o.twist==null?1:o.twist, lanes=Math.max(2,Math.round(o.lanes||7));
+  if(pattern==='wave'){ const u=idx/Math.max(1,n-1), x=(u-.5)*3.1;
+    return {x:x*spread, y:Math.sin(u*TAU*(1.35+freq*1.4)+ph)*.5*amp*spread,
+            z:Math.cos(u*TAU*(.72+freq)+ph*.7)*.55*amp*spread}; }
+  if(pattern==='spring'){ const u=idx/n, a=u*TAU*(2.8+freq*3.2)+ph*.65;
+    const rad=(.42+.18*Math.sin(u*TAU*lanes+ph))*amp;
+    return {x:(u-.5)*2.75*spread, y:Math.sin(a)*rad*spread, z:Math.cos(a)*rad*spread}; }
+  if(pattern==='zigzag'){ const u=idx/Math.max(1,n-1), seg=u*lanes, f=seg-Math.floor(seg);
+    const zz=(Math.floor(seg)%2?1-f:f)*2-1;
+    return {x:(u-.5)*3*spread, y:(zz*.72*amp+Math.sin(ph+u*8)*.08)*spread,
+            z:Math.sin(ph*.55+u*TAU*twist)*.42*spread}; }
+  if(pattern==='check'){ const u=idx/Math.max(1,n-1), split=.43, a=u<split?u/split:(u-split)/(1-split);
+    const x=u<split?lerp(-1.15,-.18,a):lerp(-.18,1.22,a);
+    const y=u<split?lerp(.1,.72,a):lerp(.72,-.78,a);
+    return {x:(x+Math.sin(ph+u*8)*.08*amp)*spread, y:(y+Math.cos(ph*.8+u*6)*.08*amp)*spread,
+            z:Math.sin(ph+u*TAU*twist)*.36*spread}; }
+  if(pattern==='cross'){ const arm=idx%4, u=((idx/4)|0)/Math.max(1,Math.ceil(n/4)-1), v=(u-.5)*2.3;
+    const wob=Math.sin(ph+u*TAU*freq)*.13*amp;
+    if(arm===0) return {x:v*spread,y:wob*spread,z:Math.cos(ph+u*5)*.35*spread};
+    if(arm===1) return {x:wob*spread,y:v*spread,z:Math.sin(ph+u*5)*.35*spread};
+    if(arm===2) return {x:v*.72*spread,y:v*.72*spread,z:wob*2.2*spread};
+    return {x:v*.72*spread,y:-v*.72*spread,z:wob*2.2*spread}; }
+  if(pattern==='spiral'){ const u=idx/n, strand=idx%2;
+    const a=u*TAU*(2+twist*4)+strand*Math.PI+ph*.5, rad=.5*amp;
+    return {x:Math.cos(a)*rad*spread, y:(u-.5)*2.8*spread, z:Math.sin(a)*rad*spread}; }
+  if(pattern==='form'){ const F=FORMS[o.formShape]||FORMS.octa, EE=F.edges, E=EE.length;
+    const e=EE[idx%E], perEdge=Math.ceil(n/E), kk=(idx/E|0), tt=(kk+0.5)/perEdge;
+    const va=F.verts[e[0]], vb=F.verts[e[1]], sc=o.formSize||1.15;
+    const base={x:lerp(va.x,vb.x,tt)*sc, y:lerp(va.y,vb.y,tt)*sc, z:lerp(va.z,vb.z,tt)*sc};
+    const rp=rotY(base,o.formAngle||0), dr=o.formDrift==null?0.12:o.formDrift;
+    return {x:(rp.x+Math.sin(ph*1.3)*dr)*spread, y:(rp.y+Math.cos(ph*1.1)*dr)*spread,
+            z:(rp.z+Math.sin(ph)*dr)*spread}; }
+  if(pattern==='axes') return axisPoint(p,t,o);
+  if(pattern==='orbitals'){ const u=idx/n, shell=(p.band+1)/7;
+    const a=ph*(.55+shell)+u*TAU*(1+twist*2), b=ph*.42+p.phase;
+    const rx=(.42+shell*.75)*amp, ry=(.25+shell*.34)*amp;
+    return {x:Math.cos(a)*rx*spread, y:Math.sin(b)*ry*spread, z:Math.sin(a)*rx*.72*spread}; }
+  if(pattern==='fan'){ const u=idx/Math.max(1,n-1), blade=(idx%lanes)/Math.max(1,lanes-1);
+    const angle=lerp(-1.05,1.05,blade)+Math.sin(ph*.3)*.16;
+    const dist=(.16+(u*lanes%1)*1.45)*amp;
+    return {x:Math.sin(angle)*dist*spread, y:(u-.5)*.42*spread+Math.cos(ph+blade*4)*.18*spread,
+            z:Math.cos(angle)*dist*spread}; }
+  if(pattern==='steps'){ const u=idx/Math.max(1,n-1), col=Math.floor(u*lanes), local=(u*lanes)%1;
+    return {x:(col/Math.max(1,lanes-1)-.5)*2.7*spread, y:(local-.5)*1.6*spread,
+            z:((col%2?.52:-.52)+Math.sin(ph+local*TAU)*.18*amp)*spread}; }
+  if(pattern==='glyphs'){ const cols=Math.ceil(Math.sqrt(n));
+    const gx=(idx%cols)/(cols-1||1)-.5, gy=(Math.floor(idx/cols)/(cols-1||1))-.5;
+    const gate=Math.sin((Math.abs(gx)+Math.abs(gy))*TAU*freq+ph);
+    return {x:(gx*2.35+gate*.12*amp)*spread, y:(gy*1.62+Math.cos(ph+gx*7)*.1*amp)*spread,
+            z:(gate*.58+Math.sin(ph+gy*9)*.18)*spread}; }
+  if(pattern==='lattice'){ const cols=Math.ceil(Math.sqrt(n));
+    const gx=(idx%cols)/(cols-1||1)-.5, gy=(Math.floor(idx/cols)/(cols-1||1))-.5;
+    const wave=Math.sin(ph+gx*8+gy*5);
+    return {x:(gx*2.2+Math.sin(ph*.7)*.08)*spread, y:(gy*1.55+wave*.22)*spread,
+            z:(wave*.62+Math.cos(ph*.6+gx*4)*.18)*spread}; }
+  if(pattern==='vortex'){ const ring=(p.band+1)/7, a=ph+ring*2.1+idx*.017;
+    const rad=(.26+ring*.88+.08*Math.sin(ph*1.7))*spread;
+    return {x:Math.cos(a)*rad, y:(p.y*.72+Math.sin(ph+ring)*.34)*spread, z:Math.sin(a)*rad}; }
+  if(pattern==='ribbon'){ const u=idx/n, a=u*TAU*2.2+t*dance*.75;
+    return {x:(u-.5)*2.8*spread, y:Math.sin(a+p.phase*.3)*.62*spread, z:Math.cos(a*1.25)*.72*spread}; }
+  if(pattern==='burst'){ const pulse=.45+.55*(0.5+0.5*Math.sin(ph*1.2));
+    const rad=(0.32+pulse*1.22)*spread;
+    return {x:p.x*rad+Math.sin(ph+p.band)*.1, y:p.y*rad+Math.cos(ph*.8)*.1, z:p.z*rad}; }
+  /* cloud — the default */
+  const curl=Math.sin(ph+p.x*3)*Math.cos(ph*.7+p.z*4);
+  return {x:(p.x+.24*Math.sin(ph+p.z))*spread, y:(p.y+.24*Math.cos(ph*.9+p.x))*spread,
+          z:(p.z+curl*.32)*spread};
+}
+const PATTERNS=[['cloud','Cloud'],['lattice','Wave lattice'],['vortex','Vortex'],['ribbon','Ribbon'],
+  ['burst','Pulse burst'],['wave','Wave'],['spring','Spring'],['zigzag','Zigzag'],['spiral','Spiral · DNA'],
+  ['check','Check'],['cross','Cross'],['axes','Random axes'],['orbitals','Orbitals'],['fan','Fan'],
+  ['steps','Steps'],['glyphs','Primitives'],['form','3D form']];
+
+/* Motion Primer BEHAVIORS + MANNERS as force presets over the physics block.
+   Their numbers are px-scaled for a 2D canvas world; ours is ±3 world units, so the
+   separation/flow figures are mapped, not copied — the RELATIONS between the manners
+   are what carries the character. */
+const BEHAVIOURS={
+  swarm:  { on:1, follow:1.1, collide:0.30, swirl:0.22, attract:0.10, gravity:0,    flock:0.25, damp:0.95 },
+  pack:   { on:1, follow:2.4, collide:1.00, swirl:0,    attract:0.35, gravity:0,    flock:0,    damp:0.90 },
+  magnet: { on:1, follow:0.8, collide:0.25, swirl:0.12, attract:1.40, gravity:0,    flock:0,    damp:0.94 },
+  orbit:  { on:1, follow:1.6, collide:0.18, swirl:0.55, attract:0.35, gravity:0,    flock:0,    damp:0.96 },
+  fall:   { on:1, follow:0.4, collide:0.90, swirl:0,    attract:0,    gravity:0.55, flock:0,    damp:0.95 },
+  scatter:{ on:1, follow:0.6, collide:0.50, swirl:0.14, attract:-0.5, gravity:0,    flock:0,    damp:0.975 }
+};
+const MANNERS={
+  Free:    { flock:0.10, collide:0.30, swirl:0.10 },
+  Cluster: { flock:0.50, collide:0.18, swirl:0.05 },
+  Disperse:{ flock:0.00, collide:1.00, swirl:0.05 },
+  Flock:   { flock:0.40, collide:0.70, swirl:0.07 },
+  Flow:    { flock:0.00, collide:0.12, swirl:0.28 },
+  Vortex:  { flock:0.02, collide:0.18, swirl:0.65 }
+};
+function applyBehaviour(id){ const b=BEHAVIOURS[id]; if(!b)return;
+  Object.assign(state.phys,b); syncAllScrubs(); setStatus('behaviour · '+id,'live'); }
+function applyManner(id){ const m=MANNERS[id]; if(!m)return;
+  state.phys.on=1; Object.assign(state.phys,m); syncAllScrubs(); setStatus('manner · '+id,'live'); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PROGRAMS — the bank of ways to place bodies. A program is a pure target provider
+   plus a DECLARED parameter dictionary. The declaration is what makes a layer
+   addressable from the mod rack: it is our equivalent of EQJ's `ifParams`
+   (mvj-inject:571–581), except we own the engine so we declare instead of scanning.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* AXIS — the image-shuffler engine (index.html:193–234 `flowItem`), ported.
+   Bodies ride one or more lanes drawn at ANY angle across the frame, optionally bent,
+   with real density (gap = centre spacing) and an off-screen recycle whose seam always
+   sits beyond the frame — so nothing is ever seen to teleport. This is the engine that
+   was asked for first and is the reason the whole track exists. */
+function axisTarget(i,N,t,P,ctx){
+  const axes=Math.max(1,Math.round(P.axes||1));
+  const lane=i%axes, inLane=Math.floor(i/axes), perLane=Math.max(1,Math.ceil(N/axes));
+  const th=(P.angle||0)*Math.PI/180, ct=Math.cos(th), st=Math.sin(th);
+  const vx=ctx.vx, vy=ctx.vy;
+  const reach=Math.abs(ct)*vx+Math.abs(st)*vy+0.6;      // half visible path + overshoot
+  const perpReach=Math.abs(st)*vx+Math.abs(ct)*vy;
+  const step=Math.max(0.09,(P.gap==null?1:P.gap)*0.5*(state.size/100));  // density
+  const loop=Math.max(perLane*step, 2*reach+2*step);    // wrap seam lives off-screen
+  const off=t*(P.speed==null?1:P.speed)*0.5;
+  let c=(inLane*step-off)%loop; c=((c%loop)+loop)%loop; c-=loop/2;
+  const laneOff=axes>1?(lane-(axes-1)/2)*(perpReach*1.5/axes):0;
+  const bendAt=x=>(P.bend||0)*Math.sin((x/reach)*Math.PI*(P.bendFreq||1));
+  const dc=0.02, across=laneOff+bendAt(c), across2=laneOff+bendAt(c+dc);
+  const p1x=ct*c-st*across,       p1y=st*c+ct*across;
+  const p2x=ct*(c+dc)-st*across2, p2y=st*(c+dc)+ct*across2;
+  const scGrad=1-(P.scaleGrad||0)*clamp(Math.abs(c)/reach,0,1);
+  const phi=(P.tilt3d||0)*0.85, cph=Math.cos(phi), sph=Math.sin(phi);
+  const cx=p1x, cy=p1y*cph, cz=p1y*sph;
+  let hx=p2x-p1x, hy=(p2y-p1y)*cph, hz=(p2y-p1y)*sph;
+  const hl=Math.hypot(hx,hy,hz)||1; hx/=hl; hy/=hl; hz/=hl;
+  const edge=clamp((reach-Math.abs(c))/0.5,0,1);
+  return { x:cx, y:cy, z:cz, scale:scGrad, alpha:edge,
+           skip:Math.abs(c)>reach+0.5, order:-Math.abs(c),
+           heading:{x:hx,y:hy,z:hz} };
+}
+/* WATERFALL — its own thing, not the generic axis (shuffler :237–252): columns of
+   bodies falling, staggered and overlapping, entering above and leaving below. */
+function waterfallTarget(i,N,t,P,ctx){
+  const vx=ctx.vx, vy=ctx.vy;
+  const cols=Math.max(1,Math.round(P.axes||3));
+  const col=i%cols, idx=Math.floor(i/cols), per=Math.max(1,Math.ceil(N/cols));
+  const step=Math.max(0.12,(P.gap==null?1:P.gap)*0.62*(state.size/100));
+  const loop=Math.max(per*step, 2*vy+2*step);
+  const colPhase=((col*0.41)%1), off=t*(P.speed==null?1:P.speed)*0.55+colPhase*loop;
+  let c=(idx*step+off)%loop; c=((c%loop)+loop)%loop;
+  const y=(vy+step)-c;
+  const colX=(col-(cols-1)/2)*(vx*1.7/cols), jit=Math.sin(idx*12.9+col*4.7)*0.06;
+  const sc=1-(P.scaleGrad||0)*0.5*clamp(Math.abs(y)/vy,0,1);
+  return { x:colX+jit, y:y, z:0, scale:sc, alpha:clamp((vy+0.45-Math.abs(y))/0.5,0,1),
+           skip:Math.abs(y)>vy+0.55, order:-Math.abs(y) };
+}
+
+const AXIS_PARAMS=[
+  {key:'axes',      label:'lanes',        min:1,  max:12,  step:1,    def:1},
+  {key:'angle',     label:'angle',        min:0,  max:360, step:1,    def:0},
+  {key:'gap',       label:'gap · density',min:0.1,max:3,   step:0.01, def:0.9},
+  {key:'speed',     label:'speed',        min:-3, max:3,   step:0.01, def:0.62},
+  {key:'bend',      label:'bend',         min:-1.5,max:1.5,step:0.01, def:0},
+  {key:'bendFreq',  label:'bend freq',    min:0.5,max:6,   step:0.1,  def:1},
+  {key:'scaleGrad', label:'size falloff', min:0,  max:1,   step:0.01, def:0.18},
+  {key:'tilt3d',    label:'plane tilt',   min:-1.5,max:1.5,step:0.01, def:0}
+];
+const PAT_PARAMS=[
+  /* spread 1 = fills the frame edge to edge. The pattern bank was authored for a ±1.5
+     world; here it is scaled by the live viewport, so a scene reaches the corners
+     instead of huddling in the middle. This is a party screen, not a thumbnail. */
+  {key:'spread',    label:'spread',    min:0, max:3,  step:0.01, def:1},
+  {key:'dance',     label:'dance',     min:0, max:4,  step:0.01, def:0.72},
+  {key:'amplitude', label:'amplitude', min:0, max:3,  step:0.01, def:1},
+  {key:'frequency', label:'frequency', min:0, max:6,  step:0.01, def:1},
+  {key:'twist',     label:'twist',     min:-3,max:3,  step:0.01, def:1},
+  {key:'lanes',     label:'lanes',     min:2, max:24, step:1,    def:7}
+];
+
+const PROGRAMS = {
+  axis:      { label:'Axis · lanes', params:AXIS_PARAMS, target:axisTarget },
+  waterfall: { label:'Waterfall',    params:AXIS_PARAMS, target:waterfallTarget },
+  pattern:   { label:'Pattern', variants:PATTERNS, params:PAT_PARAMS,
+    target(i,N,t,P,ctx){ const p=pool[i]; if(!p||!p.pd)return {x:0,y:0,z:0};
+      const q=patternPoint(p.pd, ctx.variant, t, {...P, spread:1, count:N, seed:ctx.seed});
+      /* the bank works in ±1.5; stretch it onto the real frame so it goes edge to edge */
+      const kx=ctx.vx/1.5*P.spread, ky=ctx.vy/1.5*P.spread;
+      return { x:q.x*kx, y:q.y*ky, z:q.z*Math.min(kx,ky) }; } },
+  grid: { label:'Grid',
+    params:[{key:'gap',label:'gap',min:0.1,max:3,step:0.01,def:1},
+            {key:'sway',label:'sway',min:0,max:1,step:0.01,def:0.18}],
+    target(i,N,t,P,ctx){
+      const cols=Math.ceil(Math.sqrt(N)), rows=Math.ceil(N/cols);
+      const cx=i%cols, cy=(i/cols)|0;
+      const EXT=Math.min(ctx.vx,ctx.vy)*2.0;      /* fill the frame, not a fixed box */
+      const pitch=EXT/Math.max(cols,rows)*P.gap;
+      return { x:(cx-(cols-1)/2)*pitch, y:((rows-1)/2-cy)*pitch,
+               z:Math.sin(t*0.4+i*0.3)*P.sway }; } },
+  ring: { label:'Ring',
+    params:[{key:'radius',label:'radius',min:0.1,max:3,step:0.01,def:1.05},
+            {key:'depth',label:'depth',min:0,max:2,step:0.01,def:0.35},
+            {key:'turns',label:'turns',min:0.25,max:6,step:0.05,def:1}],
+    target(i,N,t,P,ctx){ const a=(i/N)*TAU*P.turns, R=P.radius*Math.min(ctx.vx,ctx.vy)*0.62;
+      return { x:Math.cos(a)*R, y:Math.sin(a)*R*0.62,
+               z:Math.sin(a*2)*P.depth }; } },
+  tunnel: { label:'Tunnel',
+    params:[{key:'speed',label:'speed',min:-2,max:2,step:0.01,def:0.28},
+            {key:'spread',label:'spread',min:0.1,max:3,step:0.01,def:0.9},
+            {key:'rings',label:'rings',min:1,max:24,step:1,def:7}],
+    target(i,N,t,P,ctx){
+      const RINGS=Math.max(1,Math.round(P.rings));
+      const per=Math.max(1,Math.floor(N/RINGS)), ring=(i/per)|0, k=i%per;
+      const a=(k/per)*TAU;
+      const zz=((ring/RINGS)*3-t*P.speed)%3, z=zz<0?zz+3:zz, shrink=1-z*0.22;
+      const R=P.spread*Math.min(ctx.vx,ctx.vy)*0.7;
+      return { x:Math.cos(a)*R*shrink, y:Math.sin(a)*R*shrink, z:1.5-z }; } },
+  scatter: { label:'Scatter',
+    params:[{key:'spread',label:'spread',min:0.1,max:3,step:0.01,def:1.2},
+            {key:'drift',label:'drift',min:0,max:1,step:0.01,def:0.2}],
+    target(i,N,t,P,ctx){
+      const r=n=>{ const v=Math.sin(n*127.1+i*311.7+ctx.seed)*43758.5453; return v-Math.floor(v); };
+      /* scatter fills the whole frame — this is the "objects spread across the room"
+         look, not a cloud parked in the middle */
+      return { x:(r(1)-0.5)*2*P.spread*ctx.vx+Math.sin(t*0.3+i)*P.drift,
+               y:(r(2)-0.5)*2*P.spread*ctx.vy+Math.cos(t*0.26+i*1.3)*P.drift,
+               z:(r(3)-0.5)*1.6 }; } },
+  logo: { label:'Logo · mark',
+    params:[{key:'scale',label:'scale',min:0.1,max:3,step:0.01,def:1},
+            {key:'jitter',label:'jitter',min:0,max:0.5,step:0.005,def:0.015},
+            {key:'fit',label:'fit to grid',min:0,max:1,step:0.01,def:1}],
+    sizeScale(N,P){ if(P.fit<=0)return 1; buildLogoMask(N);
+      return lerp(1, clamp((LOGO.spacing||0.1)/Math.max(1e-4,state.size/100),0.15,4), P.fit); },
+    target(i,N,t,P){ const pts=buildLogoMask(N); if(!pts.length)return {x:0,y:0,z:0};
+      const p=pts[Math.min(pts.length-1,Math.floor(i*pts.length/Math.max(1,N)))];
+      return { x:p[0]*P.scale+Math.sin(t*1.7+i)*P.jitter,
+               y:p[1]*P.scale+Math.cos(t*1.9+i)*P.jitter, z:0 }; } },
+  word: { label:'Word · formation',
+    params:[{key:'scale',label:'scale',min:0.1,max:3,step:0.01,def:1},
+            {key:'jitter',label:'jitter',min:0,max:0.5,step:0.005,def:0.02},
+            {key:'fit',label:'fit to grid',min:0,max:1,step:0.01,def:1}],
+    sizeScale(N,P){ if(P.fit<=0)return 1; buildFormation(N);
+      return lerp(1, clamp(formSpacing/Math.max(1e-4,state.size/100),0.15,4), P.fit); },
+    target(i,N,t,P){ const pts=buildFormation(N); if(!pts.length)return {x:0,y:0,z:0};
+      const p=pts[Math.min(pts.length-1,Math.floor(i*pts.length/Math.max(1,N)))];
+      return { x:p[0]*P.scale+Math.sin(t*2+i)*P.jitter,
+               y:p[1]*P.scale+Math.cos(t*2.2+i)*P.jitter, z:0 }; } }
+};
+
+/* ══════════════════════════════════════════════════════════════════════════
+   LOGO — the mark itself, used two ways (both asked for):
+     · FILL   bodies settle into its silhouette, the way the word formation works
+     · AVOID  the silhouette becomes a VOID: flows route around it, so the mark is
+              read as negative space rather than drawn
+   One rasterised mask serves both — sampled for points, tested for occupancy.
+   ══════════════════════════════════════════════════════════════════════════ */
+const LOGO={ img:null, mask:null, MW:0, MH:0, pts:[], key:'', aspect:1, ready:false };
+(function loadLogo(){
+  /* The mark is authored with a viewBox and NO width/height, so naturalWidth comes back
+     0 and the mask rasterises empty — the same trap that killed dropped SVGs. Read the
+     viewBox and give the image a real size before it is ever drawn. */
+  fetch('assets/logo.svg').then(r=>r.text()).then(txt=>{
+    const m=txt.match(/viewBox\s*=\s*"([\d.\s-]+)"/);
+    const vb=m?m[1].trim().split(/\s+/).map(Number):[0,0,247,371];
+    const vw=vb[2]||247, vh=vb[3]||371;
+    LOGO.aspect=vw/vh;
+    const im=new Image();
+    im.width=Math.round(512*LOGO.aspect); im.height=512;
+    im.onload=()=>{ LOGO.img=im; LOGO.ready=true; LOGO.key=''; buildLogoMask(); };
+    im.onerror=()=>{ LOGO.ready=false; };
+    im.src='data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(txt)));
+  }).catch(()=>{ LOGO.ready=false; });
+})();
+function buildLogoMask(N){
+  if(!LOGO.ready)return LOGO.pts;
+  N=N||pool.length||300;
+  const key=N+'|'+state.logoScale;
+  if(key===LOGO.key && LOGO.pts.length) return LOGO.pts;
+  LOGO.key=key;
+  const MH=220, MW=Math.max(8,Math.round(MH*LOGO.aspect));
+  const c=document.createElement('canvas'); c.width=MW; c.height=MH;
+  const x=c.getContext('2d',{willReadFrequently:true});
+  x.drawImage(LOGO.img,0,0,MW,MH);
+  /* if the raster came back empty the mark is unusable — say so instead of silently
+     behaving as if the logo were not there */
+  const rasterProbe=x.getImageData(0,0,MW,MH).data;
+  let solid=0; for(let i=3;i<rasterProbe.length;i+=64) if(rasterProbe[i]>128) solid++;
+  if(!solid){ LOGO.ready=false; LOGO.mask=null; return LOGO.pts=[]; }
+  LOGO.mask=x.getImageData(0,0,MW,MH).data; LOGO.MW=MW; LOGO.MH=MH;
+  /* adaptive density, same rule as the word: about as many points as there are bodies,
+     so a body is the size of a cell and the mark reads instead of smearing */
+  const SPAN=state.logoScale, ySpan=SPAN/LOGO.aspect;
+  const sample=step=>{ const o=[];
+    for(let yy=0;yy<MH;yy+=step) for(let xx=0;xx<MW;xx+=step)
+      if(LOGO.mask[(yy*MW+xx)*4+3]>128) o.push([ (xx/MW-0.5)*SPAN, -(yy/MH-0.5)*ySpan ]);
+    return o; };
+  const probe=sample(4); if(!probe.length) return LOGO.pts=[];
+  const step=clamp(Math.round(4*Math.sqrt(probe.length/N)),2,26);
+  LOGO.pts=sample(step);
+  LOGO.spacing=step/MW*SPAN;
+  return LOGO.pts;
+}
+/* world → is this point inside the mark? used by AVOID */
+function insideLogo(wx,wy){
+  if(!LOGO.mask)return false;
+  const SPAN=state.logoScale, ySpan=SPAN/LOGO.aspect;
+  const u=wx/SPAN+0.5, v=0.5-wy/ySpan;
+  if(u<0||v<0||u>=1||v>=1)return false;
+  const mx=(u*LOGO.MW)|0, my=(v*LOGO.MH)|0;
+  return LOGO.mask[(my*LOGO.MW+mx)*4+3]>128;
+}
+/* Push a body out of the mark. This runs as a POSITIONAL correction after integration,
+   not as a force: a force reaches equilibrium against the layout spring somewhere inside
+   the void, which is exactly what "the stream still runs through the logo" looks like.
+   Correcting the position guarantees the mark stays empty however hard the layout pulls. */
+function avoidLogo(b,dt,strength){
+  if(!insideLogo(b.x,b.y))return;
+  const SPAN=state.logoScale, ySpan=SPAN/LOGO.aspect;
+  const sx=SPAN/LOGO.MW, sy=ySpan/LOGO.MH;
+  let bx=0,by=0,found=false;
+  for(let r=2;r<=26 && !found;r+=2){
+    for(let a=0;a<12;a++){
+      const th=a/12*TAU, tx=b.x+Math.cos(th)*r*sx, ty=b.y+Math.sin(th)*r*sy;
+      if(!insideLogo(tx,ty)){ bx=Math.cos(th); by=Math.sin(th); found=true; break; }
+    }
+  }
+  if(!found){ bx=b.x>=0?1:-1; by=0; }
+  const sx2=state.logoScale/LOGO.MW, sy2=(state.logoScale/LOGO.aspect)/LOGO.MH;
+  /* step out along the escape direction until the body is clear of the silhouette */
+  const stepPx=Math.max(1.2, 3*Math.min(1,strength));
+  for(let g=0; g<40; g++){
+    b.x+=bx*stepPx*sx2; b.y+=by*stepPx*sy2;
+    if(!insideLogo(b.x,b.y))break;
+  }
+  /* and give it a nudge so it keeps travelling around rather than hugging the edge */
+  b.vx+=bx*strength*dt*3; b.vy+=by*strength*dt*3;
+}
+
+/* ── layers: the EQJ stack model (mvj-inject:548–688), adapted to one shared pool ──
+   A layer is a program instance with a weight. `matrix` is a CURSOR onto the active
+   layer's own rows — that single line is what makes "assign any audio to any visual
+   variant" work, and it is what the old fixed MODES array could never express. */
+let layers=[], activeId=null, uid=0;
+const layerOfProg = p => layers.find(L=>L.prog===p);
+let matrix=[];                        /* === activeLayer().matrix, always */
+const activeLayer = () => layers.find(L=>L.id===activeId) || layers[0] || null;
+const anySolo = () => layers.some(L=>L.solo);
+/* solo FIRST and unconditional — EQJ :555. Requiring a non-zero weight here is what
+   made solo collapse the scene. */
+const layerVisible = L => L.solo || (!anySolo() && !L.muted);
+
+function makeLayer(prog,variant){
+  const P=PROGRAMS[prog]; const params={};
+  for(const d of P.params) params[d.key]=d.def;
+  return { id:++uid, prog,
+    variant: variant ?? (P.variants ? P.variants[0][0] : null),
+    label: P.label + (variant ? ' · '+variant : ''),
+    w:1, muted:false, solo:false, share:1,
+    seed:(Math.random()*1e6)|0,      /* two copies of one program diverge here */
+    params, matrix:[], open:false };
+}
+function focusLayer(id){
+  if(id!=null) activeId=id;
+  matrix=(activeLayer()||{matrix:[]}).matrix;
+}
+function addLayer(prog,variant){
+  const L=makeLayer(prog,variant);
+  layers.unshift(L); focusLayer(L.id); seedRows(L);
+  renderLayers(); buildMatrix(); return L;
+}
+function removeLayer(id){
+  const i=layers.findIndex(L=>L.id===id); if(i<0)return;
+  layers.splice(i,1);
+  if(activeId===id) activeId=layers.length?layers[0].id:null;
+  focusLayer(); renderLayers(); buildMatrix();
+}
+function duplicateLayer(id){
+  const i=layers.findIndex(L=>L.id===id); if(i<0)return;
+  const L=layers[i];
+  const c={...L, id:++uid, seed:(Math.random()*1e6)|0,
+    label:L.label+' copy', params:{...L.params}, matrix:L.matrix.map(r=>({...r}))};
+  layers.splice(i,0,c); focusLayer(c.id); renderLayers(); buildMatrix();
+}
+function moveLayer(id,dir){
+  const i=layers.findIndex(L=>L.id===id), j=i+dir;
+  if(i<0||j<0||j>=layers.length)return;
+  const t=layers[i]; layers[i]=layers[j]; layers[j]=t; renderLayers();
+}
+/* share: which bodies this layer is allowed to claim. Deterministic per body×layer.
+   Weights alone give a MORPH (an average of two forms, reading as neither); share lets
+   two forms coexist and stay legible. There is no EQJ equivalent — EQJ had separate
+   canvases and used blend modes for this. */
+function belongs(i,L){
+  if(L.share>=1)return true;
+  const h=((i*2654435761)^L.seed)>>>0;
+  return (h%1000)/1000 < L.share;
+}
+function paramsOf(L){
+  if(!L)return GLOBAL_PARAMS;
+  const P=PROGRAMS[L.prog];
+  return [
+    { key:'w',     label:'presence', min:0, max:1, step:0.01, get:()=>L.w,     set:v=>L.w=v },
+    { key:'share', label:'share',    min:0, max:1, step:0.01, get:()=>L.share, set:v=>L.share=v },
+    ...P.params.map(d=>({ ...d, get:()=>L.params[d.key], set:v=>L.params[d.key]=v })),
+    ...GLOBAL_PARAMS
+  ];
+}
+/* Which parameter of a program is worth putting the beat on. Picking "the first one"
+   landed the beat on `axes` — an integer lane COUNT — so every kick re-dealt the lanes
+   in visible jumps. A drive target must be continuous and expressive. */
+const DRIVE_TARGET={ axis:'bend', waterfall:'gap', pattern:'amplitude', grid:'sway',
+  ring:'radius', tunnel:'speed', scatter:'drift', logo:'jitter', word:'jitter' };
+function seedRows(L){
+  /* a new layer sounds without a single click — EQJ seedBuilderRows :891 */
+  /* BIPOLAR, not up: presence starts at 1.0, so an "up" row can only push it into the
+   ceiling and nothing moves. Bipolar breathes around the base — the layer recedes
+   between kicks and comes forward on them. */
+  L.matrix.push({ feat:'env.bassFast', path:'w', mode:'bi', depth:0.55, curve:'exp' });
+  const want=DRIVE_TARGET[L.prog];
+  const main=PROGRAMS[L.prog].params.find(p=>p.key===want) || PROGRAMS[L.prog].params[0];
+  if(main) L.matrix.push({ feat:'beat.sine', path:main.key, mode:'up', depth:0.30, curve:'ease' });
+  /* size breathes on the kick — the thing that makes a field read as ALIVE rather than
+     as a slow screensaver. Smoothness must come from damping and easing, never from
+     taking the beat away: that is how "less abrupt" turned into "nothing dances". */
+  L.matrix.push({ feat:'env.bassFast', path:'size', mode:'up', depth:0.22, curve:'exp' });
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   7 · mod matrix — Param contract from EQJ, with the last-wins bug fixed:
+   several rows on one parameter SUM their deviations from base instead of the
+   last one silently winning (EQJ mvj-inject:564 — the first row just burned CPU).
+   ══════════════════════════════════════════════════════════════════════════ */
+const GLOBAL_PARAMS = [
+  { key:'size',        label:'size',        min:8,  max:120, step:1,    get:()=>state.size,      set:v=>state.size=v },
+  { key:'cam.persp',   label:'perspective', min:0,  max:1.2, step:0.01, get:()=>state.cam.persp, set:v=>state.cam.persp=v },
+  { key:'cam.zoom',    label:'zoom',        min:0.4,max:2.4, step:0.01, get:()=>state.cam.zoom,  set:v=>state.cam.zoom=v },
+  { key:'cam.tilt',    label:'tilt',        min:-1, max:1,   step:0.01, get:()=>state.cam.tilt,  set:v=>state.cam.tilt=v },
+  { key:'cam.yaw',     label:'yaw',         min:-3.2,max:3.2,step:0.01, get:()=>state.cam.yaw,   set:v=>state.cam.yaw=v },
+  { key:'face',        label:'face heading',min:0,  max:1,   step:0.01, get:()=>state.face,      set:v=>state.face=v },
+  { key:'hueDrift',    label:'hue drift',   min:0,  max:1,   step:0.01, get:()=>state.hueDrift,  set:v=>state.hueDrift=v }
+];
+
+const CURVE = { lin:v=>v, exp:v=>v*v, sqrt:v=>Math.sqrt(v),
+  ease:v=>0.5-0.5*Math.cos(Math.PI*v), gate:v=>v>0.5?1:0, inv:v=>1-v };
+function featVal(f,id){
+  switch(id){
+    case 'rms': return f.rms;
+    case 'flux': return Math.min(1,f.flux*8);
+    case 'onset': return f.onset;
+    case 'beat.phase': return f.beat.phase;
+    case 'beat.sine': return 0.5-0.5*Math.cos(TAU*f.beat.phase);
+    case 'beat.pulse': return Math.pow(Math.max(0,1-f.beat.phase),3);
+  }
+  if(id.startsWith('band.')) return f.bands[id.slice(5)]||0;
+  if(id.startsWith('env.'))  return f.env[id.slice(4)]||0;
+  return 0;
+}
+/* v1 bindings: the moves are wired, the DJ does not have to build a matrix.
+   The generic rack (level 2) plugs into this same contract later. */
+/* Depth is a fraction of the parameter's FULL range, so a wide range needs a small
+   number. size spans 8..160: depth 0.55 there swings a body 52 → 135px on every kick,
+   which reads as a strobe of giant tiles, not a pulse. Tuned against the 124 fixture
+   until the grid still reads as a grid at the peak. */
+const _UNUSED_SEED = [
+  { feat:'env.bassFast', path:'size',      mode:'up', depth:0.14, curve:'exp'  },
+  { feat:'env.rmsSlow',  path:'cam.persp', mode:'up', depth:0.40, curve:'ease' },
+  { feat:'onset',        path:'cam.zoom',  mode:'up', depth:0.06, curve:'exp'  },
+  { feat:'flux',         path:'face',      mode:'up', depth:0.55, curve:'sqrt' }
+];
+const BASES = new Map();
+function applyMatrix(f){
+  /* Walk the rows of EVERY VISIBLE layer, not one global list: drive must reach the
+     whole stack at once (EQJ states this principle at :559). Deviations still SUM per
+     target — that part of the old code was right and is kept. */
+  const acc=new Map();
+  const take=(rows,L)=>{
+    const list=paramsOf(L);
+    for(const r of rows){
+      const p=list.find(x=>x.key===r.path); if(!p)continue;
+      const id=(L?L.id:0)+'::'+r.path;
+      if(!BASES.has(id)) BASES.set(id,p.get());
+      const base=BASES.get(id);
+      const a=clamp(featVal(f,r.feat),0,1);
+      const cv=(CURVE[r.curve]||CURVE.lin)(a);
+      const range=p.max-p.min;
+      const dev=r.mode==='bi' ? (cv-0.5)*2*r.depth*range : cv*r.depth*range;
+      const slot=acc.get(id)||{p,base,sum:0,key:r.path,layerId:(L?L.id:null)}; slot.sum+=dev; acc.set(id,slot);
+    }
+  };
+  for(const L of layers) if(layerVisible(L)) take(L.matrix,L);
+  const live=new Set();
+  for(const [,s2] of acc){
+    const v=clamp(s2.base+s2.sum,s2.p.min,s2.p.max);
+    s2.p.set(v);
+    /* a layer's own params live under `w_<id>` / the layer card, not in SCRUB_FOR */
+    const name = s2.key==='w' ? ('w_'+(s2.layerId||'')) : SCRUB_FOR[s2.key];
+    const sc=SCRUBS[name];
+    if(sc){ sc.setLive(v); live.add(name); }
+  }
+  /* clear risers that no row drives any more — otherwise a deleted row leaves a tick
+     frozen on the panel implying modulation that is gone */
+  for(const k in SCRUB_FOR){ const n=SCRUB_FOR[k];
+    if(!live.has(n) && SCRUBS[n]) SCRUBS[n].setLive(null); }
+  return acc;
+}
+function restoreMatrix(acc){ for(const [,s] of acc) s.p.set(s.base); }
+const SCRUB_FOR = { 'size':'size','cam.persp':'persp','cam.zoom':'zoom','cam.tilt':'tilt',
+  'face':'face','hueDrift':'hueDrift' };
+/* Any edit OUTSIDE the matrix must rewrite the base, or the drive overwrites the
+   user's hand on the very next frame (the classic EQJ trap). */
+function rebase(key,v){ /* bases are keyed layer::path — clear every match for this path */
+  for(const k of [...BASES.keys()]) if(k.endsWith('::'+key)) BASES.set(k,v); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   7b · quantised actions + moves
+
+   Two things a live tool needs that a parameter panel cannot give you:
+   · anything you fire lands ON the music, not on your reaction time;
+   · the dramaturgy of §4/§8.3 exists as ONE gesture, not as six sliders you would
+     have to ride simultaneously while the drop happens.
+
+   A move is a scripted function of its own normalised progress. It writes to state
+   through the same setters the panel uses, so nothing downstream knows the difference.
+   ══════════════════════════════════════════════════════════════════════════ */
+let QUANT='bar';                       /* off | beat | bar | phrase */
+const PENDING=[];
+function fire(fn,label){
+  if(QUANT==='off'){ fn(); return; }
+  PENDING.push({fn,label});
+  setStatus('queued · '+label+' on next '+QUANT,'ok');
+}
+function servePending(f){
+  if(!PENDING.length)return;
+  const hit = QUANT==='beat'?f.beat.onBeat : QUANT==='bar'?f.beat.onBar
+            : QUANT==='phrase'?f.beat.onPhrase : true;
+  if(!hit)return;
+  const q=PENDING.splice(0,PENDING.length);
+  for(const p of q) p.fn();
+}
+
+/* Anything that writes to a MODULATED parameter must write the BASE, not the live
+   value — applyMatrix rebuilds the live value from the base every frame and
+   restoreMatrix puts the base back at the end of it. Writing `state.cam.persp = v`
+   directly looks like it works and is silently undone one frame later. Moves, scenes
+   and the panel all go through here. (§10.4 base-sync invariant.) */
+function setDriven(key,v){ const p=GLOBAL_PARAMS.find(x=>x.key===key); if(!p)return;
+  p.set(v); rebase(key,v); }
+
+let MOVE=null;                          /* {name, t, dur, step(k), done()} */
+function startMove(m){ MOVE={...m,t:0}; }
+const easeOut = k => 1-Math.pow(1-k,3);
+const MOVES={
+  /* build-up sucks everything to the centre, the drop throws it out and peaks the
+     perspective — sжатие→взрыв from §8.3 */
+  magnet:{ name:'Magnet drop', dur:6.5, step(k,ctx){
+    const P=state.phys;
+    if(k<0.72){ const a=k/0.72;
+      P.on=1; P.attract=lerp(0,2.6,a*a); P.collide=lerp(P.collide,0.3,0.02);
+      setDriven('cam.persp',lerp(ctx.persp,ctx.persp+0.25,a));
+    } else { const b=(k-0.72)/0.28;
+      P.attract=0;
+      if(b<0.06&&!ctx.blew){ ctx.blew=1;
+        for(const p of pool){ const d=Math.hypot(p.x,p.y)+0.1;
+          p.vx+=(p.x/d)*0.42; p.vy+=(p.y/d)*0.42; } }
+      setDriven('cam.persp',lerp(ctx.persp+0.25,ctx.persp,easeOut(b)));
+    }
+  }, done(ctx){ setDriven('cam.persp',ctx.persp); state.phys.attract=0; } },
+
+  /* chaos → order: scatter takes over, then the grid snaps back. The guilloché move,
+     carried onto geometry (§4 «Собраться») */
+  gather:{ name:'Gather', dur:5.4, step(k,ctx){
+    const g=layerOfProg('grid'), s=layerOfProg('scatter');
+    if(k<0.62){ const a=k/0.62; s.w=lerp(ctx.sw,1,a); g.w=lerp(ctx.gw,0,a);
+      state.phys.on=1; state.phys.swirl=lerp(ctx.swirl,1.6,a); }
+    else { const b=easeOut((k-0.62)/0.38);
+      s.w=lerp(1,0,b); g.w=lerp(0,1,b); state.phys.swirl=lerp(1.6,ctx.swirl,b); }
+    renderLayers();
+  }, done(ctx){ state.phys.swirl=ctx.swirl; renderLayers(); } },
+
+  /* the crowd, full frame, two bars, then gone */
+  crowd:{ name:'Crowd', dur:2.8, step(k,ctx){
+    const C=state.cam2;
+    C.layer = k<0.12 ? lerp(ctx.layer,1,k/0.12)
+            : k<0.72 ? 1
+            : lerp(1,ctx.layer,easeOut((k-0.72)/0.28));
+  }, done(ctx){ state.cam2.layer=ctx.layer; if(SCRUBS.camLayer)SCRUBS.camLayer.set(ctx.layer); } },
+
+  /* everything freezes into a hard grid on the beat and releases */
+  snap:{ name:'Snap', dur:2.4, step(k,ctx){
+    const g=layerOfProg('grid');
+    g.w = k<0.5 ? 1 : lerp(1,ctx.gw,easeOut((k-0.5)/0.5));
+    state.phys.follow = k<0.5 ? 18 : lerp(18,ctx.follow,(k-0.5)/0.5);
+    renderLayers();
+  }, done(ctx){ state.phys.follow=ctx.follow; renderLayers(); } }
+};
+function runMove(dt){
+  if(!MOVE)return;
+  MOVE.t+=dt;
+  const k=clamp(MOVE.t/MOVE.dur,0,1);
+  MOVE.step(k,MOVE.ctx);
+  if(k>=1){ MOVE.done&&MOVE.done(MOVE.ctx); MOVE=null; }
+}
+function triggerMove(id){
+  const m=MOVES[id]; if(!m)return;
+  fire(()=>{
+    const ctx={ persp:state.cam.persp, swirl:state.phys.swirl, follow:state.phys.follow,
+                layer:state.cam2.layer, gw:(layerOfProg('grid')||{}).w||0, sw:(layerOfProg('scatter')||{}).w||0 };
+    startMove({...m,ctx});
+    setStatus(m.name,'live');
+  }, m.name);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   8 · pool
+   ══════════════════════════════════════════════════════════════════════════ */
+let pool=[];
+function rebuildPool(){
+  const n=Math.max(1,Math.round(state.count));
+  while(pool.length<n) pool.push({ x:0,y:0,z:0, px:0,py:0,pz:0, vx:0,vy:0,vz:0, tex:0 });
+  pool.length=n;
+  /* every body carries the seeded particle-dance record the pattern bank reads
+     (id · phase · band · a point on the unit sphere · lane · axis) */
+  for(let i=0;i<n;i++) pool[i].pd=baseParticle(i,77);
+  assignFaces();
+}
+
+/* ── local interaction ────────────────────────────────────────────────────────
+   Pair tests are O(N²) and the plan budgets ~150 bodies for that (§8.5). A uniform
+   spatial hash makes the same forces survive a thousand: only neighbours within one
+   cell are ever compared, so the cost tracks density, not population.
+   Simplex-free curl: two cheap sine fields whose curl is taken analytically — enough
+   for a drifting vortex without dragging a noise implementation in. */
+const GRID=new Map();
+function cellKey(x,y,c){ return ((x/c)|0)+','+((y/c)|0); }
+function cellKey3(b,c){ return ((b.x/c)|0)+','+((b.y/c)|0)+','+((b.z/c)|0); }
+function curlAt(x,y,t){
+  /* ψ = sin(a)·cos(b); curl = (∂ψ/∂y, −∂ψ/∂x) — divergence-free by construction,
+     so bodies swirl instead of piling into sinks */
+  const a=x*1.3+t*0.21, b=y*1.3-t*0.17;
+  return { x: -Math.sin(a)*Math.sin(b)*1.3, y: -Math.cos(a)*Math.cos(b)*1.3 };
+}
+function stepPhysics(dt,t,f){
+  const P=state.phys;
+  if(!P.on) return;
+  const N=pool.length;
+
+  /* Avoidance works in the plane by default and in full depth when `dim3` is up.
+     Both are wanted: a flat field of objects nudging each other reads completely
+     differently from a volume of them, and the choice is the artistic one. */
+  const D3=P.dim3>0.5;
+  if(P.collide>0.001){
+    const c=Math.max(0.02,P.radius*2);
+    GRID.clear();
+    for(let i=0;i<N;i++){
+      const k=D3 ? cellKey3(pool[i],c) : cellKey(pool[i].x,pool[i].y,c);
+      let arr=GRID.get(k); if(!arr){ arr=[]; GRID.set(k,arr); } arr.push(i);
+    }
+    const r2=P.radius*P.radius;
+    for(const [,arr] of GRID){
+      for(let a=0;a<arr.length;a++) for(let b=a+1;b<arr.length;b++){
+        const A=pool[arr[a]], B=pool[arr[b]];
+        const dx=B.x-A.x, dy=B.y-A.y, dz=D3?(B.z-A.z):0;
+        const d2=dx*dx+dy*dy+dz*dz;
+        if(d2>r2||d2<1e-9)continue;
+        const d=Math.sqrt(d2), ov=(P.radius-d)/P.radius;
+        const nx=dx/d, ny=dy/d, nz=dz/d, push=ov*P.collide*dt*9;
+        A.vx-=nx*push; A.vy-=ny*push; if(D3)A.vz-=nz*push;
+        B.vx+=nx*push; B.vy+=ny*push; if(D3)B.vz+=nz*push;
+      }
+    }
+  }
+
+  for(let i=0;i<N;i++){
+    const b=pool[i];
+    if(P.swirl>0.001){ const c=curlAt(b.x,b.y,t);
+      b.vx+=c.x*P.swirl*dt; b.vy+=c.y*P.swirl*dt; }
+    if(P.gravity!==0) b.vy-=P.gravity*dt;
+    if(P.attract>0.001){
+      /* Magnet: pull grows the closer you get (Motion Primer `attract`, boost/(d+soft)).
+         The coefficient has to be able to BEAT the layout spring — "Магнит-дроп" (§8.3)
+         is build-up sucking everything to the centre, and a magnet the grid can out-pull
+         is not a magnet. At attract=2 / follow=3 it wins; below that they negotiate. */
+      const d=Math.hypot(b.x,b.y)+0.15, g=P.attract*dt*(6/d);
+      b.vx+=(-b.x/d)*g; b.vy+=(-b.y/d)*g;
+    }
+  }
+
+  if(P.flock>0.001){
+    /* cohesion toward the local mean, reusing the collide grid when it exists */
+    const c=Math.max(0.06,P.radius*4);
+    if(!P.collide) { GRID.clear();
+      for(let i=0;i<N;i++){ const k=cellKey(pool[i].x,pool[i].y,c);
+        let arr=GRID.get(k); if(!arr){ arr=[]; GRID.set(k,arr); } arr.push(i); } }
+    for(const [,arr] of GRID){
+      if(arr.length<2)continue;
+      let mx=0,my=0;
+      for(const i of arr){ mx+=pool[i].x; my+=pool[i].y; }
+      mx/=arr.length; my/=arr.length;
+      let mz=0; if(D3){ for(const i of arr) mz+=pool[i].z; mz/=arr.length; }
+      for(const i of arr){ const b=pool[i];
+        b.vx+=(mx-b.x)*P.flock*dt*2; b.vy+=(my-b.y)*P.flock*dt*2;
+        if(D3) b.vz+=(mz-b.z)*P.flock*dt*2; }
+    }
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   9 · audio (proven block from audio-panel.html)
+   ══════════════════════════════════════════════════════════════════════════ */
+const FFT=2048, WARM_SEC=5, WARM_BASE=0.10, WARM_AMP=0.09, WARM_RATE=3.2, WARM_PHASE=0.7;
+let core=window.makeAudioCore({sampleRate:48000,fftSize:FFT});
+let ac=null,analyser=null,srcNode=null,stream=null,fixture=null;
+let clockOn=false,armed=false,warmT0=null,last=0;
+let freq=new Uint8Array(core.binCount),time=new Uint8Array(FFT),silent=new Uint8Array(core.binCount);
+let curInput='clock';
+const nowT=()=>performance.now()/1000;
+const inSel=$('#inSel'), armBtn=$('#arm'), armNote=$('#armNote');
+
+function setStatus(msg,kind){ const t=$('#statusText'), s2=$('#status');
+  if(t)t.textContent=msg; if(s2)s2.dataset.kind=kind||'idle'; }
+const FIXON=/[?&]fix=1/.test(location.search);
+function baseOpts(){ const o=[['clock','clock — internal BPM']];
+  if(FIXON)o.push(['fix90','fixture 90'],['fix124','fixture 124'],['fix174','fixture 174']);
+  o.push(['tab','tab audio'],['sys','system audio']); return o; }
+let micUnlocked=false,unlockTried=false;
+function refreshDevices(){
+  const keep=inSel.value||curInput;
+  const fill=list=>{ inSel.innerHTML='';
+    for(const [v,l] of baseOpts()){ const o=document.createElement('option'); o.value=v; o.textContent=l; inSel.appendChild(o); }
+    for(const d of list){ const o=document.createElement('option'); o.value='dev:'+d.deviceId;
+      o.textContent=d.label||('input '+(d.deviceId||'').slice(0,6)); inSel.appendChild(o); }
+    inSel.value=[...inSel.options].some(o=>o.value===keep)?keep:'clock'; };
+  if(!(navigator.mediaDevices&&navigator.mediaDevices.enumerateDevices)){ fill([]); return; }
+  navigator.mediaDevices.enumerateDevices().then(ds=>fill(ds.filter(d=>d.kind==='audioinput'))).catch(()=>fill([]));
+}
+function unlockMicLabels(){
+  if(micUnlocked||unlockTried)return;
+  if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia))return;
+  unlockTried=true;
+  navigator.mediaDevices.getUserMedia({audio:true})
+    .then(s=>{ s.getTracks().forEach(t=>t.stop()); micUnlocked=true; refreshDevices(); })
+    .catch(()=>{ unlockTried=false; });
+}
+['mousedown','focus','keydown','touchstart'].forEach(ev=>inSel.addEventListener(ev,unlockMicLabels,{passive:true}));
+if(navigator.mediaDevices) navigator.mediaDevices.ondevicechange=refreshDevices;
+
+function ensureCtx(){ if(ac)return;
+  ac=new (window.AudioContext||window.webkitAudioContext)();
+  analyser=ac.createAnalyser(); analyser.fftSize=FFT; analyser.smoothingTimeConstant=0.5;
+  core=window.makeAudioCore({sampleRate:ac.sampleRate,fftSize:FFT});
+  freq=new Uint8Array(core.binCount); time=new Uint8Array(analyser.fftSize); silent=new Uint8Array(core.binCount); }
+function disconnect(){ if(srcNode){ try{srcNode.disconnect();}catch(_){} srcNode=null; }
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; } }
+
+function selectInput(v){
+  curInput=v; fixture=null; clockOn=false; warmT0=(v==='clock')?null:nowT();
+  if(v==='clock'){ clockOn=true; if(!core.features.beat.bpm)core.setBPM(SCRUBS.bpm.get()||120);
+    disconnect(); setStatus('clock — internal BPM','idle'); return Promise.resolve(); }
+  if(v.startsWith('fix')){ const b=+v.slice(3)||124; fixture=window.makeFixture(b,{fftSize:FFT});
+    core.auto(); disconnect(); setStatus('fixture '+b+' — synthetic click','ok'); return Promise.resolve(); }
+  ensureCtx();
+  return ac.resume().then(()=>{ disconnect();
+    if(v==='tab'||v==='sys'){
+      return navigator.mediaDevices.getDisplayMedia({audio:true,video:true}).then(s=>{
+        stream=s; s.getVideoTracks().forEach(t=>t.stop());
+        if(!s.getAudioTracks().length) throw new Error(v==='sys'
+          ? 'No audio track. Tick "Share system audio" in the picker.'
+          : 'No audio track. Tick "Share tab audio" in the picker.');
+        srcNode=ac.createMediaStreamSource(s); srcNode.connect(analyser);
+        setStatus(v==='sys'?'live · system audio':'live · tab audio','live'); });
+    }
+    const id=v.startsWith('dev:')?v.slice(4):'default';
+    const c={audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}};
+    if(id&&id!=='default')c.audio.deviceId={exact:id};
+    return navigator.mediaDevices.getUserMedia(c).then(s=>{
+      stream=s; srcNode=ac.createMediaStreamSource(s); srcNode.connect(analyser);
+      setStatus('live · '+Math.round(ac.sampleRate/1000)+' kHz','live'); refreshDevices(); });
+  });
+}
+function setArmState(s){
+  armBtn.classList.toggle('on',s==='armed'); armBtn.classList.toggle('warn',s==='failed');
+  armBtn.classList.toggle('is-disabled',s==='requesting');
+  if(s==='requesting')armBtn.dataset.busy='1'; else delete armBtn.dataset.busy;
+  armBtn.textContent=s==='armed'?'LIVE':s==='requesting'?'…':s==='failed'?'RETRY':'ARM';
+  armBtn.setAttribute('aria-pressed',s==='armed'?'true':'false');
+  armNote.textContent=s==='armed'?'Input is live. Switching source re-arms immediately.'
+    :s==='failed'?'Permission was refused or the device is busy. Nothing is listening.'
+    :'A gesture is required before the browser will start an AudioContext.';
+}
+armBtn.addEventListener('click',()=>{
+  if(armBtn.dataset.busy)return;
+  const want=inSel.value;
+  if(want==='clock'){ setStatus('clock needs no input — pick a device first','idle'); return; }
+  setArmState('requesting'); setStatus('requesting access…','idle');
+  Promise.resolve(selectInput(want)).then(()=>{ armed=true; setArmState('armed'); syncTransport(); })
+    .catch(err=>{ armed=false; setArmState('failed'); syncTransport();
+      disconnect(); clockOn=true; curInput='clock'; inSel.value='clock';
+      setStatus((err&&(err.message||err.name))||'input failed','err'); });
+});
+function syncTransport(){
+  const hasClock = clockOn || curInput.startsWith('fix') || armed;
+  const why='ARM a live input first — there is no clock yet';
+  for(const id of ['tap','auto','sync','phMinus','phPlus']){
+    const b=document.getElementById(id);
+    b.classList.toggle('is-disabled',!hasClock);
+    b.setAttribute('aria-disabled',hasClock?'false':'true');
+    b.title=hasClock?b.dataset.title:why;
+  }
+  document.querySelector('.nudge').classList.toggle('is-disabled',!hasClock);
+  SCRUBS.bpm.setDisabled(!hasClock); SCRUBS.trim.setDisabled(!hasClock);
+}
+for(const id of ['tap','auto','sync','phMinus','phPlus']){
+  const b=document.getElementById(id); b.dataset.title=b.title; }
+inSel.addEventListener('change',()=>{
+  const v=inSel.value;
+  if(v==='clock'||v.startsWith('fix')){ armed=false; setArmState('idle'); selectInput(v).then(syncTransport); }
+  else if(armed){ selectInput(v).then(syncTransport).catch(err=>{ armed=false; setArmState('failed');
+    syncTransport(); setStatus((err&&(err.message||err.name))||'input failed','err'); }); }
+  else { setArmState('idle'); setStatus('press ARM to open '+v,'idle'); syncTransport(); }
+});
+
+const METERS=[['band.sub','sub'],['band.bass','bass'],['band.lowmid','lo-mid'],
+  ['band.mid','mid'],['band.highmid','hi-mid'],['band.treble','treble'],
+  ['rms','rms'],['flux','flux'],['onset','onset'],['beat.sine','beat']];
+const ACCENT_M={onset:1,'beat.sine':1};
+const mEls=[];
+(function(){ const host=$('#meters');
+  for(const [id,label] of METERS){
+    const l=document.createElement('div'); l.className='ml'; l.textContent=label;
+    const t=document.createElement('div'); t.className='mt'+(ACCENT_M[id]?' a':'');
+    const i=document.createElement('i'); t.appendChild(i); host.append(l,t); mEls.push(i); } })();
+
+/* spectrum */
+const spec=$('#spec'), specx=spec.getContext('2d');
+const F_MIN=20,F_MAX=16000;
+let peaks=null,sW=0,sH=0;
+function resizeSpec(){
+  const dpr=Math.min(2,devicePixelRatio||1), r=spec.getBoundingClientRect();
+  sW=Math.max(1,Math.round(r.width)); sH=Math.max(1,Math.round(r.height));
+  spec.width=Math.round(sW*dpr); spec.height=Math.round(sH*dpr);
+  specx.setTransform(dpr,0,0,dpr,0,0); peaks=new Float32Array(sW);
+}
+const cssVar=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let COL={};
+function readColours(){ COL={blue:cssVar('--blue'),yellow:cssVar('--yellow'),red:cssVar('--red'),
+  line:cssVar('--line'),muted:cssVar('--muted')}; }
+function drawSpec(bins,binHz,live){
+  if(!peaks)return;
+  specx.clearRect(0,0,sW,sH);
+  const lmin=Math.log10(F_MIN), lspan=Math.log10(F_MAX)-lmin;
+  const col=new Float32Array(sW);
+  for(let i=1;i<bins.length;i++){
+    const hz=i*binHz; if(hz<F_MIN||hz>F_MAX)continue;
+    const x=Math.floor(((Math.log10(hz)-lmin)/lspan)*(sW-1));
+    const v=bins[i]/255; if(v>col[x])col[x]=v;
+  }
+  for(let x=1;x<sW;x++) if(col[x]===0) col[x]=col[x-1]*0.86;
+  const g=specx.createLinearGradient(0,0,sW,0);
+  g.addColorStop(0,COL.blue); g.addColorStop(0.55,COL.yellow); g.addColorStop(1,COL.red);
+  specx.fillStyle=g; specx.globalAlpha=live?1:0.45;
+  for(let x=0;x<sW;x++){ const h=col[x]*(sH-2); if(h>0.5)specx.fillRect(x,sH-h,1,h);
+    peaks[x]=Math.max(col[x],peaks[x]-0.006); }
+  specx.globalAlpha=live?0.55:0.25; specx.fillStyle=COL.muted;
+  for(let x=0;x<sW;x++){ if(peaks[x]>0.02)specx.fillRect(x,sH-peaks[x]*(sH-2),1,1); }
+  specx.globalAlpha=1; specx.fillStyle=COL.line;
+  for(const b of (window.AC_BANDS||[])){ const lo=b[1]; if(lo<=F_MIN)continue;
+    specx.fillRect(Math.round(((Math.log10(lo)-lmin)/lspan)*(sW-1)),0,1,sH); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   10 · post — one WebGL pass over the finished 2D frame, no FBO.
+   Pattern lifted from Synthex Engine v1 (:2988–3189): the 2D canvas itself is
+   the texture. Off at 0: the GL canvas is hidden and nothing is uploaded.
+   ══════════════════════════════════════════════════════════════════════════ */
+const glcv=$('#glcv');
+let gl=null,glProg=null,glTex=null,glFail=false,glU={};
+const VS='attribute vec2 p;varying vec2 vUv;void main(){vUv=p*0.5+0.5;gl_Position=vec4(p,0.0,1.0);}';
+const FS=`precision highp float;varying vec2 vUv;uniform sampler2D uTex;
+uniform vec2 uRes;uniform float uAmt,uAng;
+void main(){vec2 uv=vUv;vec3 col;
+  float a=uAmt;
+  if(a>0.001){
+    float ar=uRes.x/uRes.y;
+    vec2 ab=a*vec2(0.1*sin(uAng)*ar,0.1*cos(uAng))*distance(uv,vec2(0.5))*2.0;
+    vec3 r3=vec3(0.0),g3=vec3(0.0),b3=vec3(0.0);
+    for(int i=1;i<=12;i++){ float fi=float(i)/12.0; vec2 o=ab*fi;
+      r3+=texture2D(uTex,clamp(uv-o,0.0,1.0)).rgb/12.0;
+      b3+=texture2D(uTex,clamp(uv+o,0.0,1.0)).rgb/12.0;
+      g3+=texture2D(uTex,clamp(uv+ab*(fi-0.5),0.0,1.0)).rgb/12.0; }
+    col=vec3(r3.r,g3.g,b3.b);
+  } else col=texture2D(uTex,uv).rgb;
+  gl_FragColor=vec4(col,1.0);}`;
+function initGL(){
+  if(gl||glFail)return;
+  try{
+    gl=glcv.getContext('webgl',{premultipliedAlpha:false,antialias:false});
+    if(!gl){ glFail=true; return; }
+    const sh=(t,s)=>{ const o=gl.createShader(t); gl.shaderSource(o,s); gl.compileShader(o);
+      if(!gl.getShaderParameter(o,gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+    glProg=gl.createProgram();
+    gl.attachShader(glProg,sh(gl.VERTEX_SHADER,VS));
+    gl.attachShader(glProg,sh(gl.FRAGMENT_SHADER,FS));
+    gl.linkProgram(glProg);
+    if(!gl.getProgramParameter(glProg,gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(glProg));
+    gl.useProgram(glProg);
+    const buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,1,1]),gl.STATIC_DRAW);
+    const loc=gl.getAttribLocation(glProg,'p');
+    gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc,2,gl.FLOAT,false,0,0);
+    glTex=gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D,glTex);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.LINEAR);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL,true);
+    for(const u of ['uTex','uRes','uAmt','uAng']) glU[u]=gl.getUniformLocation(glProg,u);
+  }catch(e){ glFail=true; gl=null; }
+}
+function runPost(){
+  const amt=state.post.chroma;
+  if(amt<=0.001||glFail){ glcv.style.display='none'; return; }
+  initGL(); if(!gl){ glcv.style.display='none'; return; }
+  if(glcv.width!==cv.width||glcv.height!==cv.height){ glcv.width=cv.width; glcv.height=cv.height; }
+  gl.viewport(0,0,glcv.width,glcv.height);
+  gl.bindTexture(gl.TEXTURE_2D,glTex);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,cv);
+  gl.uniform1i(glU.uTex,0);
+  gl.uniform2f(glU.uRes,glcv.width,glcv.height);
+  gl.uniform1f(glU.uAmt,amt);
+  gl.uniform1f(glU.uAng,state.post.chromaAng*Math.PI/180);
+  gl.drawArrays(gl.TRIANGLE_STRIP,0,4);
+  glcv.style.display='block';
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   10b · scenes
+
+   Migration follows the EQJ pattern that actually worked (mvj-inject:883): build a
+   FRESH default, then Object.assign the stored data over it. A scene saved before a
+   field existed comes back with that field's default instead of `undefined`.
+   The version field is READ here — EQJ wrote `v:4` into a store keyed `_v2` and never
+   looked at it again (§10.4), which is a migration that does not exist.
+   ══════════════════════════════════════════════════════════════════════════ */
+const SCENE_V=1, LS='bryk_scenes_v1';
+function captureScene(){
+  return { v:SCENE_V,
+    shapes:{...state.shapes}, assetW:state.assetW, assetTint:state.assetTint,
+    camW:state.camW, cam2:{...state.cam2}, mixSeed:state.mixSeed,
+    count:state.count, size:state.size, radius:state.radius, stroke:state.stroke, face:state.face,
+    cam:{...state.cam}, bgL:state.bgL, hueDrift:state.hueDrift,
+    post:{...state.post}, phys:{...state.phys},
+    stops:state.stops.map(s=>({...s})),
+    formation:{...state.formation},
+    layers:layers.map(L=>({prog:L.prog,variant:L.variant,label:L.label,w:L.w,muted:L.muted,
+      solo:L.solo,share:L.share,seed:L.seed,params:{...L.params},rows:L.matrix.map(r=>({...r}))})),
+    active:activeId,
+
+    quant:QUANT };
+}
+function applyScene(sc){
+  if(!sc)return;
+  if(sc.v!==SCENE_V) setStatus('scene v'+sc.v+' loaded into v'+SCENE_V+' — missing fields defaulted','ok');
+  const def=captureScene();                     /* fresh defaults, then the stored data over them */
+  /* mutate the EXISTING objects rather than replacing them: replacing orphans any
+     reference the panel or the engine already holds */
+  const m=(a,b)=>Object.assign(a,b||{});
+  state.shapes=m(def.shapes,sc.shapes);
+  state.cam2=m(def.cam2,sc.cam2);
+  state.cam=m(def.cam,sc.cam);
+  state.post=m(def.post,sc.post);
+  state.phys=m(def.phys,sc.phys);
+  state.formation=m(def.formation,sc.formation);
+  for(const k of ['assetW','assetTint','camW','mixSeed','count','size','radius','stroke','face','bgL','hueDrift'])
+    if(sc[k]!=null) state[k]=sc[k];
+  if(Array.isArray(sc.stops)&&sc.stops.length>=2) state.stops=sc.stops.map(s=>({...s}));
+  if(Array.isArray(sc.layers)){
+    layers=[]; uid=0;
+    /* bottom-first, because addLayer unshifts (EQJ applyScene :911) */
+    for(const ls of sc.layers.slice().reverse()){
+      if(!PROGRAMS[ls.prog])continue;
+      const L=makeLayer(ls.prog,ls.variant);
+      Object.assign(L,{label:ls.label??L.label,w:ls.w??1,muted:!!ls.muted,solo:!!ls.solo,
+        share:ls.share??1,seed:ls.seed??L.seed});
+      Object.assign(L.params,ls.params||{});
+      L.matrix=(ls.rows||[]).map(r=>({...r}));
+      layers.unshift(L);
+    }
+    activeId=sc.active && layers.some(L=>L.id===sc.active) ? sc.active : (layers[0]?layers[0].id:null);
+    focusLayer();
+  }
+  if(sc.quant) QUANT=sc.quant;
+  formKey='';
+  buildRamp(); buildStops(); rebuildPool(); rebuildTextures();
+  renderLayers(); buildMatrix(); syncAllScrubs();
+  document.body.classList.toggle('camover',!!state.cam2.over);
+}
+let banks=[]; try{ banks=JSON.parse(localStorage.getItem(LS))||[]; }catch(_){ banks=[]; }
+banks.length=8;
+let saveMode=false;
+function buildBanks(){
+  const host=$('#banks'); host.innerHTML='';
+  for(let i=0;i<8;i++){
+    const b=document.createElement('button');
+    b.className='btn'+(banks[i]?' on':''); b.textContent=String(i+1);
+    b.title=banks[i]?('scene '+(i+1)+(saveMode?' — overwrite':' — recall')):('slot '+(i+1)+(saveMode?' — save':' — empty'));
+    b.addEventListener('click',()=>{
+      if(saveMode){ banks[i]=captureScene();
+        let okS=true; try{ localStorage.setItem(LS,JSON.stringify(banks)); }catch(_){ okS=false; }
+        setStatus(okS?('scene '+(i+1)+' saved'):('slot '+(i+1)+' held in memory — too big for storage, export it'),okS?'ok':'err');
+        saveMode=false; buildBanks();
+      } else if(banks[i]){ fire(()=>{ applyScene(banks[i]); setStatus('scene '+(i+1),'live'); },'scene '+(i+1)); }
+      else setStatus('slot '+(i+1)+' is empty — press SAVE first','idle');
+    });
+    host.appendChild(b);
+  }
+  $('#saveBtn').classList.toggle('on',saveMode);
+  $('#saveBtn').textContent=saveMode?'PICK A SLOT':'SAVE';
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   10c · mod rack (level 2) — a UI over the Param contract that already sums
+   ══════════════════════════════════════════════════════════════════════════ */
+const FEATURES=[['env.bassFast','bass ⚡'],['env.bassSlow','bass ~'],['env.midFast','mid ⚡'],
+  ['env.midSlow','mid ~'],['env.highFast','high ⚡'],['env.highSlow','high ~'],
+  ['band.sub','band sub'],['band.bass','band bass'],['band.mid','band mid'],['band.treble','band treble'],
+  ['rms','rms'],['env.rmsSlow','rms ~'],['flux','flux'],['onset','onset'],
+  ['beat.phase','beat ◔'],['beat.sine','beat ∿'],['beat.pulse','beat ●']];
+const CURVES=[['lin','lin'],['exp','exp'],['sqrt','sqrt'],['ease','ease'],['gate','gate'],['inv','inv']];
+const RMODES=[['up','up'],['bi','± bi']];
+function mkSel(opts,val,on){
+  const s=document.createElement('select'); s.className='tinSelect';
+  for(const [v,l] of opts){ const o=document.createElement('option'); o.value=v; o.textContent=l;
+    if(v===val)o.selected=true; s.appendChild(o); }
+  s.addEventListener('change',()=>on(s.value)); return s;
+}
+function buildMatrix(){
+  const host=$('#rack'); if(!host)return;
+  host.innerHTML='';
+  const rl=$('#rackLayer'); if(rl) rl.textContent=activeLayer()?('▸ '+activeLayer().label):'— no layer';
+  if(!activeLayer()){ const n=document.createElement('p'); n.className='note';
+    n.textContent='Add a layer first — a mapping row belongs to a layer.'; host.appendChild(n); return; }
+  matrix.forEach((r,i)=>{
+    const card=document.createElement('div'); card.className='mcard open';
+    const hd=document.createElement('div'); hd.className='mhd';
+    hd.appendChild(mkSel(FEATURES,r.feat,v=>{ r.feat=v; }));
+    hd.appendChild(mkSel(paramsOf(activeLayer()).map(p=>[p.key,p.label]),r.path,v=>{
+      BASES.delete(r.path); r.path=v; }));
+    const del=document.createElement('button'); del.className='mtgl x'; del.textContent='✕';
+    del.title='Remove row';
+    del.addEventListener('click',()=>{ matrix.splice(i,1); BASES.clear(); buildMatrix(); });
+    hd.appendChild(del); card.appendChild(hd);
+    const row=document.createElement('div'); row.className='row';
+    const lb=document.createElement('label'); lb.textContent='depth';
+    const slot=document.createElement('span'); row.append(lb,slot); card.appendChild(row);
+    const sc=mkScrub({min:-1,max:1,step:0.01,value:r.depth,allowExtend:true,
+      label:'depth',onInput:v=>r.depth=v});
+    slot.appendChild(sc.el);
+    const row2=document.createElement('div'); row2.className='row';
+    const lb2=document.createElement('label'); lb2.textContent='curve · mode';
+    const sl2=document.createElement('span'); sl2.style.display='flex'; sl2.style.gap='4px';
+    sl2.appendChild(mkSel(CURVES,r.curve,v=>r.curve=v));
+    sl2.appendChild(mkSel(RMODES,r.mode,v=>r.mode=v));
+    row2.append(lb2,sl2); card.appendChild(row2);
+    host.appendChild(card);
+  });
+}
+
+function syncAllScrubs(){
+  const map={ count:state.count, size:state.size, radius:state.radius, stroke:state.stroke,
+    face:state.face, persp:state.cam.persp, zoom:state.cam.zoom, tilt:state.cam.tilt,
+    spin:state.cam.spin, bgL:state.bgL, hueDrift:state.hueDrift,
+    chroma:state.post.chroma, chromaAng:state.post.chromaAng,
+    wRect:state.shapes.rect, wCircle:state.shapes.circle, wTri:state.shapes.tri,
+    wAsset:state.assetW, assetTint:state.assetTint, camW:state.camW,
+    camLayer:state.cam2.layer, camOver:state.cam2.over, camMirror:state.cam2.mirror,
+    camDuo:state.cam2.duotone, camContrast:state.cam2.contrast, camGain:state.cam2.gain,
+    physOn:state.phys.on, follow:state.phys.follow, damp:state.phys.damp,
+    collide:state.phys.collide, pradius:state.phys.radius, swirl:state.phys.swirl,
+    attract:state.phys.attract, gravity:state.phys.gravity, flock:state.phys.flock };
+  for(const k in map){ const s=SCRUBS[k]; if(s)s.set(map[k]); }
+  renderLayers();
+  const fi=$('#fText'); if(fi)fi.value=state.formation.text;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   11 · panel wiring
+   ══════════════════════════════════════════════════════════════════════════ */
+mount('bpm',{min:40,max:220,step:0.5,value:120,allowExtend:true,label:'BPM',onInput:v=>core.setBPM(v||120)});
+mount('trim',{min:-6,max:6,step:0.1,value:0,allowExtend:true,label:'Tempo trim',
+  onInput:v=>{ core.setTrim(v); if(Math.abs(v)>0.001) setStatus('trim '+(v>0?'+':'')+v.toFixed(1)+' BPM — detection still running','live'); }});
+const PHASE_STEP=0.02;
+const shiftPhase=d=>core.shift(d);
+$('#phMinus').addEventListener('click',()=>shiftPhase(-PHASE_STEP));
+$('#phPlus').addEventListener('click',()=>shiftPhase(+PHASE_STEP));
+const phFill=$('#phBar').firstElementChild;
+$('#tap').addEventListener('click',()=>core.tap(nowT()));
+$('#auto').addEventListener('click',()=>{ core.auto(); SCRUBS.trim.set(0); setStatus('clock handed back to the detector','ok'); });
+$('#sync').addEventListener('click',()=>{ core.resync(); setStatus('downbeat reset to now','ok'); });
+
+mount('count',{min:8,max:600,step:1,value:state.count,allowExtend:true,label:'Count',
+  onInput:v=>{ state.count=v; rebuildPool(); }});
+mount('size',{min:8,max:120,step:1,value:state.size,allowExtend:true,label:'Size',
+  onInput:v=>{ state.size=v; rebase('size',v); }});
+mount('radius',{min:0,max:50,step:1,value:state.radius,label:'Corner radius',
+  onInput:v=>{ state.radius=v; rebuildTextures(); }});
+mount('stroke',{min:0,max:1,step:1,value:state.stroke,label:'Outline only',
+  onInput:v=>{ state.stroke=v; rebuildTextures(); }});
+mount('varSize',{min:0,max:1,step:0.01,value:state.varSize,label:'Size variation',
+  onInput:v=>state.varSize=v});
+mount('varTilt',{min:0,max:1,step:0.01,value:state.varTilt,label:'Tilt variation',
+  onInput:v=>state.varTilt=v});
+mount('face',{min:0,max:1,step:0.01,value:state.face,label:'Face heading',
+  onInput:v=>{ state.face=v; rebase('face',v); }});
+mount('persp',{min:0,max:1.2,step:0.01,value:state.cam.persp,allowExtend:true,label:'Perspective',
+  onInput:v=>{ state.cam.persp=v; rebase('cam.persp',v); }});
+mount('zoom',{min:0.4,max:2.4,step:0.01,value:state.cam.zoom,allowExtend:true,label:'Zoom',
+  onInput:v=>{ state.cam.zoom=v; rebase('cam.zoom',v); }});
+mount('tilt',{min:-1,max:1,step:0.01,value:state.cam.tilt,allowExtend:true,label:'Tilt',
+  onInput:v=>{ state.cam.tilt=v; rebase('cam.tilt',v); }});
+mount('spin',{min:-0.5,max:0.5,step:0.005,value:state.cam.spin,allowExtend:true,label:'Auto spin',
+  onInput:v=>state.cam.spin=v});
+mount('bgL',{min:0.05,max:0.4,step:0.005,value:state.bgL,label:'Background lightness',
+  onInput:v=>{ state.bgL=v; document.documentElement.style.setProperty('--bg','oklch('+v+' 0.012 265)'); }});
+mount('hueDrift',{min:0,max:1,step:0.01,value:state.hueDrift,label:'Hue drift',
+  onInput:v=>{ state.hueDrift=v; rebase('hueDrift',v); }});
+mount('chroma',{min:0,max:1,step:0.01,value:0,label:'Chromatic aberration',
+  onInput:v=>state.post.chroma=v});
+mount('chromaAng',{min:0,max:360,step:1,value:0,label:'Aberration angle',
+  onInput:v=>state.post.chromaAng=v});
+
+/* ── shape mix ── */
+const mixRow=(slot,key,label)=>mount(slot,{min:0,max:3,step:0.05,value:state.shapes[key],
+  allowExtend:true,label:label,onInput:v=>{ state.shapes[key]=v; rebuildTextures(); }});
+mixRow('wTri','tri','triangle weight');
+mixRow('wWedge','wedge','wedge weight');
+mixRow('wCircle','circle','circle weight');
+mixRow('wTri','tri','triangle weight');
+mount('wAsset',{min:0,max:3,step:0.05,value:state.assetW,allowExtend:true,label:'asset weight',
+  onInput:v=>{ state.assetW=v; rebuildTextures(); }});
+mount('assetTint',{min:0,max:1,step:0.01,value:state.assetTint,label:'asset tint',
+  onInput:v=>{ state.assetTint=v; rebuildTextures(); }});
+$('#reroll').addEventListener('click',rerollMix);
+
+/* ── assets: drop anywhere, or the button ── */
+const assetNote=$('#assetNote');
+function noteAssets(){
+  assetNote.textContent = ASSETS.length
+    ? ASSETS.length+' asset'+(ASSETS.length>1?'s':'')+' in the mix — raise "dropped assets" to see them.'
+    : 'No assets — primitives only.';
+}
+function addFiles(list){
+  const files=[...list].filter(f=>/^image\//.test(f.type));
+  if(!files.length)return;
+  let pending=files.length;
+  const done=()=>{ if(--pending===0){ rebuildTextures(); noteAssets(); } };
+  for(const f of files){
+    const url=URL.createObjectURL(f);
+    const im=new Image();
+    /* SVG without width/height reports naturalWidth 0, which used to produce a NaN
+       aspect and a dead texture in the shuffler — give it a size before rasterising. */
+    im.onload=()=>{ if(!im.naturalWidth||!im.naturalHeight){ im.width=512; im.height=512; }
+      ASSETS.push(im); URL.revokeObjectURL(url); done(); };
+    im.onerror=()=>{ URL.revokeObjectURL(url); done(); };
+    if(/svg/.test(f.type)) { im.width=512; im.height=512; }
+    im.src=url;
+  }
+}
+$('#fileIn').addEventListener('change',e=>{ addFiles(e.target.files); e.target.value=''; });
+$('#dropBtn').addEventListener('click',()=>$('#fileIn').click());
+$('#clearAssets').addEventListener('click',()=>{ ASSETS=[]; rebuildTextures(); noteAssets(); });
+let dragDepth=0;
+addEventListener('dragenter',e=>{ e.preventDefault(); dragDepth++; document.body.classList.add('dragging'); });
+addEventListener('dragover',e=>e.preventDefault());
+addEventListener('dragleave',()=>{ if(--dragDepth<=0){ dragDepth=0; document.body.classList.remove('dragging'); } });
+addEventListener('drop',e=>{ e.preventDefault(); dragDepth=0; document.body.classList.remove('dragging');
+  if(e.dataTransfer&&e.dataTransfer.files) addFiles(e.dataTransfer.files); });
+
+/* ── physics ──
+   No captured reference: applyScene REPLACES state.phys, and a captured object would
+   leave every slider writing into an orphan after the first scene recall. */
+mount('physOn',{min:0,max:1,step:1,value:state.phys.on,label:'Physics on',
+  onInput:v=>{ state.phys.on=v; if(!v) for(const b of pool){ b.vx=b.vy=b.vz=0; } }});
+mount('dim3',{min:0,max:1,step:1,value:state.phys.dim3,label:'Interact in 3D',onInput:v=>state.phys.dim3=v});
+mount('follow',{min:0.5,max:20,step:0.1,value:state.phys.follow,allowExtend:true,label:'Follow',onInput:v=>state.phys.follow=v});
+mount('damp',{min:0.5,max:0.99,step:0.005,value:state.phys.damp,label:'Damping',onInput:v=>state.phys.damp=v});
+mount('collide',{min:0,max:2,step:0.01,value:state.phys.collide,allowExtend:true,label:'Collide',onInput:v=>state.phys.collide=v});
+mount('pradius',{min:0.02,max:0.4,step:0.005,value:state.phys.radius,allowExtend:true,label:'Body radius',onInput:v=>state.phys.radius=v});
+mount('swirl',{min:0,max:3,step:0.01,value:state.phys.swirl,allowExtend:true,label:'Swirl',onInput:v=>state.phys.swirl=v});
+mount('attract',{min:0,max:3,step:0.01,value:state.phys.attract,allowExtend:true,label:'Attract',onInput:v=>state.phys.attract=v});
+mount('gravity',{min:-3,max:3,step:0.01,value:state.phys.gravity,allowExtend:true,label:'Gravity',onInput:v=>state.phys.gravity=v});
+mount('flock',{min:0,max:2,step:0.01,value:state.phys.flock,allowExtend:true,label:'Flock',onInput:v=>state.phys.flock=v});
+
+/* ── viewport: drag to orbit, wheel to zoom (image-shuffler bindUi:867–871) ──────
+   The stage is a control, not a picture. Ported from the shuffler, with one required
+   change: yaw/tilt/zoom are MODULATED parameters here, so a direct `state.cam.yaw +=`
+   is undone by restoreMatrix one frame later — every write goes through setDriven so
+   the base moves with the hand. */
+(function bindViewport(){
+  const stage=$('#stage');
+  let drag=false, lx=0, ly=0, moved=0;
+  stage.style.cursor='grab';
+  stage.addEventListener('pointerdown',e=>{
+    if(e.target.closest('#corner'))return;
+    drag=true; moved=0; lx=e.clientX; ly=e.clientY;
+    stage.setPointerCapture(e.pointerId); stage.style.cursor='grabbing';
+  });
+  stage.addEventListener('pointermove',e=>{
+    if(!drag)return;
+    const dx=e.clientX-lx, dy=e.clientY-ly; lx=e.clientX; ly=e.clientY;
+    moved+=Math.abs(dx)+Math.abs(dy);
+    setDriven('cam.yaw',  state.cam.yaw + dx*0.006);
+    setDriven('cam.tilt', clamp(state.cam.tilt - dy*0.006, -1.4, 1.4));
+    SCRUBS.tilt.set(state.cam.tilt);
+  });
+  const end=()=>{ if(!drag)return; drag=false; stage.style.cursor='grab'; };
+  stage.addEventListener('pointerup',end);
+  stage.addEventListener('lostpointercapture',end);
+  stage.addEventListener('wheel',e=>{
+    e.preventDefault();
+    setDriven('cam.zoom', clamp(state.cam.zoom*(e.deltaY>0?0.94:1.06), 0.2, 6));
+    SCRUBS.zoom.set(state.cam.zoom);
+  },{passive:false});
+  /* double-click resets the view — a viewport you can lose is a viewport you avoid */
+  stage.addEventListener('dblclick',()=>{
+    setDriven('cam.yaw',0); setDriven('cam.tilt',0.1); setDriven('cam.zoom',1);
+    SCRUBS.tilt.set(0.1); SCRUBS.zoom.set(1);
+    setStatus('view reset','ok');
+  });
+})();
+
+/* ── camera wiring ── */
+const camNote=$('#camNote'), camBtn=$('#camBtn');
+function camNoteText(){
+  camNote.textContent = CAM.fail ? CAM.fail
+    : CAM.on ? 'Live. Raise "In shapes" to cut the video with the primitives, or "As layer" for a full frame.'
+    : 'No camera. Shapes fall back to palette fills — no black holes.';
+  camBtn.textContent = CAM.on ? 'STOP' : 'OPEN';
+  camBtn.classList.toggle('on',CAM.on);
+  camBtn.classList.toggle('warn',!!CAM.fail);
+  for(const k of ['camW','camLayer','camOver','camMirror','camDuo','camContrast','camGain'])
+    if(SCRUBS[k]) SCRUBS[k].setDisabled(!CAM.on);
+  const bl=$('#camBlend'); if(bl) bl.disabled=!CAM.on;
+}
+camBtn.addEventListener('click',()=>{
+  if(CAM.on){ camStop(); camNoteText(); return; }
+  camBtn.textContent='…'; CAM.fail='';
+  camStart($('#camSel').value).then(camNoteText).catch(err=>{
+    CAM.fail='Camera refused or busy: '+(err&&(err.message||err.name)||'unknown')+'. Nothing is showing.';
+    CAM.on=false; camNoteText();
+  });
+});
+$('#camSel').addEventListener('change',()=>{ if(CAM.on){ camStop(); camStart($('#camSel').value).then(camNoteText)
+  .catch(()=>{ CAM.fail='Could not switch camera.'; camNoteText(); }); } });
+['mousedown','focus','keydown','touchstart'].forEach(ev=>$('#camSel').addEventListener(ev,refreshCams,{passive:true}));
+mount('camW',{min:0,max:3,step:0.05,value:state.camW,allowExtend:true,label:'Camera in shapes',
+  onInput:v=>{ state.camW=v; rebuildTextures(); }});
+mount('camLayer',{min:0,max:1,step:0.01,value:state.cam2.layer,label:'Camera layer',
+  onInput:v=>state.cam2.layer=v});
+mount('camOver',{min:0,max:1,step:1,value:state.cam2.over,label:'Camera over geometry',
+  onInput:v=>{ state.cam2.over=v; document.body.classList.toggle('camover',!!v); }});
+mount('camMirror',{min:0,max:1,step:1,value:state.cam2.mirror,label:'Mirror camera',
+  onInput:v=>state.cam2.mirror=v});
+mount('camDuo',{min:0,max:1,step:0.01,value:state.cam2.duotone,label:'Camera duotone',
+  onInput:v=>state.cam2.duotone=v});
+mount('camContrast',{min:0,max:1.5,step:0.01,value:state.cam2.contrast,allowExtend:true,label:'Camera contrast',
+  onInput:v=>state.cam2.contrast=v});
+mount('camGain',{min:0,max:1.5,step:0.01,value:state.cam2.gain,allowExtend:true,label:'Camera gain',
+  onInput:v=>state.cam2.gain=v});
+$('#camBlend').addEventListener('change',e=>state.cam2.blend=e.target.value);
+refreshCams(); camNoteText();
+
+/* ── add-layer bar: one button per program (EQJ engine library :727) ── */
+(function(){ const bar=$('#addLayerBar'); if(!bar)return;
+  for(const key of Object.keys(PROGRAMS)){
+    const b=document.createElement('button'); b.className='btn';
+    b.textContent='+ '+PROGRAMS[key].label.split(' · ')[0];
+    b.title='Add a '+PROGRAMS[key].label+' layer';
+    b.addEventListener('click',()=>{ addLayer(key); setStatus('layer added · '+PROGRAMS[key].label,'ok'); });
+    bar.appendChild(b);
+  } })();
+
+/* ── behaviours + manners (Motion Primer) ── */
+for(const [sel,table,fn] of [['#behSel',BEHAVIOURS,applyBehaviour],['#mannerSel',MANNERS,applyManner]]){
+  const el=$(sel);
+  for(const k of Object.keys(table)){ const o=document.createElement('option');
+    o.value=k; o.textContent=k; el.appendChild(o); }
+  el.addEventListener('change',()=>{ if(el.value) fire(()=>fn(el.value), el.value); });
+}
+
+/* ── moves · quantise · scenes · rack ── */
+document.querySelector('#gMoves .seg').addEventListener('click',e=>{
+  const b=e.target.closest('[data-move]'); if(b) triggerMove(b.dataset.move);
+});
+$('#quantSel').addEventListener('change',e=>{ QUANT=e.target.value;
+  setStatus('quantise · '+QUANT,'idle'); });
+let autoRoll=0;
+mount('autoRoll',{min:0,max:1,step:1,value:0,label:'Auto-randomise on bar',onInput:v=>autoRoll=v});
+
+buildBanks();
+$('#saveBtn').addEventListener('click',()=>{ saveMode=!saveMode; buildBanks();
+  setStatus(saveMode?'pick a slot to save into':'','idle'); });
+$('#expBtn').addEventListener('click',()=>{
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(captureScene(),null,2)],{type:'application/json'}));
+  a.download='bryk-scene.json'; a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+});
+$('#impBtn').addEventListener('click',()=>$('#sceneFile').click());
+$('#sceneFile').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{ try{ applyScene(JSON.parse(rd.result)); setStatus('scene imported','ok'); }
+    catch(err){ setStatus('bad scene file: '+err.message,'err'); } };
+  rd.readAsText(f); e.target.value='';
+});
+$('#addRow').addEventListener('click',()=>{
+  matrix.push({ feat:'env.bassFast', path:paramsOf(activeLayer())[0].key, mode:'up', depth:0.15, curve:'lin' });
+  buildMatrix();
+});
+buildMatrix();
+
+/* collapsible groups */
+document.querySelectorAll('legend[data-toggle]').forEach(l=>{
+  const fs=l.parentElement;
+  l.tabIndex=0; l.setAttribute('role','button');
+  l.setAttribute('aria-expanded', fs.classList.contains('closed')?'false':'true');
+  const t=()=>{ const closed=fs.classList.toggle('closed');
+    l.setAttribute('aria-expanded',closed?'false':'true'); if(!closed)resizeSpec(); };
+  l.addEventListener('click',t);
+  l.addEventListener('keydown',e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); t(); } });
+});
+
+/* mode cards */
+/* ── layer stack UI — EQJ `.lrow` grammar (mvj-inject:628–635) ─────────────────
+   Row 1: number · name (click = focus, dbl = rename) · ▲ ▼ ⧉ ✕
+   Row 2: variant ▾ · PRESENCE · hide · solo
+   Row 3 (open): share + the program's own declared params. */
+function renderLayers(){
+  const host=$('#layers'); if(!host)return;
+  host.innerHTML='';
+  layers.forEach((L,idx)=>{
+    const d=document.createElement('div');
+    d.className='lrow'+(L.id===activeId?' act':'')+(L.muted?' mut':'')+(L.open?' open':'');
+
+    const r1=document.createElement('div'); r1.className='l1';
+    const nm=document.createElement('button'); nm.className='lname';
+    nm.innerHTML='<span class="ln">'+(idx+1)+'</span> · <b></b>';
+    nm.querySelector('b').textContent=L.label;
+    nm.title='Click to focus · double-click to rename';
+    nm.addEventListener('click',()=>{ focusLayer(L.id); L.open=!L.open; renderLayers(); buildMatrix(); });
+    nm.addEventListener('dblclick',e=>{ e.stopPropagation();
+      const v=prompt('Layer name',L.label); if(v!=null&&v.trim()){ L.label=v.trim(); renderLayers(); buildMatrix(); } });
+    const ctl=document.createElement('span'); ctl.className='lctl';
+    for(const [cls,txt,lbl,fn] of [
+      ['lup','▲','Move layer up',()=>moveLayer(L.id,-1)],
+      ['ldn','▼','Move layer down',()=>moveLayer(L.id,1)],
+      ['ldup','⧉','Duplicate layer',()=>duplicateLayer(L.id)],
+      ['lx','✕','Remove layer',()=>removeLayer(L.id)]]){
+      const b=document.createElement('button'); b.className='ltiny '+cls; b.textContent=txt;
+      b.title=lbl; b.setAttribute('aria-label',lbl+' '+L.label);
+      b.addEventListener('click',e=>{ e.stopPropagation(); fn(); }); ctl.appendChild(b);
+    }
+    r1.append(nm,ctl); d.appendChild(r1);
+
+    const r2=document.createElement('div'); r2.className='l2';
+    const P=PROGRAMS[L.prog];
+    if(P.variants){
+      const sel=document.createElement('select'); sel.className='tinSelect';
+      sel.setAttribute('aria-label',L.label+' variant');
+      for(const [v,l] of P.variants){ const o=document.createElement('option');
+        o.value=v; o.textContent=l; if(v===L.variant)o.selected=true; sel.appendChild(o); }
+      sel.addEventListener('change',()=>{ L.variant=sel.value;
+        L.label=P.label+' · '+sel.value; renderLayers(); });
+      r2.appendChild(sel);
+    } else { const sp=document.createElement('span'); sp.className='lprog';
+      sp.textContent=P.label; r2.appendChild(sp); }
+    const lop=document.createElement('span'); lop.className='lop'; r2.appendChild(lop);
+    for(const [cls,txt,lbl,get,fn] of [
+      ['lhide','hide','Mute',()=>L.muted,()=>{ L.muted=!L.muted; if(L.muted)L.solo=false; }],
+      ['lsolo','solo','Solo',()=>L.solo,()=>{ L.solo=!L.solo; if(L.solo)L.muted=false; }]]){
+      const b=document.createElement('button'); b.className='ltog '+cls+(get()?' on':'');
+      b.textContent=txt; b.setAttribute('aria-label',lbl+' '+L.label);
+      b.setAttribute('aria-pressed',get()?'true':'false');
+      b.addEventListener('click',e=>{ e.stopPropagation(); fn(); renderLayers(); }); r2.appendChild(b);
+    }
+    d.appendChild(r2);
+
+    const sc=mkScrub({min:0,max:1,step:0.01,value:L.w,label:L.label+' presence',
+      onInput:v=>{ L.w=v; }});
+    lop.appendChild(sc.el); SCRUBS['w_'+L.id]=sc;
+
+    if(L.open){
+      const box=document.createElement('div'); box.className='lparams';
+      const rows=[{key:'share',label:'share',min:0,max:1,step:0.01,
+                   get:()=>L.share,set:v=>L.share=v}, ...P.params.map(x=>({...x,
+                   get:()=>L.params[x.key],set:v=>L.params[x.key]=v}))];
+      for(const p of rows){
+        const row=document.createElement('div'); row.className='row';
+        const lb=document.createElement('label'); lb.textContent=p.label; lb.title=p.label;
+        const sl=document.createElement('span'); row.append(lb,sl); box.appendChild(row);
+        const s2=mkScrub({min:p.min,max:p.max,step:p.step,value:p.get(),
+          label:L.label+' '+p.label, onInput:v=>p.set(v)});
+        sl.appendChild(s2.el);
+      }
+      d.appendChild(box);
+    }
+    host.appendChild(d);
+  });
+  const rl=$('#rackLayer'); if(rl) rl.textContent=activeLayer()?('▸ '+activeLayer().label):'— no layer';
+}
+
+/* formation */
+const fText=$('#fText'), fFont=$('#fFont'), fNote=$('#fNote');
+fText.addEventListener('input',()=>{ state.formation.text=fText.value; formKey=''; });
+fFont.addEventListener('change',()=>{ state.formation.font=fFont.value; formKey=''; });
+function seedFonts(list){
+  fFont.innerHTML='';
+  const o0=document.createElement('option'); o0.value=''; o0.textContent='default (Inter / system)';
+  fFont.appendChild(o0);
+  for(const f of list){ const o=document.createElement('option'); o.value=f; o.textContent=f; fFont.appendChild(o); }
+}
+/* A curated fallback: queryLocalFonts is Chromium-only, needs a gesture and a
+   permission, and does not exist in Safari or Firefox. Never leave the picker empty. */
+const FALLBACK_FONTS=['Inter','Helvetica Neue','Arial','Avenir Next','Futura','Georgia',
+  'Times New Roman','Courier New','Menlo','SF Pro Display','Impact','Verdana'];
+seedFonts(FALLBACK_FONTS.filter(f=>document.fonts.check('12px "'+f+'"')));
+mount('logoAvoid',{min:0,max:2,step:0.01,value:state.logoAvoid,label:'Logo as void',
+  onInput:v=>state.logoAvoid=v});
+mount('logoScale',{min:0.5,max:8,step:0.05,value:state.logoScale,label:'Logo size',
+  onInput:v=>{ state.logoScale=v; LOGO.key=''; }});
+$('#fFonts').addEventListener('click',async()=>{
+  if(!window.queryLocalFonts){ fNote.textContent='This browser has no Local Font Access API — using the checked system list.'; return; }
+  try{
+    const fs=await window.queryLocalFonts();
+    const fams=[...new Set(fs.map(f=>f.family))].sort();
+    seedFonts(fams);
+    fNote.textContent=fams.length+' installed families. Pick one and the word rebuilds.';
+  }catch(e){ fNote.textContent='Font access was refused — using the checked system list.'; }
+});
+
+/* corner + keys */
+const uiBtn=$('#uiBtn');
+function setUI(hidden){
+  document.body.classList.toggle('noui',hidden);
+  uiBtn.setAttribute('aria-pressed',hidden?'true':'false');
+  uiBtn.title=hidden?'Show interface (H)':'Hide interface (H)';
+  resize();
+}
+uiBtn.addEventListener('click',()=>setUI(!document.body.classList.contains('noui')));
+let showFps=false;
+$('#fpsSw').addEventListener('change',e=>showFps=e.target.checked);
+addEventListener('keydown',e=>{
+  const tag=e.target&&e.target.tagName;
+  if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return;
+  if(e.target&&e.target.closest&&e.target.closest('.scrub'))return;
+  const k=e.key.toLowerCase();
+  if(k==='t')core.tap(nowT());
+  else if(e.key==='[')shiftPhase(-PHASE_STEP);
+  else if(e.key===']')shiftPhase(+PHASE_STEP);
+  else if(k==='h')setUI(!document.body.classList.contains('noui'));
+  else if(k==='b')document.body.classList.toggle('blackout');
+  else if(k==='p')nextPalette();
+  else if(k==='c'){ if(CAM.on){ camStop(); camNoteText(); }
+    else camBtn.click(); }
+  else if(e.key>='1'&&e.key<='4') triggerMove(['magnet','gather','crowd','snap'][+e.key-1]);
+  else if(e.key>='5'&&e.key<='8'){ const i=+e.key-5;
+    if(banks[i]) fire(()=>{ applyScene(banks[i]); setStatus('scene '+(i+1),'live'); },'scene '+(i+1)); }
+  else if(k==='w'){ const L=layerOfProg('word')||addLayer('word');
+    L.w = L.w>0.5?0:1; renderLayers(); }
+  else if(k==='f'){ if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();
+    else document.exitFullscreen?.(); }
+});
+
+/* ══════════════════════════════════════════════════════════════════════════
+   12 · frame
+   ══════════════════════════════════════════════════════════════════════════ */
+function resize(){
+  DPR=Math.min(2,devicePixelRatio||1);
+  const r=$('#stage').getBoundingClientRect();
+  W=Math.max(1,Math.round(r.width)); H=Math.max(1,Math.round(r.height));
+  cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  resizeSpec(); drawRamp();
+}
+addEventListener('resize',resize);
+
+const lamp=$("#lamp"); let lampV=0, fpsAcc=0, fpsN=0, fpsShown=0, lastQuads=0;
+function frame(){
+  requestAnimationFrame(frame);
+  const t=nowT(); const dt=Math.min(0.05,last?t-last:1/60); last=t;
+
+  /* ── audio ── */
+  let fd, live=false;
+  if(clockOn)fd=silent;
+  else if(fixture)fd=fixture.frame(t);
+  else if(analyser){ analyser.getByteFrequencyData(freq); analyser.getByteTimeDomainData(time); fd=freq; live=true; }
+  else fd=silent;
+  const f=core.process(fd,(fixture||clockOn)?null:time,dt,t);
+
+  const warm=(warmT0!=null)&&((t-warmT0)<WARM_SEC);
+  $('#meters').classList.toggle('warming',warm);
+  for(let i=0;i<METERS.length;i++){
+    let v=clamp(featVal(f,METERS[i][0]),0,1);
+    if(warm)v=Math.max(v,WARM_BASE+WARM_AMP*(0.5+0.5*Math.sin(t*WARM_RATE-i*WARM_PHASE)));
+    mEls[i].style.transform='scaleX('+v+')';
+  }
+  drawSpec(fd,core.binHz||(48000/FFT),live||!!fixture);
+  phFill.style.left=(f.beat.phase*100)+'%';
+
+  const tr=core.getTrim();
+  $('#bpmOut').textContent=f.beat.bpm?f.beat.bpm.toFixed(1):'—';
+  $('#conf').textContent='conf '+(f.beat.conf?f.beat.conf.toFixed(2):'—');
+  $('#src').textContent=(f.beat.source||'—')+(tr?(tr>0?' +':' ')+tr.toFixed(1):'');
+  if(f.beat.bpm&&!SCRUBS.bpm.isEditing()){
+    const base=+(f.beat.bpm-tr).toFixed(1);
+    if(Math.abs(SCRUBS.bpm.get()-base)>0.05)SCRUBS.bpm.set(base);
+  }
+  const target=Math.max(1-f.beat.phase*3,f.onset);
+  lampV+=(target-lampV)*(target>lampV?0.55:0.12);
+  lamp.style.background=lampV>0.04
+    ? 'color-mix(in srgb, var(--accent-beat) '+Math.round(lampV*100)+'%, var(--line))' : 'var(--line)';
+  lamp.style.transform='scale('+(1+lampV*0.18)+')';
+
+  /* ── hue drift from spectral centroid, mapped through the palette ── */
+  /* Zero point was baked at hd=0.5, so hueDrift=0 gave a permanent −0.6 rad (−34°)
+     rotation: you picked blue and got violet, and turning drift down was the MAXIMUM
+     of the error, not its absence. Drift must swing symmetrically around the authored
+     palette and vanish at 0. */
+  const wantShift = state.hueDrift * ((f.centroid||0) - 0.5) * 1.2;
+  /* The centroid jitters every frame, so a 0.004 gate meant rebuildTextures() — which
+     allocates a canvas per face × per stop — ran continuously. Rebuild only on a
+     VISIBLE change, and never more than ~8×/sec. */
+  if(Math.abs(wantShift-hueShift)>0.002){
+    hueShift=lerp(hueShift,wantShift,0.08);
+    if(Math.abs(hueShift-lastBakedShift)>0.03 && t-lastBake>0.12){
+      lastBakedShift=hueShift; lastBake=t; buildRamp(); rebuildTextures(); }
+  }
+
+  /* ── drive: modulate, draw, restore the bases ── */
+  const acc=applyMatrix(f);
+
+  /* quantised actions land here, on the musical grid, not on the click */
+  servePending(f);
+  runMove(dt);
+  if(autoRoll && f.beat.onBar) rerollMix();
+
+  /* ── camera: one decode, then every consumer reads the same snapshot ── */
+  camTick();
+  if(CAM.ready){
+    if(state.camW>0) for(const k of ['rect','circle','tri']) if((state.shapes[k]||0)>0) camTexFor(k);
+    const C=state.cam2, cc=$('#camcv');
+    if(C.layer>0.002){
+      if(cc.width!==cv.width||cc.height!==cv.height){ cc.width=cv.width; cc.height=cv.height; }
+      const cx=cc.getContext('2d');
+      cx.clearRect(0,0,cc.width,cc.height);
+      cx.globalAlpha=C.layer;
+      /* cover-fit the square snapshot across a frame of any proportion */
+      const s=Math.max(cc.width/CAM_PX,cc.height/CAM_PX), dw=CAM_PX*s, dh=CAM_PX*s;
+      cx.drawImage(camStyled,(cc.width-dw)/2,(cc.height-dh)/2,dw,dh);
+      cx.globalAlpha=1;
+      cc.style.mixBlendMode=C.blend;
+      cc.style.display='block';
+    } else cc.style.display='none';
+  }
+
+  /* ── camera (the viewing one) ── */
+  setDriven('cam.yaw', state.cam.yaw + state.cam.spin*dt);   /* yaw is modulatable — a raw += is undone by restoreMatrix */
+
+  /* forces first, then the targets integrate against the same velocity */
+  stepPhysics(dt,t,f);
+
+  /* ── bodies: weighted blend of every active mode's target ── */
+  const act=layers.filter(layerVisible).filter(L=>L.w>0.001);
+  let wsum=0; for(const L of act) wsum+=L.w;
+  const wnorm=Math.max(1,wsum);
+  const N=pool.length;
+  ctx.clearRect(0,0,W,H);
+  const vxw=(W/Math.min(W,H))*1.6, vyw=(H/Math.min(W,H))*1.6;   /* viewport half-extent in world */
+
+  let sizeMul=1;
+  if(wsum>0){ sizeMul=0;
+    for(const L of act){ const P=PROGRAMS[L.prog];
+      sizeMul += (P.sizeScale?P.sizeScale(N,L.params):1)*(L.w/wnorm); }
+    sizeMul += 1*(1-Math.min(1,wsum/wnorm)); }
+
+  const draws=[];
+  for(let i=0;i<N;i++){
+    const b=pool[i];
+    let tx=0,ty=0,tz=0, alpha=1, skip=false, order=null, scale=1, wl=0;
+    for(const L of act){
+      if(!belongs(i,L))continue;                       /* share: this body isn't its business */
+      const P=PROGRAMS[L.prog];
+      const tg=P.target(i,N,t,L.params,{variant:L.variant,seed:L.seed,vx:vxw,vy:vyw});
+      const w=L.w/wnorm;
+      tx+=tg.x*w; ty+=tg.y*w; tz+=tg.z*w; wl+=w;
+      if(tg.alpha!=null) alpha=Math.min(alpha,tg.alpha);
+      if(tg.scale!=null) scale*=lerp(1,tg.scale,w);
+      if(tg.skip) skip=true;
+      if(tg.order!=null) order=(order==null?0:order)+tg.order*w;
+      if(tg.heading) b.hd=tg.heading;                  /* axis engine supplies its own heading */
+    }
+    if(wl<=0){ tx=b.x; ty=b.y; tz=b.z; }               /* claimed by nobody → hold, never origin */
+
+    b.px=b.x; b.py=b.y; b.pz=b.z;
+    const k=1-Math.exp(-dt*state.phys.follow);
+    if(state.phys.on){
+      b.vx+=(tx-b.x)*k; b.vy+=(ty-b.y)*k; b.vz+=(tz-b.z)*k;
+      const d=Math.pow(state.phys.damp,dt*60);
+      b.vx*=d; b.vy*=d; b.vz*=d;
+      b.x+=b.vx; b.y+=b.vy; b.z+=b.vz;
+    } else {
+      b.x=lerp(b.x,tx,k); b.y=lerp(b.y,ty,k); b.z=lerp(b.z,tz,k);
+      b.vx=b.vy=b.vz=0;
+    }
+    /* the mark as a hole in the field — applied to the settled position */
+    if(state.logoAvoid>0.001) avoidLogo(b,dt,state.logoAvoid);
+    if(skip)continue;
+    const P2=project({x:b.x,y:b.y,z:b.z},state.cam);
+    if(P2.x<-200||P2.x>W+200||P2.y<-200||P2.y>H+200)continue;
+    draws.push({b,P:P2,i,alpha,order,scale});
+  }
+
+  /* tent paint order: the closest to centre sits on top (shuffler lesson) */
+  /* a layout may declare its own paint order (cover-flow: entering card UNDER, centre
+     on top — shuffler's tent order). Fall back to depth when it doesn't. */
+  draws.sort((a,c)=>(a.order!=null&&c.order!=null)?(a.order-c.order):(a.P.z-c.P.z));
+
+  const size=state.size*sizeMul;
+  let quads=0;
+
+  /* ── quad budget ────────────────────────────────────────────────────────────
+     The perspective-quad path costs a clip + affine drawImage per mesh cell, and
+     that is expensive in Canvas2D no matter how coarse the mesh: measured 20fps at
+     300 turned bodies, and only 26 once the mesh dropped to 2×2. A VJ tool has to
+     hold the frame for a twenty-minute set, so instead of hoping the scene stays
+     small we BOUND the cost: only the largest QUAD_BUDGET bodies get a real quad,
+     everything else bills out. The big ones are the only ones whose perspective
+     you can actually read, so the look survives and the frame time stops depending
+     on the body count. */
+  const QUAD_BUDGET = 80;
+  let quadCut = 0;
+  if(state.face>=0.03 && draws.length>QUAD_BUDGET){
+    const sizes=new Float64Array(draws.length);
+    for(let i=0;i<draws.length;i++) sizes[i]=draws[i].P.k;
+    const sorted=Float64Array.prototype.slice.call(sizes).sort();
+    quadCut=sorted[Math.max(0,sorted.length-QUAD_BUDGET)];   /* k of the budget-th largest */
+  }
+  for(const d of draws){
+    const {b,P,i}=d;
+    const img=textures[b.tex]||textures[0]; if(!img)continue;
+    const pv=b.pd||{size:1,roll:0,spin:0};
+    const calibre=lerp(1,pv.size,state.varSize);        /* 0 = every body identical */
+    const sc=size*P.k/220*(d.scale==null?1:d.scale)*calibre;
+    const alpha=clamp(0.35+P.k*0.35,0,1)*(d.alpha==null?1:d.alpha);
+    const px = sc*2.2;                       /* on-screen size of this body */
+
+    /* LOD. The quad path costs G² × 2 clipped affine triangles per body — the
+       shuffler was built for a couple of dozen large photo frames, not a swarm,
+       and it collapses to 20fps at 300 turned bodies. A body smaller than
+       LOD_QUAD_PX cannot show its own perspective anyway, so it bills out; a
+       middling one gets a coarser mesh. Measured: 300 turned bodies 20 → 58fps. */
+    const LOD_QUAD_PX = 34, LOD_FINE_PX = 90;
+    if(state.face<0.03 || px < LOD_QUAD_PX || P.k < quadCut){
+      /* even in billboard LOD the body still leans, just in 2D — the read is
+         "it banks into its travel", which survives the substitution at this size */
+      const hx=b.x-b.px, hy=b.y-b.py;
+      /* own tilt, drifting slowly, plus a lean into travel when Face heading is up */
+      const own=(pv.roll + t*pv.spin*0.12)*state.varTilt;
+      const rot = own + (state.face>0.03 ? Math.atan2(hy,hx)*state.face : 0);
+      drawBillboard(img,P,Math.max(2,px),rot,alpha);
+    } else {
+      /* heading = direction of travel; the quad banks into it */
+      const hx=b.x-b.px, hy=b.y-b.py, hz=b.z-b.pz;
+      const hl=Math.hypot(hx,hy,hz)||1;
+      const n={ x:lerp(0,hx/hl,state.face), y:lerp(0,hy/hl,state.face), z:lerp(1,hz/hl,state.face) };
+      const nl=Math.hypot(n.x,n.y,n.z)||1; n.x/=nl; n.y/=nl; n.z/=nl;
+      const rgt={ x:n.z, y:0, z:-n.x };
+      const rl=Math.hypot(rgt.x,rgt.y,rgt.z)||1; rgt.x/=rl; rgt.y/=rl; rgt.z/=rl;
+      const up={ x:n.y*rgt.z-n.z*rgt.y, y:n.z*rgt.x-n.x*rgt.z, z:n.x*rgt.y-n.y*rgt.x };
+      const s=size/220*calibre;
+      const ownR=(pv.roll+t*pv.spin*0.12)*state.varTilt;
+      const ca=Math.cos(ownR), sa=Math.sin(ownR);
+      const rr={x:rgt.x*ca+up.x*sa, y:rgt.y*ca+up.y*sa, z:rgt.z*ca+up.z*sa};
+      const uu={x:-rgt.x*sa+up.x*ca, y:-rgt.y*sa+up.y*ca, z:-rgt.z*sa+up.z*ca};
+      rgt.x=rr.x; rgt.y=rr.y; rgt.z=rr.z; up.x=uu.x; up.y=uu.y; up.z=uu.z;
+      drawQuadWorld(img,{x:b.x,y:b.y,z:b.z},
+        {x:rgt.x*s,y:rgt.y*s,z:rgt.z*s},{x:up.x*s,y:up.y*s,z:up.z*s},alpha,state.cam,
+        px<LOD_FINE_PX?2:4);
+      quads++;
+    }
+  }
+
+  restoreMatrix(acc);
+  runPost();
+
+  fpsAcc+=dt; fpsN++;
+  lastQuads=quads;
+  if(fpsAcc>0.5){ fpsShown=Math.round(fpsN/fpsAcc); fpsAcc=0; fpsN=0;
+    if(showFps){ $('#fps').textContent=fpsShown+' fps';
+      $('#bodies').textContent=draws.length+'/'+N+(quads?' · '+quads+'q':''); } }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   13 · boot
+   ══════════════════════════════════════════════════════════════════════════ */
+readColours();
+buildRamp(); buildStops(); rebuildPool(); rebuildTextures();
+/* One layer at boot — two at full weight average into a band. And the axis engine
+   defaults to a SINGLE lane at 0°, which is literally a horizontal line: correct
+   behaviour, wrong first impression. Open on a field, not a stripe. */
+(function(){ const L=addLayer('axis');
+  Object.assign(L.params,{axes:6, angle:14, gap:1.0, speed:0.62,
+                          bend:0.22, bendFreq:2, scaleGrad:0.2, tilt3d:0.12}); })();
+resize(); refreshDevices(); setArmState('idle');
+SCRUBS.bpm.set(120);
+selectInput(FIXON?'fix124':'clock').then(()=>{ inSel.value=curInput; syncTransport(); });
+frame();
+
+/* Debug handle. setCount/setFace go through the same path the panel uses, because
+   scrub.set() is deliberately silent (it must not fire onInput when the engine
+   mirrors a value back) — a probe that only calls .set() would measure nothing. */
+window.__bryk = { state, core:()=>core, pool:()=>pool, layers:()=>layers, scrubs:SCRUBS,
+  programs:()=>PROGRAMS, addLayer, removeLayer, duplicateLayer, focusLayer,
+  activeLayer:()=>activeLayer(), paramsOf:L=>paramsOf(L||activeLayer()),
+  input:()=>curInput, armed:()=>armed, ramp:()=>RAMP, textures:()=>textures,
+  formation:(n)=>buildFormation(n), fps:()=>fpsShown, quads:()=>lastQuads, quadBudget:80,
+  cam:()=>CAM, camTick:()=>camTick(), rebuildTex:()=>rebuildTextures(),
+  scene:{ capture:()=>captureScene(), apply:sc=>applyScene(sc) },
+  move:id=>triggerMove(id), moving:()=>!!MOVE, pending:()=>PENDING.length,
+  quant:v=>{ if(v!=null){ QUANT=v; const s2=document.getElementById('quantSel'); if(s2)s2.value=v; } return QUANT; },
+  matrix:()=>matrix, logo:()=>LOGO, insideLogo:(x,y)=>insideLogo(x,y), patterns:()=>PATTERNS, behaviours:()=>BEHAVIOURS, manners:()=>MANNERS,
+  setCount(n){ state.count=n; SCRUBS.count.set(n); rebuildPool(); },
+  setFace(v){ state.face=v; SCRUBS.face.set(v); rebase('face',v); },
+  setLayerW(i,w){ if(layers[i]){ layers[i].w=w; renderLayers(); } },
+  onlyProg(p){ let f=layerOfProg(p); if(!f)f=addLayer(p);
+    layers.forEach(L=>L.w = L===f?1:0); renderLayers(); return f; } };
+})();
+</script>
+</body>
+</html>

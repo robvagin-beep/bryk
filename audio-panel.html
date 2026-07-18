@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BRYK — Audio panel</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   SEC:css-tokens — BRYK dark polarity
+   Ported from the Synthex Engine panel token layer (engine:56–75) and flipped to
+   dark per Rob's decision 2026-07-18: the app runs at a party, on a projector.
+   A light panel lights the room. Values are OKLCH so one hue re-tunes the family.
+   Brand dominants: yellow · red · blue — warmer than the Olympic set (their blue
+   #0081C8 runs to cyan and chills the scene on dark; their red #EE334E goes pink).
+   ═══════════════════════════════════════════════════════════════════════════ */
+:root{
+  /* surfaces — never pure black: #000 bands on LED walls and kills gradient detail */
+  --bg:      oklch(0.13 0.012 265);
+  --panel:   oklch(0.165 0.012 265);
+  --paper:   oklch(0.205 0.013 265);   /* control surface (input zone) */
+  --ink:     oklch(0.94 0.008 265);
+  --muted:   oklch(0.635 0.016 265);   /* 4.9:1 on --panel — AA for 10px labels */
+  --line:    oklch(0.30 0.015 265);
+
+  /* brand dominants */
+  --yellow:  oklch(0.84 0.165 88);
+  --red:     oklch(0.62 0.205 32);
+  --blue:    oklch(0.66 0.160 250);    /* L lifted vs the paper value: accents on dark
+                                          need higher L and slightly lower C or they vibrate */
+  /* semantic roles — components never reach for a brand token directly */
+  --accent-live: var(--blue);          /* focus · fill · active · armed */
+  --accent-beat: var(--yellow);        /* the clock: lamp, onset, beat meters */
+  --accent-warn: var(--red);           /* error · denied · recording */
+  --accent-live-ink: oklch(0.14 0.012 265);
+
+  /* type scale · rhythm 4/8/12 · radii — canon, unchanged from the engine */
+  --fz-s:9px; --fz-m:10px; --fz-l:11px;
+  --sp-0:2px; --sp-1:4px; --sp-2:8px; --sp-3:12px;
+  --r-ctl:4px; --r-mid:6px; --r-outer:10px; --r-full:99px;
+
+  --tint:      color-mix(in srgb, var(--ink) 9%, transparent);
+  --tint-hi:   color-mix(in srgb, var(--ink) 15%, transparent);
+  --tint-card: color-mix(in srgb, var(--ink) 5%, transparent);
+  --sec-zone:  color-mix(in srgb, var(--ink) 3.5%, transparent);
+
+  --ease-out: cubic-bezier(0.23,1,0.32,1);
+  --dur-press:100ms; --dur-pop:180ms;
+
+  --panel-w:276px;                     /* single source — the engine hardcoded 276 in 4 places */
+  --h-row:22px; --h-btn:30px;
+
+  --grotesk:'Inter',ui-sans-serif,system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);
+  font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink)}
+
+/* ═══ SEC:css-chrome — left column, canon two-border layout (engine:95–104) ═══ */
+#panel{position:fixed;top:0;left:0;bottom:0;width:var(--panel-w);
+  background:var(--panel);border:0;border-right:1px solid var(--line);
+  display:flex;flex-direction:column;overflow:hidden;z-index:10}
+#ptitle{flex:none;padding:var(--sp-3) 14px var(--sp-2);font-family:var(--grotesk);
+  font-size:var(--fz-l);font-weight:600;letter-spacing:.01em}
+#body{flex:1;min-height:0;overflow-y:auto;padding:0 14px var(--sp-3)}
+#body{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+#body::-webkit-scrollbar{width:7px}
+#body::-webkit-scrollbar-thumb{background:var(--line);border-radius:var(--r-full)}
+#body::-webkit-scrollbar-track{background:transparent}
+@media (hover:hover) and (pointer:fine){ #body::-webkit-scrollbar-thumb:hover{background:var(--muted)} }
+
+#stage{position:fixed;top:0;left:var(--panel-w);right:0;bottom:0;
+  display:flex;align-items:center;justify-content:center;padding:40px}
+#stageNote{max-width:52ch;color:var(--muted);font-size:var(--fz-l);line-height:1.7;text-align:center}
+#stageNote b{color:var(--ink);font-weight:400}
+#stageNote kbd{font:inherit;background:var(--tint);border:1px solid var(--line);
+  border-radius:var(--r-ctl);padding:1px 5px;color:var(--ink)}
+
+/* ═══ groups — full-bleed zone, absolute legend (engine:206–218) ═══ */
+fieldset{position:relative;min-inline-size:0;border:0;margin:0 -14px;padding:var(--sp-3) 14px 14px;
+  background:var(--sec-zone);box-shadow:inset 0 -1px var(--line)}
+/* The engine parks its legend absolutely with height:14px so the native fieldset border
+   cannot run through the text (engine:206–218). We set border:0 and draw the separator
+   with an inset shadow, so there is no border to dodge — and the absolute box with a FIXED
+   height clipped its own text under the WCAG 1.4.12 spacing override (caught by the stress
+   pass). Static flow, no locked height: it can grow and the rows move down with it. */
+legend{display:block;float:left;width:100%;padding:0;margin:0 0 var(--sp-2);
+  font-family:var(--grotesk);font-size:var(--fz-l);line-height:1.3;letter-spacing:.01em;
+  font-weight:600;color:var(--ink)}
+legend + *{clear:both}
+
+/* ═══ rows — one grammar (panel-canon law 2) ═══ */
+.row{display:grid;grid-template-columns:1fr minmax(96px,120px);gap:var(--sp-2);
+  align-items:center;margin:var(--sp-1) 0;min-height:var(--h-row)}
+.row>label{font-size:var(--fz-m);color:var(--muted);overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.row.full{grid-template-columns:1fr}
+
+/* ═══ SEC:css-scrub — number-in-track (engine:224–238) ═══
+   Border HOLDS at rest: it is the signal that this is an input zone. */
+.scrub{position:relative;display:flex;align-items:center;height:var(--h-row);box-sizing:border-box;
+  background:var(--paper);border:1px solid var(--line);border-radius:var(--r-ctl);
+  overflow:hidden;cursor:ew-resize;user-select:none;touch-action:none;width:100%}
+.scrub .sfill{position:absolute;left:0;top:0;bottom:0;width:0;
+  background:color-mix(in srgb, var(--accent-live) 22%, transparent);pointer-events:none}
+.scrub .slive{position:absolute;top:2px;bottom:2px;width:2px;margin-left:-1px;
+  background:var(--accent-live);opacity:.9;pointer-events:none}
+.scrub .sval{position:relative;margin-left:auto;padding:0 var(--sp-2);
+  font:var(--fz-m) ui-monospace,monospace;color:var(--ink);
+  font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;
+  pointer-events:none;white-space:nowrap}
+.scrub .sedit{position:absolute;inset:0;width:100%;box-sizing:border-box;border:0;
+  background:var(--panel);color:var(--ink);font:var(--fz-m) ui-monospace,monospace;
+  padding:0 var(--sp-2);text-align:right;-moz-appearance:textfield}
+.scrub .sedit::-webkit-inner-spin-button{display:none}
+.scrub:focus-visible{outline:2px solid var(--accent-live);outline-offset:1px;border-color:var(--accent-live)}
+.scrub.is-disabled{opacity:.42;pointer-events:none}
+@media (prefers-reduced-motion:no-preference){ .scrub .slive{transition:left var(--dur-press) var(--ease-out)} }
+@media (hover:hover) and (pointer:fine){ .scrub:hover{border-color:var(--muted)} }
+
+/* ═══ select — same 22px height as the scrub (engine:284–294 · W-ROB-15 audit) ═══ */
+.tinSelect{font:var(--fz-m) ui-monospace,monospace;border:1px solid var(--line);
+  border-radius:var(--r-ctl);background:var(--paper);color:var(--ink);padding:0 22px 0 6px;
+  height:var(--h-row);line-height:calc(var(--h-row) - 2px);width:100%;
+  appearance:none;-webkit-appearance:none;margin:0;cursor:pointer;
+  background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),
+                   linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:calc(100% - 12px) 9px,calc(100% - 8px) 9px;
+  background-size:4px 4px,4px 4px;background-repeat:no-repeat}
+
+/* ═══ buttons — tint chips, border is the rare accent ═══ */
+.btn{font:var(--fz-m) ui-monospace,monospace;height:var(--h-btn);padding:0 var(--sp-2);
+  background:var(--tint);border:1px solid transparent;border-radius:var(--r-mid);
+  color:var(--muted);cursor:pointer;letter-spacing:.02em}
+.btn.wide{display:block;width:100%;text-align:center}
+.btn.on{background:var(--accent-live);border-color:var(--accent-live);color:var(--accent-live-ink)}
+.btn.warn{border-color:var(--accent-warn);color:var(--accent-warn)}
+.btn.is-disabled{opacity:.42;pointer-events:none}
+.btn[data-busy]{color:var(--ink)}
+.seg{display:flex;gap:var(--sp-1);margin:var(--sp-2) 0 0}
+.seg .btn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ═══ phase nudge — ± around a live phase readout ═══ */
+.nudge{display:flex;align-items:center;gap:var(--sp-1)}
+.nudge .nb{flex:none;width:var(--h-row);height:var(--h-row);padding:0;line-height:1;
+  border:1px solid var(--line);background:var(--paper);border-radius:var(--r-ctl);
+  color:var(--ink);font-size:var(--fz-l)}
+.nudge .phbar{flex:1;min-width:0;height:var(--h-row);position:relative;
+  background:var(--paper);border:1px solid var(--line);border-radius:var(--r-ctl);overflow:hidden}
+.nudge .phbar i{position:absolute;top:2px;bottom:2px;width:2px;margin-left:-1px;left:0;
+  background:var(--accent-beat);opacity:.9}
+.nudge.is-disabled{opacity:.42;pointer-events:none}
+
+/* ═══ SEC:css-corner — bottom-right chrome toggle ═══
+   Lives in the corner it acts on, and the tray grows OUT of that corner
+   (apple-design §7: anchor the interaction to its source, enter and exit on the
+   same path). This is the only chrome that survives `noui` — everything else goes. */
+#corner{position:fixed;right:0;bottom:0;z-index:30;padding:16px;
+  display:flex;flex-direction:column;align-items:flex-end;gap:var(--sp-1)}
+#tray{display:flex;flex-direction:column;align-items:stretch;gap:var(--sp-1);
+  padding:var(--sp-2);min-width:168px;
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r-outer);
+  transform-origin:100% 100%;                       /* grows from the button, not the centre */
+  opacity:0;transform:scale(.92) translateY(6px);pointer-events:none;
+  transition:opacity var(--dur-pop) var(--ease-out), transform var(--dur-pop) var(--ease-out)}
+#corner:hover #tray, #corner:focus-within #tray{opacity:1;transform:none;pointer-events:auto}
+#tray .trow{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-2);
+  font-size:var(--fz-s);color:var(--muted)}
+#tray .thead{font-family:var(--grotesk);font-size:var(--fz-s);color:var(--muted);
+  letter-spacing:.06em;text-transform:uppercase;margin-bottom:var(--sp-0)}
+#uiBtn{flex:none;width:34px;height:34px;padding:0;border-radius:var(--r-full);
+  border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  font:14px/1 ui-monospace,monospace;cursor:pointer;
+  display:flex;align-items:center;justify-content:center}
+#uiBtn[aria-pressed="true"]{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+body.noui #panel{display:none}
+body.noui #stage{left:0}
+/* When the chrome is gone the button fades back but stays reachable — a dead corner
+   would strand the user with no way back (wayfinding: never trap). */
+body.noui #uiBtn{opacity:.18}
+@media (hover:hover) and (pointer:fine){ body.noui #corner:hover #uiBtn{opacity:1} }
+body.noui #corner:focus-within #uiBtn{opacity:1}
+@media (prefers-reduced-motion:reduce){ #tray{transition:opacity 120ms linear;transform:none}
+  #corner:hover #tray,#corner:focus-within #tray{transform:none} }
+
+/* ═══ beat strip ═══ */
+#beat{display:flex;align-items:center;gap:var(--sp-2);margin:var(--sp-3) 0 var(--sp-1)}
+#lamp{flex:none;width:var(--h-btn);height:var(--h-btn);border-radius:50%;
+  background:var(--line);will-change:transform,background-color}
+#bpmOut{font-size:18px;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1}
+#bmeta{margin-left:auto;text-align:right;font-size:var(--fz-s);color:var(--muted);line-height:1.5}
+
+/* ═══ spectrum — the honest picture (raw bins, log-f) ═══ */
+#specWrap{position:relative;margin:var(--sp-1) 0 var(--sp-2)}
+#spec{display:block;width:100%;height:64px;background:var(--paper);
+  border:1px solid var(--line);border-radius:var(--r-ctl)}
+#specLabels{display:flex;justify-content:space-between;margin-top:var(--sp-0);
+  font-size:var(--fz-s);color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* ═══ meters — 2-col grid, 10 pairs in 5 rows, zero JS layout (engine-proven) ═══ */
+#meters{display:grid;grid-template-columns:auto 1fr auto 1fr;
+  gap:var(--sp-1) var(--sp-2);align-items:center;margin-top:var(--sp-1)}
+#meters .ml{font-size:var(--fz-s);color:var(--muted);white-space:nowrap}
+#meters .mt{height:4px;background:var(--tint);border-radius:var(--r-full);overflow:hidden}
+#meters .mt i{display:block;height:100%;width:100%;background:var(--accent-live);
+  transform-origin:left;transform:scaleX(0);will-change:transform}
+#meters .mt.a i{background:var(--accent-beat)}
+/* warming — the first ~5 s the AGC has not spread min/max yet, so real levels sit at zero
+   and the panel reads as broken. A drifting underlay with a per-meter phase offset says
+   "heating", not "dead". Math.max, never replace: real signal punches straight through. */
+#meters.warming{position:relative}
+#meters.warming .mt i,#meters.warming .mt.a i{background:var(--muted)}
+#meters.warming::after{content:'warming…';position:absolute;right:0;top:calc(-1 * var(--sp-3));
+  font-size:var(--fz-s);color:var(--muted);letter-spacing:.05em}
+
+/* ═══ status — four kinds of feedback: status · completion · warning · error ═══ */
+#status{display:flex;align-items:flex-start;gap:var(--sp-1);margin-top:var(--sp-3);
+  font-size:var(--fz-s);color:var(--muted);line-height:1.5;min-height:2.2em}
+#status i{flex:none;width:6px;height:6px;border-radius:50%;background:var(--muted);margin-top:5px}
+#status[data-kind="ok"] i{background:var(--accent-live)}
+#status[data-kind="live"] i{background:var(--accent-beat)}
+#status[data-kind="err"] i{background:var(--accent-warn)}
+#status[data-kind="err"]{color:var(--accent-warn)}
+
+.note{font-size:var(--fz-s);color:var(--muted);margin:var(--sp-1) 0 0;line-height:1.5}
+.note b{color:var(--ink);font-weight:400}
+kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radius:var(--r-ctl);
+  padding:0 4px;color:var(--ink)}
+
+/* ═══ toggle — pill switch (engine:269–278) ═══ */
+input.sw{appearance:none;-webkit-appearance:none;width:30px;height:16px;margin:0;flex:none;
+  cursor:pointer;border:1px solid var(--line);border-radius:var(--r-full);
+  background:var(--paper);position:relative}
+input.sw::before{content:'';position:absolute;top:2px;left:2px;width:10px;height:10px;
+  border-radius:50%;background:var(--muted);
+  transition:left var(--dur-press) var(--ease-out),background-color var(--dur-press) var(--ease-out),
+             transform var(--dur-press) var(--ease-out)}
+input.sw:checked{border-color:var(--accent-live);background:var(--accent-live)}
+input.sw:checked::before{left:16px;background:var(--accent-live-ink)}
+input.sw:active::before{transform:scale(.88)}
+@media (prefers-reduced-motion:reduce){ input.sw::before{transition:none} }
+
+/* ═══ SEC:css-states — the matrix (engine:368–393) ═══ */
+.btn,#lamp{transition:transform var(--dur-press) var(--ease-out),
+  background-color var(--dur-press) var(--ease-out),color var(--dur-press) var(--ease-out)}
+.btn:active{transform:scale(.97)}                      /* press = transform only, compositor-safe */
+@media (hover:hover) and (pointer:fine){
+  .btn:not(.on):not(.is-disabled):hover{background:var(--tint-hi);color:var(--ink)}
+  .tinSelect:hover{border-color:var(--muted)}
+}
+#panel :focus-visible{outline:2px solid var(--accent-live);outline-offset:1px}
+button,.tinSelect{touch-action:manipulation}
+@media (prefers-reduced-motion:reduce){
+  .btn,#lamp,.scrub .slive{transition:none}
+  #meters .mt i{transition:none}
+}
+@media (prefers-contrast:more){ fieldset{box-shadow:inset 0 -1px var(--ink)} }
+</style>
+</head>
+<body>
+
+<aside id="panel">
+  <div id="ptitle">Audio</div>
+  <div id="body">
+
+    <fieldset id="gSource">
+      <legend>Source</legend>
+      <div class="row full"><select id="inSel" class="tinSelect" aria-label="Audio input"></select></div>
+      <button class="btn wide" id="arm" style="margin-top:var(--sp-2)">ARM AUDIO</button>
+      <p class="note" id="armNote">A gesture is required before the browser will start an AudioContext.</p>
+    </fieldset>
+
+    <fieldset id="gClock">
+      <legend>Clock</legend>
+      <div class="row srow"><label title="Detected or manual base tempo">BPM</label><span data-mnt="bpm"></span></div>
+      <div class="row srow"><label title="Live ± offset on top of the clock. Detection keeps running.">Trim&nbsp;±</label><span data-mnt="trim"></span></div>
+      <div class="row srow"><label title="Slide the downbeat without touching tempo">Phase</label>
+        <div class="nudge">
+          <button class="btn nb" id="phMinus" title="Pull the downbeat back ( [ )">−</button>
+          <div class="phbar" id="phBar" aria-hidden="true"><i></i></div>
+          <button class="btn nb" id="phPlus" title="Push the downbeat forward ( ] )">+</button>
+        </div>
+      </div>
+      <div class="seg">
+        <button class="btn" id="tap" title="Tap 4× in time (T)">TAP</button>
+        <button class="btn" id="auto" title="Hand the clock back to the detector, clear trim">AUTO</button>
+        <button class="btn" id="sync" title="Slam the downbeat to now">SYNC</button>
+      </div>
+      <p class="note">Trim leans on the tempo without dropping detection.
+        Phase <kbd>[</kbd> <kbd>]</kbd> aligns the downbeat · tap <kbd>T</kbd> · SYNC is the hard reset.</p>
+
+      <div id="beat">
+        <div id="lamp" aria-hidden="true"></div>
+        <div><div id="bpmOut">—</div></div>
+        <div id="bmeta"><div id="conf">conf —</div><div id="src">—</div></div>
+      </div>
+    </fieldset>
+
+    <fieldset id="gSpectrum">
+      <legend>Spectrum</legend>
+      <div id="specWrap">
+        <canvas id="spec" aria-label="Live frequency spectrum, logarithmic"></canvas>
+      </div>
+      <div id="specLabels"><span>20</span><span>200</span><span>2k</span><span>16k Hz</span></div>
+      <p class="note">Raw bins, log&nbsp;scale, un-normalised — bands below are each AGC'd
+        to 0..1 <b>independently</b>, so their heights are not comparable to one another.</p>
+    </fieldset>
+
+    <fieldset id="gLevels">
+      <legend>Levels</legend>
+      <div id="meters"></div>
+    </fieldset>
+
+    <div id="status" data-kind="idle" role="status" aria-live="polite"><i></i><span id="statusText">clock — internal BPM, no input armed</span></div>
+  </div>
+</aside>
+
+<main id="stage">
+  <p id="stageNote">
+    Audio panel, rebuilt on the Synthex canon.<br>
+    Pick a source and press <b>ARM AUDIO</b> — or leave it on <b>clock</b> and drag the BPM.<br>
+    Every number is a scrub: <b>drag</b> it, or <b>click</b> to type. Push past the end and it keeps going.<br>
+    <b>Trim</b> leans on the tempo live; <b>Phase</b> slides the downbeat. Neither drops detection.<br>
+    Corner button, bottom right, or <kbd>H</kbd> — hide the chrome. Hover the corner for the tray.
+  </p>
+</main>
+
+<!-- Bottom-right corner: the one piece of chrome that outlives `noui`. -->
+<div id="corner">
+  <div id="tray" role="group" aria-label="Display options">
+    <div class="thead">Display</div>
+    <div class="trow"><label for="mirrorSw">Mirror camera</label><input type="checkbox" id="mirrorSw" class="sw"></div>
+    <div class="trow"><label for="meterSw">Show meters</label><input type="checkbox" id="meterSw" class="sw" checked></div>
+    <div class="trow"><span>Chrome</span><span><kbd>H</kbd></span></div>
+    <div class="trow"><span>Blackout</span><span><kbd>B</kbd></span></div>
+    <div class="trow"><span>Fullscreen</span><span><kbd>F</kbd></span></div>
+  </div>
+  <button id="uiBtn" aria-pressed="false" title="Hide interface (H)">◐</button>
+</div>
+
+<script src="audio-core.js"></script>
+<script>
+(function(){
+'use strict';
+const $ = s => document.querySelector(s);
+const clamp = (v,a,b) => v<a?a:v>b?b:v;
+
+/* ══════════════════════════════════════════════════════════════════════════
+   mkScrub — ported from Synthex Engine v1 (engine:3716–3774), with one change.
+
+   apple-design review finding #1: the engine resists a hard 28px wall past the
+   range end and then releases at full speed. Apple's boundary law is PROGRESSIVE
+   resistance — a hard threshold reads as "frozen", continuous resistance reads as
+   "responsive, but there's nothing more here". Rob's requirement (W-ROB-20) is that
+   you can still travel anywhere, so an asymptotic rubber-band alone is wrong too.
+   Resolution: rubber-band the first stretch, then blend back to 1:1 tracking, so the
+   edge is felt but never blocks. Continuous in value AND in slope.
+   ══════════════════════════════════════════════════════════════════════════ */
+const RESIST_PX = 26;                    // scale of the resistance zone
+function resist(over){                   // over = px past the boundary → px actually travelled
+  const c = 0.55;
+  const soft = (over * RESIST_PX * c) / (RESIST_PX + c * over);   // asymptotic (Apple rubberband)
+  const t = Math.min(1, over / (RESIST_PX * 2));                  // 0→1 over 2× the zone
+  return soft * (1 - t) + over * t;                               // …then release to linear
+}
+
+const SCRUBS = {};
+function fmtStep(v,step){ v=+v; if(isNaN(v))return '0';
+  return (Math.abs(step)>=1) ? ''+Math.round(v) : v.toFixed(step<=0.005?3:2); }
+
+function mkScrub(cfg){
+  let min=cfg.min, max=cfg.max, step=cfg.step||0.01,
+      v=(cfg.value!=null?+cfg.value:min), editing=false;
+  const el=document.createElement('div');
+  el.className='scrub'; el.tabIndex=0; el.setAttribute('role','slider');
+  if(cfg.label) el.setAttribute('aria-label',cfg.label);
+  const fill=document.createElement('i'); fill.className='sfill';
+  const val=document.createElement('span'); val.className='sval';
+  const edit=document.createElement('input');
+  edit.className='sedit'; edit.type='text'; edit.inputMode='decimal'; edit.style.display='none';
+  const live=document.createElement('i'); live.className='slive'; live.style.display='none';
+  el.append(fill,val,edit,live);
+
+  function paint(){
+    val.textContent=fmtStep(v,step);
+    const f=(max>min)?clamp((v-min)/(max-min),0,1):0;
+    if(min<0&&max>0){                                  // bipolar fills FROM zero (W-ROB-7)
+      const z=(0-min)/(max-min);
+      fill.style.left=(Math.min(z,f)*100)+'%';
+      fill.style.width=(Math.abs(f-z)*100)+'%';
+    } else { fill.style.left='0'; fill.style.width=(f*100)+'%'; }
+    el.setAttribute('aria-valuenow',fmtStep(v,step));
+    el.setAttribute('aria-valuemin',min); el.setAttribute('aria-valuemax',max);
+  }
+  function setV(nv,commit,silent){
+    if(isNaN(nv))return; v=+nv;
+    if(cfg.allowExtend){ if(v>max)max=v; if(v<min)min=v; if(cfg.extend)cfg.extend(v); }
+    else v=clamp(v,min,max);
+    paint();
+    if(!silent&&cfg.onInput)cfg.onInput(v);
+    if(commit&&cfg.onCommit)cfg.onCommit(v);
+  }
+
+  let down=null;
+  el.addEventListener('pointerdown',e=>{
+    if(editing)return;
+    down={x:e.clientX,v:v,drag:false,w:el.getBoundingClientRect().width||120,
+          span:(max-min)||1,mn:min,mx:max};   // gesture bounds frozen at start: extending
+    try{el.setPointerCapture(e.pointerId);}catch(_){}  // must not drift the sensitivity
+    e.preventDefault();
+  });
+  el.addEventListener('pointermove',e=>{
+    if(!down)return;
+    const dx=e.clientX-down.x;
+    if(Math.abs(dx)>3)down.drag=true;                  // 3px hysteresis — below it, still a click
+    if(!down.drag)return;
+    const sens=(e.shiftKey?0.25:1);
+    const raw=down.v+(dx/down.w)*down.span*sens;
+    let q;
+    if(cfg.allowExtend){
+      if(raw>down.mx){ const overPx=(raw-down.mx)/down.span*down.w/sens;
+        q=down.mx+(resist(overPx)/down.w)*down.span*sens; }
+      else if(raw<down.mn){ const underPx=(down.mn-raw)/down.span*down.w/sens;
+        q=down.mn-(resist(underPx)/down.w)*down.span*sens; }
+      else q=raw;
+      q=Math.round(q/step)*step;
+    } else q=clamp(Math.round(raw/step)*step,min,max);
+    setV(q,false);
+  });
+  function endDrag(){ if(!down)return; const d=down.drag; down=null;
+    if(d){ if(cfg.onCommit)cfg.onCommit(v); } else enterEdit(); }
+  el.addEventListener('pointerup',endDrag);
+  el.addEventListener('lostpointercapture',()=>{ if(down){ const d=down.drag; down=null;
+    if(d&&cfg.onCommit)cfg.onCommit(v); } });
+
+  function enterEdit(){ editing=true; edit.value=fmtStep(v,step); edit.style.display='';
+    val.style.visibility='hidden'; edit.focus(); edit.select(); }
+  function leaveEdit(commit){ editing=false; edit.style.display=''; edit.style.display='none';
+    val.style.visibility='';
+    if(commit){ const nv=parseFloat(edit.value); if(!isNaN(nv))setV(nv,true); } }
+  edit.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){ e.preventDefault(); leaveEdit(true); el.focus(); }
+    else if(e.key==='Escape'){ e.preventDefault(); leaveEdit(false); el.focus(); }
+    else if(e.key==='ArrowUp'||e.key==='ArrowDown'){ e.preventDefault();
+      let cur=parseFloat(edit.value); if(isNaN(cur))cur=v;
+      setV(cur+(e.key==='ArrowUp'?1:-1)*step*(e.shiftKey?10:1),false);
+      edit.value=fmtStep(v,step); }
+  });
+  edit.addEventListener('blur',()=>{ if(editing)leaveEdit(true); });
+  el.addEventListener('keydown',e=>{
+    if(editing)return;
+    let d=0;
+    if(e.key==='ArrowRight'||e.key==='ArrowUp')d=1;
+    else if(e.key==='ArrowLeft'||e.key==='ArrowDown')d=-1;
+    else if(e.key==='Enter'||e.key===' '){ e.preventDefault(); enterEdit(); return; }
+    else return;
+    e.preventDefault();
+    const nv=v+d*step*(e.shiftKey?10:1);
+    setV(cfg.allowExtend?nv:clamp(nv,min,max),true);
+  });
+  paint();
+  return { el,
+    set(nv){ if(nv==null||isNaN(nv))return; v=+nv;
+      if(cfg.allowExtend){ if(v>max)max=v; if(v<min)min=v; } paint(); },
+    get(){ return v; },
+    isEditing(){ return editing; },
+    setDisabled(on){ el.classList.toggle('is-disabled',!!on);
+      el.setAttribute('aria-disabled',on?'true':'false'); el.tabIndex=on?-1:0; },
+    setLive(nv){ if(nv==null||isNaN(nv)){ if(live.style.display!=='none')live.style.display='none'; return; }
+      const f=(max>min)?clamp((nv-min)/(max-min),0,1):0;
+      live.style.left=(f*100)+'%'; if(live.style.display==='none')live.style.display='block'; } };
+}
+function mount(slot,cfg){ const host=document.querySelector('[data-mnt="'+slot+'"]');
+  const sc=mkScrub(cfg); host.appendChild(sc.el); SCRUBS[slot]=sc; return sc; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Audio engine
+   ══════════════════════════════════════════════════════════════════════════ */
+const FFT = 2048;
+const WARM_SEC = 5;                          // AGC needs ~5 s to spread band min/max
+const WARM_BASE = 0.10, WARM_AMP = 0.09, WARM_RATE = 3.2, WARM_PHASE = 0.7;
+
+let core = window.makeAudioCore({sampleRate:48000, fftSize:FFT});
+let ac=null, analyser=null, srcNode=null, stream=null, fixture=null;
+let clockOn=false, armed=false, warmT0=null, last=0;
+let freq=new Uint8Array(core.binCount), time=new Uint8Array(FFT), silent=new Uint8Array(core.binCount);
+let curInput='clock';
+const nowT = () => performance.now()/1000;
+
+const inSel=$('#inSel'), armBtn=$('#arm'), armNote=$('#armNote');
+
+/* ── status: four kinds of feedback, never a bare technical string ────────── */
+function setStatus(msg,kind){
+  const s=$('#status');
+  $('#statusText').textContent=msg;          // textContent, not innerHTML — err.name goes in here
+  s.dataset.kind=kind||'idle';
+}
+
+/* ── input list ───────────────────────────────────────────────────────────── */
+const FIXON = /[?&]fix=1/.test(location.search);
+function baseOpts(){
+  const o=[['clock','clock — internal BPM']];
+  if(FIXON) o.push(['fix90','fixture 90'],['fix124','fixture 124'],['fix174','fixture 174']);
+  o.push(['tab','tab audio'],['sys','system audio']);
+  return o;
+}
+let micUnlocked=false, unlockTried=false;
+function refreshDevices(){
+  const keep=inSel.value||curInput;
+  const fill = list => {
+    inSel.innerHTML='';
+    for(const [v,l] of baseOpts()){ const o=document.createElement('option'); o.value=v; o.textContent=l; inSel.appendChild(o); }
+    for(const d of list){ const o=document.createElement('option');
+      o.value='dev:'+d.deviceId;
+      o.textContent=d.label||('input '+(d.deviceId||'').slice(0,6)||'unnamed');
+      inSel.appendChild(o); }
+    inSel.value=[...inSel.options].some(o=>o.value===keep)?keep:'clock';
+  };
+  if(!(navigator.mediaDevices&&navigator.mediaDevices.enumerateDevices)){ fill([]); return; }
+  navigator.mediaDevices.enumerateDevices()
+    .then(ds=>fill(ds.filter(d=>d.kind==='audioinput')))
+    .catch(()=>fill([]));
+}
+/* Device labels stay blank until one grant has happened. Trigger the unlock from every
+   way a user can reach the select — the engine only bound mousedown, which left keyboard
+   and touch users looking at "input a1b2c3". */
+function unlockMicLabels(){
+  if(micUnlocked||unlockTried)return;
+  if(!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia))return;
+  unlockTried=true;
+  navigator.mediaDevices.getUserMedia({audio:true})
+    .then(s=>{ s.getTracks().forEach(t=>t.stop()); micUnlocked=true; refreshDevices(); })
+    .catch(()=>{ unlockTried=false; });     // reset so a later attempt can still work
+}
+['mousedown','focus','keydown','touchstart'].forEach(ev=>
+  inSel.addEventListener(ev,unlockMicLabels,{passive:true}));
+if(navigator.mediaDevices) navigator.mediaDevices.ondevicechange=refreshDevices;
+
+/* ── context ──────────────────────────────────────────────────────────────── */
+function ensureCtx(){
+  if(ac)return;
+  ac=new (window.AudioContext||window.webkitAudioContext)();
+  analyser=ac.createAnalyser();
+  analyser.fftSize=FFT; analyser.smoothingTimeConstant=0.5;
+  /* Rebuild the core on the REAL sample rate: band edges derive from sampleRate/fftSize,
+     and 44.1 vs 48 kHz moves every boundary. */
+  core=window.makeAudioCore({sampleRate:ac.sampleRate, fftSize:FFT});
+  freq=new Uint8Array(core.binCount);
+  time=new Uint8Array(analyser.fftSize);
+  silent=new Uint8Array(core.binCount);
+}
+function disconnect(){
+  if(srcNode){ try{srcNode.disconnect();}catch(_){} srcNode=null; }
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+}
+
+function selectInput(v){
+  curInput=v; fixture=null; clockOn=false;
+  warmT0=(v==='clock')?null:nowT();
+
+  if(v==='clock'){
+    clockOn=true;
+    if(!core.features.beat.bpm) core.setBPM(SCRUBS.bpm.get()||120);
+    disconnect(); setStatus('clock — internal BPM, no input armed','idle');
+    return Promise.resolve();
+  }
+  if(v.indexOf('fix')===0){
+    const bpm=+v.slice(3)||124;                    // parse, not a ternary chain
+    fixture=window.makeFixture(bpm,{fftSize:FFT});
+    core.auto(); disconnect();
+    setStatus('fixture '+bpm+' — synthetic click track','ok');
+    return Promise.resolve();
+  }
+  ensureCtx();
+  return ac.resume().then(()=>{
+    disconnect();
+    if(v==='tab'||v==='sys'){
+      /* video:true is required or Chrome will not offer the tab at all; the video track
+         is stopped the instant we have it. */
+      return navigator.mediaDevices.getDisplayMedia({audio:true,video:true}).then(s=>{
+        stream=s; s.getVideoTracks().forEach(t=>t.stop());
+        if(!s.getAudioTracks().length){
+          throw new Error(v==='sys'
+            ? 'No audio track. Tick "Share system audio" in the picker.'
+            : 'No audio track. Tick "Share tab audio" in the picker.');
+        }
+        srcNode=ac.createMediaStreamSource(s); srcNode.connect(analyser);
+        setStatus(v==='sys'?'live · system audio':'live · tab audio','live');
+      });
+    }
+    const id=v.indexOf('dev:')===0?v.slice(4):'default';
+    /* EC/NS/AGC off — all three are speech processing and they eat music. */
+    const c={audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}};
+    if(id&&id!=='default') c.audio.deviceId={exact:id};
+    return navigator.mediaDevices.getUserMedia(c).then(s=>{
+      stream=s; srcNode=ac.createMediaStreamSource(s); srcNode.connect(analyser);
+      setStatus('live · '+Math.round(ac.sampleRate/1000)+' kHz','live');
+      refreshDevices();
+    });
+  });
+}
+
+/* ── ARM — three states, and it rolls back ────────────────────────────────────
+   The engine set armed=true BEFORE the request, so a denied permission left the
+   button reading ARMED forever and unlocked a transport with no clock behind it. */
+function setArmState(s){
+  armBtn.classList.toggle('on', s==='armed');
+  armBtn.classList.toggle('warn', s==='failed');
+  armBtn.classList.toggle('is-disabled', s==='requesting');
+  if(s==='requesting') armBtn.dataset.busy='1'; else delete armBtn.dataset.busy;
+  armBtn.textContent = s==='armed'?'ARMED' : s==='requesting'?'REQUESTING…' : s==='failed'?'RETRY' : 'ARM AUDIO';
+  armBtn.setAttribute('aria-pressed', s==='armed'?'true':'false');
+  armNote.textContent = s==='armed'
+    ? 'Input is live. Switching source in the list re-arms it immediately.'
+    : s==='failed'
+      ? 'Permission was refused or the device is busy. Nothing is listening.'
+      : 'A gesture is required before the browser will start an AudioContext.';
+}
+armBtn.addEventListener('click',()=>{
+  if(armBtn.dataset.busy)return;
+  const want=inSel.value;
+  if(want==='clock'){ setStatus('clock needs no input — pick a device or fixture first','idle'); return; }
+  setArmState('requesting'); setStatus('requesting access…','idle');
+  Promise.resolve(selectInput(want)).then(()=>{
+    armed=true; setArmState('armed'); syncTransport();
+  }).catch(err=>{
+    armed=false; setArmState('failed'); syncTransport();
+    disconnect(); clockOn=true; curInput='clock'; inSel.value='clock';
+    setStatus((err&&(err.message||err.name))||'input failed','err');
+  });
+});
+
+/* ── transport gating ─────────────────────────────────────────────────────────
+   Single source of truth is curInput, never the select's value: the two agreed by
+   coincidence in the original and would have lied the moment they diverged. */
+function syncTransport(){
+  const hasClock = clockOn || curInput.indexOf('fix')===0 || armed;
+  const why = 'ARM a live input first — there is no clock yet';
+  for(const id of ['tap','auto','sync','phMinus','phPlus']){
+    const b=document.getElementById(id);
+    b.classList.toggle('is-disabled',!hasClock);
+    b.setAttribute('aria-disabled', hasClock?'false':'true');
+    b.title = hasClock ? b.dataset.title : why;
+  }
+  document.querySelector('.nudge').classList.toggle('is-disabled',!hasClock);
+  SCRUBS.bpm.setDisabled(!hasClock);
+  SCRUBS.trim.setDisabled(!hasClock);
+}
+for(const id of ['tap','auto','sync','phMinus','phPlus']){
+  const b=document.getElementById(id); b.dataset.title=b.title;
+}
+
+inSel.addEventListener('change',()=>{
+  const v=inSel.value;
+  if(v==='clock'||v.indexOf('fix')===0){ armed=false; setArmState('idle'); selectInput(v).then(syncTransport); }
+  else if(armed){ selectInput(v).then(syncTransport).catch(err=>{
+    armed=false; setArmState('failed'); syncTransport();
+    setStatus((err&&(err.message||err.name))||'input failed','err'); }); }
+  else { setArmState('idle'); setStatus('press ARM to open '+v,'idle'); syncTransport(); }
+});
+
+/* ── clock controls ───────────────────────────────────────────────────────── */
+/* BPM — the base tempo. Dragging it takes the clock manual (that IS the intent of
+   grabbing the base). Auto hands it back. */
+mount('bpm',{min:40,max:220,step:0.5,value:120,allowExtend:true,label:'BPM',
+  onInput:v=>core.setBPM(v||120)});
+
+/* Trim — a live ± lean on top of whatever the clock says. Bipolar, so the scrub fills
+   FROM zero and the sign is readable at a glance across a dark room. Critically this
+   calls setTrim, NOT nudge: nudge sets an override and freezes detection, which is the
+   exact thing Rob does not want mid-set. Detection and PLL keep running underneath. */
+const TRIM_RANGE = 6;                                   // ±6 BPM covers a live lean; extends on demand
+mount('trim',{min:-TRIM_RANGE,max:TRIM_RANGE,step:0.1,value:0,allowExtend:true,label:'Tempo trim',
+  onInput:v=>{ core.setTrim(v); paintTrim(v); }});
+function paintTrim(v){
+  const on = Math.abs(v) > 0.001;
+  $('#gClock').classList.toggle('trimmed', on);
+  if(on) setStatus('trim '+(v>0?'+':'')+v.toFixed(1)+' BPM — detection still running','live');
+}
+
+/* Phase — slide the downbeat without touching tempo. SYNC remains the hard reset. */
+const PHASE_STEP = 0.02;                                // ~1/50 of a beat per press
+function shiftPhase(d){ core.shift(d); }
+$('#phMinus').addEventListener('click',()=>shiftPhase(-PHASE_STEP));
+$('#phPlus').addEventListener('click',()=>shiftPhase(+PHASE_STEP));
+const phFill = $('#phBar').firstElementChild;
+
+$('#tap').addEventListener('click',()=>core.tap(nowT()));
+$('#auto').addEventListener('click',()=>{                // auto clears trim in the core — mirror it in the UI
+  core.auto(); SCRUBS.trim.set(0); paintTrim(0);
+  setStatus('clock handed back to the detector','ok');
+});
+$('#sync').addEventListener('click',()=>{ core.resync(); setStatus('downbeat reset to now','ok'); });
+
+/* ── meters ───────────────────────────────────────────────────────────────── */
+const METERS=[
+  ['band.sub','sub'],['band.bass','bass'],['band.lowmid','lo-mid'],
+  ['band.mid','mid'],['band.highmid','hi-mid'],['band.treble','treble'],
+  ['rms','rms'],['flux','flux'],['onset','onset'],['beat.sine','beat']
+];
+const ACCENT_METERS={onset:1,'beat.sine':1};
+const mEls=[];
+(function buildMeters(){
+  const host=$('#meters');
+  for(const [id,label] of METERS){
+    const l=document.createElement('div'); l.className='ml'; l.textContent=label;
+    const t=document.createElement('div'); t.className='mt'+(ACCENT_METERS[id]?' a':'');
+    const i=document.createElement('i'); t.appendChild(i);
+    host.append(l,t); mEls.push(i);
+  }
+})();
+function featVal(f,id){
+  switch(id){
+    case 'rms': return f.rms;
+    case 'flux': return Math.min(1,f.flux*8);
+    case 'onset': return f.onset;
+    case 'beat.phase': return f.beat.phase;
+    case 'beat.sine': return 0.5-0.5*Math.cos(6.2832*f.beat.phase);
+    case 'beat.pulse': return Math.pow(Math.max(0,1-f.beat.phase),3);
+  }
+  if(id.indexOf('band.')===0) return f.bands[id.slice(5)]||0;
+  if(id.indexOf('env.')===0)  return f.env[id.slice(4)]||0;
+  return 0;
+}
+
+/* ── spectrum — the honest picture ────────────────────────────────────────────
+   The band meters are each AGC-normalised on their own sliding min/max, so their
+   heights cannot be compared to one another (sub in near-silence reads like bass on
+   a kick). This draws the RAW bins on a log-frequency axis, which is the actual
+   distribution, plus a slow peak-hold so transients stay legible at 60fps. */
+const spec=$('#spec'), sctx=spec.getContext('2d');
+const F_MIN=20, F_MAX=16000;
+let peaks=null, specW=0, specH=0, DPR=1;
+function resizeSpec(){
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  const r=spec.getBoundingClientRect();
+  specW=Math.max(1,Math.round(r.width)); specH=Math.max(1,Math.round(r.height));
+  spec.width=Math.round(specW*DPR); spec.height=Math.round(specH*DPR);
+  sctx.setTransform(DPR,0,0,DPR,0,0);
+  peaks=new Float32Array(specW);
+}
+addEventListener('resize',resizeSpec);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+let COL={};
+function readColours(){ COL={blue:css('--blue'),yellow:css('--yellow'),red:css('--red'),
+  line:css('--line'),muted:css('--muted')}; }
+
+function drawSpec(bins,binHz,live){
+  if(!peaks)return;
+  sctx.clearRect(0,0,specW,specH);
+  const logMin=Math.log10(F_MIN), logSpan=Math.log10(F_MAX)-logMin;
+  const col=new Float32Array(specW);
+  /* Bin → column, taking the max: at low frequencies many columns share one bin,
+     at high frequencies many bins share one column. Max keeps transients alive. */
+  for(let i=1;i<bins.length;i++){
+    const hz=i*binHz; if(hz<F_MIN||hz>F_MAX)continue;
+    const x=Math.floor(((Math.log10(hz)-logMin)/logSpan)*(specW-1));
+    const v=bins[i]/255;
+    if(v>col[x])col[x]=v;
+  }
+  for(let x=1;x<specW;x++) if(col[x]===0) col[x]=col[x-1]*0.86;   // fill log-scale gaps
+  const grad=sctx.createLinearGradient(0,0,specW,0);
+  grad.addColorStop(0,COL.blue); grad.addColorStop(0.55,COL.yellow); grad.addColorStop(1,COL.red);
+  sctx.fillStyle=grad; sctx.globalAlpha=live?1:0.45;
+  for(let x=0;x<specW;x++){
+    const h=col[x]*(specH-2);
+    if(h>0.5) sctx.fillRect(x,specH-h,1,h);
+    peaks[x]=Math.max(col[x],peaks[x]-0.006);                      // slow peak-hold
+  }
+  sctx.globalAlpha=live?0.55:0.25; sctx.fillStyle=COL.muted;
+  for(let x=0;x<specW;x++){ const y=specH-peaks[x]*(specH-2); if(peaks[x]>0.02) sctx.fillRect(x,y,1,1); }
+  sctx.globalAlpha=1;
+  /* band boundaries — so the six meters below can be located in the picture */
+  sctx.fillStyle=COL.line;
+  for(const [,lo] of (window.AC_BANDS||[])){
+    if(lo<=F_MIN)continue;
+    const x=Math.round(((Math.log10(lo)-logMin)/logSpan)*(specW-1));
+    sctx.fillRect(x,0,1,specH);
+  }
+}
+
+/* ── frame ────────────────────────────────────────────────────────────────── */
+const lamp=$('#lamp');
+let lampV=0;
+function frame(){
+  requestAnimationFrame(frame);
+  const t=nowT(); const dt=Math.min(0.05,last?t-last:1/60); last=t;
+
+  let fd, live=false;
+  if(clockOn) fd=silent;
+  else if(fixture) fd=fixture.frame(t);
+  else if(analyser){ analyser.getByteFrequencyData(freq); analyser.getByteTimeDomainData(time); fd=freq; live=true; }
+  else fd=silent;
+
+  const f=core.process(fd,(fixture||clockOn)?null:time,dt,t);
+
+  /* warming underlay */
+  const warm=(warmT0!=null)&&((t-warmT0)<WARM_SEC);
+  $('#meters').classList.toggle('warming',warm);
+  for(let i=0;i<METERS.length;i++){
+    let v=clamp(featVal(f,METERS[i][0]),0,1);
+    if(warm) v=Math.max(v, WARM_BASE+WARM_AMP*(0.5+0.5*Math.sin(t*WARM_RATE-i*WARM_PHASE)));
+    mEls[i].style.transform='scaleX('+v+')';
+  }
+
+  drawSpec(fd, core.binHz || (48000/FFT), live||!!fixture);
+
+  /* beat lamp — decays with a spring-ish settle rather than a linear ramp, so the
+     pulse reads as a physical hit (apple-design §4: behaviour, not a fixed curve) */
+  const target=Math.max(1-f.beat.phase*3, f.onset);
+  lampV += (target-lampV) * (target>lampV ? 0.55 : 0.12);
+  lamp.style.background = lampV>0.04
+    ? `color-mix(in srgb, var(--accent-beat) ${Math.round(lampV*100)}%, var(--line))`
+    : 'var(--line)';
+  lamp.style.transform='scale('+(1+lampV*0.18)+')';
+
+  /* phase readout — the caret walks the bar once per beat, so "is it in the groove"
+     is answerable by eye without staring at the lamp */
+  phFill.style.left=(f.beat.phase*100)+'%';
+
+  const tr=core.getTrim();
+  $('#bpmOut').textContent = f.beat.bpm ? f.beat.bpm.toFixed(1) : '—';
+  $('#conf').textContent   = 'conf ' + (f.beat.conf?f.beat.conf.toFixed(2):'—');
+  $('#src').textContent    = (f.beat.source||'—') + (tr ? (tr>0?' +':' ')+tr.toFixed(1) : '');
+  /* beat.bpm is the EFFECTIVE tempo (base + trim). Mirror the BASE into the BPM scrub,
+     or dragging trim would walk the base up and the offset would compound on the next
+     touch of BPM. The big readout stays effective — that is the number you hear. */
+  if(f.beat.bpm && !SCRUBS.bpm.isEditing()){
+    const base=+(f.beat.bpm-tr).toFixed(1);
+    if(Math.abs(SCRUBS.bpm.get()-base)>0.05) SCRUBS.bpm.set(base);
+  }
+}
+
+/* ── chrome toggle — bottom-right corner ──────────────────────────────────────
+   One class on body. The corner button is the only chrome that survives, because a
+   hidden UI with no visible way back traps the user. Tray extras live on hover of the
+   same corner, so the affordance and its contents share an origin. */
+const uiBtn=$('#uiBtn');
+function setUI(hidden){
+  document.body.classList.toggle('noui',hidden);
+  uiBtn.setAttribute('aria-pressed',hidden?'true':'false');
+  uiBtn.title = hidden ? 'Show interface (H)' : 'Hide interface (H)';
+  if(!hidden) resizeSpec();                    // the canvas was laid out while hidden
+}
+uiBtn.addEventListener('click',()=>setUI(!document.body.classList.contains('noui')));
+$('#meterSw').addEventListener('change',e=>{
+  $('#gLevels').style.display = e.target.checked ? '' : 'none';
+});
+
+/* ── keys ─────────────────────────────────────────────────────────────────── */
+addEventListener('keydown',e=>{
+  const tag=e.target&&e.target.tagName;
+  if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT')return;
+  if(e.target&&e.target.closest&&e.target.closest('.scrub'))return;   // Space must not double as pause
+  const k=e.key.toLowerCase();
+  if(k==='t'){ core.tap(nowT()); }
+  /* [ and ] were documented in the EQJ panel but never actually bound — nudge only
+     existed as buttons. Here they drive PHASE, which is what "line it up" means. */
+  else if(e.key==='['){ shiftPhase(-PHASE_STEP); }
+  else if(e.key===']'){ shiftPhase(+PHASE_STEP); }
+  else if(k==='h'){ setUI(!document.body.classList.contains('noui')); }
+  else if(k==='f'){ if(!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+                    else document.exitFullscreen?.(); }
+});
+
+/* ── boot ─────────────────────────────────────────────────────────────────── */
+readColours(); resizeSpec(); refreshDevices();
+setArmState('idle');
+/* Seed the DISPLAY only. Calling core.setBPM here would set an override and freeze the
+   detector to 120 the instant we boot onto a fixture or a live input — the clock branch
+   of selectInput() already seeds the core when (and only when) there is no audio at all. */
+SCRUBS.bpm.set(120);
+selectInput(FIXON?'fix124':'clock').then(()=>{ inSel.value=curInput; syncTransport(); });
+frame();
+
+window.__brykAudio = { core:()=>core, input:()=>curInput, armed:()=>armed, scrubs:SCRUBS };
+})();
+</script>
+</body>
+</html>
