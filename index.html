@@ -1852,6 +1852,16 @@ function setDriven(key,v){ const p=GLOBAL_PARAMS.find(x=>x.key===key); if(!p)ret
 let MOVE=null;                          /* {name, t, dur, step(k), done()} */
 function startMove(m){ MOVE={...m,t:0}; }
 const easeOut = k => 1-Math.pow(1-k,3);
+/* Summon a layer a move depends on, silent, without stealing focus or the open card —
+   a technique firing must never rearrange the panel under the user's hand. */
+function ensureProg(prog){
+  let L=layerOfProg(prog); if(L) return L;
+  L=makeLayer(prog); L.w=0;
+  const keepActive=activeId, keepOpen=layers.find(x=>x.open);
+  layers.push(L); seedRows(L);
+  activeId=keepActive; if(keepOpen) openOnly(keepOpen.id);
+  renderLayers(); return L;
+}
 const MOVES={
   /* build-up sucks everything to the centre, the drop throws it out and peaks the
      perspective — sжатие→взрыв from §8.3 */
@@ -1872,7 +1882,11 @@ const MOVES={
   /* chaos → order: scatter takes over, then the grid snaps back. The guilloché move,
      carried onto geometry (§4 «Собраться») */
   gather:{ name:'Gather', dur:5.4, step(k,ctx){
-    const g=layerOfProg('grid'), s=layerOfProg('scatter');
+    /* A move borrows layers that may simply not be on the stack — boot puts up one Axis,
+       so pressing 2 on a fresh page used to throw and kill the whole rAF loop. A move
+       that needs a layer summons it rather than assuming it; ensureProg leaves it silent
+       (w:0) so nothing appears until the move actually raises it. */
+    const g=ensureProg('grid'), s=ensureProg('scatter');
     if(k<0.62){ const a=k/0.62; s.w=lerp(ctx.sw,1,a); g.w=lerp(ctx.gw,0,a);
       state.phys.on=1; state.phys.swirl=lerp(ctx.swirl,1.6,a); }
     else { const b=easeOut((k-0.62)/0.38);
@@ -1890,7 +1904,7 @@ const MOVES={
 
   /* everything freezes into a hard grid on the beat and releases */
   snap:{ name:'Snap', dur:2.4, step(k,ctx){
-    const g=layerOfProg('grid');
+    const g=ensureProg('grid');
     g.w = k<0.5 ? 1 : lerp(1,ctx.gw,easeOut((k-0.5)/0.5));
     state.phys.follow = k<0.5 ? 18 : lerp(18,ctx.follow,(k-0.5)/0.5);
     renderLayers();
@@ -2304,6 +2318,12 @@ function applyScene(sc){
     openOnly(activeId);
   }
   if(sc.quant) QUANT=sc.quant;
+  /* Law 1 of this file: applyScene writes straight into modulated parameters, and
+     restoreMatrix() at the end of the SAME frame hands back whatever base it cached
+     before the load. Without this the scene loads and silently rolls back a frame later —
+     measured: apply a scene with size 40, read 34. Clear the cache so the next
+     applyMatrix() rebases onto the values the scene just set. */
+  BASES.clear();
   formKey='';
   buildRamp(); buildStops(); rebuildPool(); rebuildTextures();
   renderLayers(); buildMatrix(); syncAllScrubs();

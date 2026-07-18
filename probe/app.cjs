@@ -154,10 +154,32 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
         Math.hypot(b.x - a.x, b.y - a.y) > 0.05, Math.hypot(b.x - a.x, b.y - a.y).toFixed(3));
 
     // formation lands
-    solo('word'); await sleep(1400);
-    const pts = B.formation();
-    const near = B.pool().filter(p => pts.some(q => Math.hypot(q[0]-p.x, q[1]-p.y) < 0.06)).length;
-    put('bodies land on the word', near > B.pool().length * 0.7, near + '/' + B.pool().length);
+    /* The contract is simple and it is currently BROKEN: a body must end up at the point
+       the program assigned to IT. Measured 2026-07-18 with mappings cleared, jitter 0 and
+       a real solo: median 0.514 from the assigned point, bodies spanning 5.67 × 3.00
+       against a mask of 3.15 × 0.85. Ruled out: the mask itself (renders BRYK correctly),
+       the program target (returns the exact mask point for the body asked about), and the
+       forces (collide/swirl off changes little). The transport is what does not converge.
+       Threshold is the mask's own point spacing × 3 — three cells of slack is generous and
+       still nowhere near what the build does. This gate stays red until the word reads. */
+    solo('word'); await sleep(2600);
+    const pts = B.formation(), pool = B.pool(), NB = pool.length;
+    const errs = pool.map((b, i) => {
+      const q = pts[Math.min(pts.length - 1, Math.floor(i * pts.length / NB))];
+      return Math.hypot(q[0] - b.x, q[1] - b.y);
+    }).sort((a, b) => a - b);
+    const medErr = errs[Math.floor(NB / 2)];
+    const xs = pool.map(b => b.x), ys = pool.map(b => b.y);
+    const span = [Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
+    const mx = pts.map(q => q[0]), my = pts.map(q => q[1]);
+    const maskSpan = [Math.max(...mx) - Math.min(...mx), Math.max(...my) - Math.min(...my)];
+    const cell = Math.sqrt(maskSpan[0] * maskSpan[1] / Math.max(1, pts.length));
+    put('a body reaches the point it was assigned', medErr < cell * 3,
+        'median ' + medErr.toFixed(3) + ' vs 3 cells ' + (cell * 3).toFixed(3));
+    put('the crowd does not overflow the word', span[0] < maskSpan[0] * 1.25,
+        'bodies ' + span.map(v => v.toFixed(2)).join('×') + ' vs mask ' + maskSpan.map(v => v.toFixed(2)).join('×'));
+    put('the mask supplies a point for every body', pts.length >= NB * 0.9,
+        pts.length + ' points / ' + NB + ' bodies');
 
     // post pass
     B.state.post.chroma = 0.5; await sleep(300);
@@ -191,17 +213,31 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     }
 
     // ── Motion Primer behaviours / manners drive the force block ─────────────
+    /* Gate the RELATION, not the magnitude. The presets were re-scaled from Motion
+       Primer's px world onto our ±3 one — the file says so itself: «the separation/flow
+       figures are mapped, not copied — the RELATIONS between the manners are what carries
+       the character». The old thresholds (>1) were left over from the px era and failed
+       on correct code: fall now sets gravity 0.55, orbit swirl 0.55, Disperse collide
+       exactly 1.00. Any re-tune moves those numbers again; it must not move the ordering. */
     B.quant('off');
     const bs = document.getElementById('behSel');
-    bs.value = 'fall'; bs.dispatchEvent(new Event('change')); await sleep(500);
-    put('behaviour fall sets gravity', B.state.phys.gravity > 1, 'gravity ' + B.state.phys.gravity);
-    bs.value = 'orbit'; bs.dispatchEvent(new Event('change')); await sleep(500);
-    put('behaviour orbit swaps to swirl, drops gravity',
-        B.state.phys.gravity === 0 && B.state.phys.swirl > 1);
+    const pick = async (el, v) => { el.value = v; el.dispatchEvent(new Event('change')); await sleep(500);
+      return { ...B.state.phys }; };
+    const fall = await pick(bs, 'fall'), orbit = await pick(bs, 'orbit'), pack = await pick(bs, 'pack');
+    put('fall is the only behaviour that falls',
+        fall.gravity > 0 && orbit.gravity === 0 && pack.gravity === 0,
+        'fall ' + fall.gravity + ' / orbit ' + orbit.gravity + ' / pack ' + pack.gravity);
+    put('gravity dominates fall, swirl dominates orbit',
+        fall.gravity > fall.swirl && orbit.swirl > orbit.gravity && orbit.swirl > fall.swirl,
+        'fall g' + fall.gravity + ' s' + fall.swirl + ' | orbit g' + orbit.gravity + ' s' + orbit.swirl);
     const ms2 = document.getElementById('mannerSel');
-    ms2.value = 'Disperse'; ms2.dispatchEvent(new Event('change')); await sleep(500);
-    put('manner Disperse maximises separation, kills cohesion',
-        B.state.phys.collide > 1 && B.state.phys.flock === 0);
+    const disp = await pick(ms2, 'Disperse'), clus = await pick(ms2, 'Cluster'), flow = await pick(ms2, 'Flow');
+    put('Disperse separates hardest and refuses to cohere',
+        disp.collide > clus.collide && disp.collide > flow.collide && disp.flock === 0,
+        'collide ' + disp.collide + ' vs ' + clus.collide + '/' + flow.collide);
+    put('Cluster coheres, Flow flows',
+        clus.flock > disp.flock && flow.swirl > clus.swirl,
+        'cluster flock ' + clus.flock + ' | flow swirl ' + flow.swirl);
     put('panel follows a behaviour change',
         Math.abs(B.scrubs.collide.get() - B.state.phys.collide) < 0.001);
 
