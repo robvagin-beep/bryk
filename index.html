@@ -1971,13 +1971,22 @@ function makeLayer(prog,variant){
 /* reinit(), Motion Primer :249-262. A behaviour preset SEEDS its bodies — where they
    appear is half of what makes fall look like falling and orbit look like an orbit. The
    old table of numbers had no equivalent, which is why all six looked the same. */
+/* ONE seeding path, used by both callers. The frame loop used to re-seed a stray body
+   inline without zeroing its velocity first, and `fall` opens with `b.mvy += gravity*dt`,
+   so an undefined velocity turned the whole pool to NaN the moment Count changed after a
+   behaviour layer existed. Anything that seeds a body goes through here. */
+function mpSeedBody(b,i,N,r,P,params){
+  b.mvx=0; b.mvy=0; b.age=0; b.oR=null; b.tx=null; b.ty=null;
+  if(b.seed==null) b.seed=hash01(i)*1e3;
+  P.init(b,i,N,r,params);
+  if(!Number.isFinite(b.mx)||!Number.isFinite(b.my)){ b.mx=MPW/2; b.my=MPH/2; }
+  if(!Number.isFinite(b.mvx)) b.mvx=0;
+  if(!Number.isFinite(b.mvy)) b.mvy=0;
+}
 function mpSeed(L){
   const P=PROGRAMS[L.prog]; if(!P||!P.init)return;
-  const r=rngFor(L.seed*3+1);
-  const N=pool.length;
-  for(let i=0;i<N;i++){ const b=pool[i];
-    b.mvx=0; b.mvy=0; b.age=0; b.seed=(b.seed==null?hash01(i)*1e3:b.seed);
-    P.init(b,i,N,r,L.params); }
+  const r=rngFor(L.seed*3+1), N=pool.length;
+  for(let i=0;i<N;i++) mpSeedBody(pool[i],i,N,r,P,L.params);
 }
 const rngFor=seed=>{ let x=(seed>>>0)||1;
   return ()=>{ x=(x*1664525+1013904223)>>>0; return x/4294967296; }; };
@@ -2301,6 +2310,9 @@ function rebuildPool(){
      (id · phase · band · a point on the unit sphere · lane · axis) */
   for(let i=0;i<n;i++) pool[i].pd=baseParticle(i,77);
   assignFaces();
+  /* a rebuilt pool has no behaviour state; every behaviour layer re-seeds or its
+     bodies start from undefined */
+  layers.forEach(mpSeed);
 }
 
 /* ── local interaction ────────────────────────────────────────────────────────
@@ -3556,8 +3568,12 @@ function frame(){
     const ctx={ flock:mine, com:{x:cx/mine.length,y:cy/mine.length} };
     const pr={...L.params};
     if(pr.manner!=null) pr.manner=MANNER_LIST[clamp(Math.round(pr.manner),0,5)];
-    for(const b of mine){ if(b.mx==null){ P.init(b,0,mine.length,Math.random,L.params); }
-      P.step(b,Math.min(dt,0.05),t,pr,ctx); }
+    const rr=rngFor(L.seed*3+1);
+    for(let k=0;k<mine.length;k++){ const b=mine[k];
+      if(!Number.isFinite(b.mx)) mpSeedBody(b,k,mine.length,rr,P,L.params);
+      P.step(b,Math.min(dt,0.05),t,pr,ctx);
+      /* a behaviour that produces NaN must not poison the pool for every other layer */
+      if(!Number.isFinite(b.mx)||!Number.isFinite(b.my)) mpSeedBody(b,k,mine.length,rr,P,L.params); }
   }
 
   /* forces first, then the targets integrate against the same velocity */
@@ -3743,7 +3759,7 @@ window.__bryk = { state, core:()=>core, pool:()=>pool, layers:()=>layers, scrubs
   /* Ask the ENGINE who owns a body. A probe that re-derives ownership would be testing
      its own copy of the rule, which is how a green gate ends up proving nothing. */
   owner:i=>ownerOf(i,dealers()), dealers:()=>dealers(), manners:()=>MANNER_PRESET,
-  setCount(n){ state.count=n; SCRUBS.count.set(n); rebuildPool(); },
+  setCount(n){ state.count=n; SCRUBS.count.set(n); rebuildPool(); layers.forEach(mpSeed); },
   setFace(v){ state.face=v; SCRUBS.face.set(v); rebase('face',v); },
   setLayerW(i,w){ if(layers[i]){ layers[i].w=w; renderLayers(); } },
   onlyProg(p){ let f=layerOfProg(p); if(!f)f=addLayer(p);

@@ -110,7 +110,9 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
     const F = B.onlyProg('pat-form'); B.setCount(240);
     const spans = [];
     for (let k = 0; k < 8; k++) {
-      F.params.formShape = k; await s(400);
+      /* the pool was just rebuilt by setCount and the previous preset was still pulling —
+         measure the FORM, not the transit toward it */
+      F.params.formShape = k; await s(1100);
       const pl = B.pool(), xs = pl.map(q => q.x), ys = pl.map(q => q.y);
       if (!pl.every(q => [q.x,q.y,q.z].every(Number.isFinite))) { spans.push('NaN'); continue; }
       spans.push((Math.max(...xs)-Math.min(...xs)).toFixed(2)+'x'+(Math.max(...ys)-Math.min(...ys)).toFixed(2));
