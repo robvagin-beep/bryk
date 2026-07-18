@@ -316,15 +316,32 @@ button,.tinSelect{touch-action:manipulation}
 </head>
 <body>
 
-<!-- LEFT · Synthex grammar: STATIC — object, construction, vector.
-     Reads as one sentence: what bodies → how placed → into what word → in what space
-     → under what forces. (PANEL_MAP.md:24) -->
+<!-- LEFT · «Левая панель это контекст того, что мы строим» (Роб, 2026-07-18).
+     One sequence, and it starts with the choice: pick a piece → it becomes a card → tune
+     it → then the settings that belong to everything underneath.
+       LAYERS (shelf → stack) → POOL → FORCES → SPACE
+     What changed and why. BODIES used to sit ABOVE the stack and paint every layer at
+     once, so you configured the material before deciding what you were building, and a
+     card could not affect its own bodies. FORMATION used to be its own fieldset while
+     `word` is a program, so a Word layer's text lived in a different section from the
+     layer — that is the «настройки, потом выбор, потом опять настройки» Rob called out.
+     Debt, stated: the marks are still global (POOL). They move into the card in the slice
+     that touches the engine (L.shapes + face dealing by share partition). -->
 <aside id="panel">
   <div class="ptitle">Build</div>
   <div class="pbody">
-    <fieldset><legend>Bodies</legend>
-      <p class="note" style="margin-top:0">Weights, not a choice — every face above zero
-        is in the mix. Drop PNG or SVG anywhere to add more.</p>
+    <fieldset id="gLayers"><legend>Layers</legend>
+      <div class="seg wrap" id="addLayerBar" role="group" aria-label="Add layer"></div>
+      <div id="layers"></div>
+      <p class="note">A layer is a way of placing bodies, with a PRESENCE weight.
+        <b>share</b> splits the pool so two forms stay legible instead of averaging into
+        one. Click a layer to focus it — the mapping rack on the right edits <b>its</b> rows.</p>
+    </fieldset>
+
+    <fieldset id="gPool"><legend>Pool</legend>
+      <p class="note" style="margin-top:0">One shared pool. Every layer above places
+        THESE bodies — count and calibre are the material, the stack decides where they go.
+        Weights, not a choice: every face above zero is in the mix. Drop PNG or SVG anywhere.</p>
 
       <div class="row"><label>triangle</label><span data-mnt="wTri"></span></div>
       <div class="row"><label>wedge</label><span data-mnt="wWedge"></span></div>
@@ -347,33 +364,6 @@ button,.tinSelect{touch-action:manipulation}
       <div class="row"><label title="0 = all at one angle, 1 = every body its own tilt">Tilt variation</label><span data-mnt="varTilt"></span></div>
     </fieldset>
 
-    <fieldset id="gLayers"><legend>Layers</legend>
-      <div class="seg wrap" id="addLayerBar" role="group" aria-label="Add layer"></div>
-      <div id="layers"></div>
-      <p class="note">A layer is a way of placing bodies, with a PRESENCE weight.
-        <b>share</b> splits the pool so two forms stay legible instead of averaging into
-        one. Click a layer to focus it — the mapping rack on the right edits <b>its</b> rows.</p>
-    </fieldset>
-
-    <fieldset id="gForm"><legend>Formation</legend>
-      <div class="row full"><input class="tinText" id="fText" value="BRYK" aria-label="Formation text" spellcheck="false"></div>
-      <div class="row full" style="margin-top:var(--sp-1)"><select id="fFont" class="tinSelect" aria-label="Formation font"></select></div>
-      <button class="btn wide" id="fFonts" style="margin-top:var(--sp-1)">list installed fonts</button>
-      <p class="note" id="fNote">Add a <b>Word</b> layer to build this text out of bodies.</p>
-      <div class="row" style="margin-top:var(--sp-2)"><label title="Bodies are pushed out of the mark, so streams part around it">Logo as void</label><span data-mnt="logoAvoid"></span></div>
-      <div class="row"><label>Logo size</label><span data-mnt="logoScale"></span></div>
-      <p class="note">Add a <b>Logo</b> layer to gather bodies <b>into</b> the mark — or
-        raise <b>Logo as void</b> and let the flow route <b>around</b> it.</p>
-    </fieldset>
-
-    <fieldset id="gSpace"><legend>Space</legend>
-      <div class="row"><label title="0 = flat orthographic, up = depth opens out">Perspective</label><span data-mnt="persp"></span></div>
-      <div class="row"><label>Zoom</label><span data-mnt="zoom"></span></div>
-      <div class="row"><label>Tilt</label><span data-mnt="tilt"></span></div>
-      <div class="row"><label>Auto spin</label><span data-mnt="spin"></span></div>
-      <p class="note">Drag the stage to orbit, wheel to zoom, double-click to reset.</p>
-    </fieldset>
-
     <fieldset id="gPhys"><legend>Forces</legend>
       <div class="row"><label title="Motion Primer behaviours — a whole force set at once">Behaviour</label>
         <select id="behSel" class="tinSelect" aria-label="Behaviour"><option value="">—</option></select></div>
@@ -389,7 +379,32 @@ button,.tinSelect{touch-action:manipulation}
       <div class="row"><label title="Magnet to centre, stronger the closer they get">Attract</label><span data-mnt="attract"></span></div>
       <div class="row"><label>Gravity</label><span data-mnt="gravity"></span></div>
       <div class="row"><label title="Cohesion toward the local mean">Flock</label><span data-mnt="flock"></span></div>
+      <div class="row" style="margin-top:var(--sp-2)"><label title="Bodies are pushed out of the mark, so streams part around it">Logo as void</label><span data-mnt="logoAvoid"></span></div>
     </fieldset>
+
+    <fieldset id="gSpace"><legend>Space</legend>
+      <div class="row"><label title="0 = flat orthographic, up = depth opens out">Perspective</label><span data-mnt="persp"></span></div>
+      <div class="row"><label>Zoom</label><span data-mnt="zoom"></span></div>
+      <div class="row"><label>Tilt</label><span data-mnt="tilt"></span></div>
+      <div class="row"><label>Auto spin</label><span data-mnt="spin"></span></div>
+      <p class="note">Drag the stage to orbit, wheel to zoom, double-click to reset.</p>
+    </fieldset>
+
+    <!-- Program extras: controls that cannot be generated from a param declaration
+         (a text field, a font picker). They live here once, keep their wiring, and are
+         MOVED into the open card by renderLayers — moving a node preserves its listeners,
+         cloning would lose them. This div is their parking bay and is never visible. -->
+    <div id="progExtras" hidden>
+      <div id="fExtras">
+        <div class="row full"><input class="tinText" id="fText" value="BRYK" aria-label="Formation text" spellcheck="false"></div>
+        <div class="row full" style="margin-top:var(--sp-1)"><select id="fFont" class="tinSelect" aria-label="Formation font"></select></div>
+        <button class="btn wide" id="fFonts" style="margin-top:var(--sp-1)">list installed fonts</button>
+        <p class="note" id="fNote"></p>
+      </div>
+      <div id="lExtras">
+      <div class="row"><label>Logo size</label><span data-mnt="logoScale"></span></div>
+      </div>
+    </div>
   </div>
 </aside>
 
@@ -1598,27 +1613,43 @@ function makeLayer(prog,variant){
     seed:(Math.random()*1e6)|0,      /* two copies of one program diverge here */
     params, matrix:[], open:false };
 }
+/* Idempotent, ported from EQJ `mvj-inject:653` with the author's reason: re-clicking the
+   ALREADY active layer must not churn the comb, or a double-click rename on it cannot
+   survive the rebuild the first click triggers. */
 function focusLayer(id){
+  if(id!=null && id===activeId && activeLayer()) return;
   if(id!=null) activeId=id;
   matrix=(activeLayer()||{matrix:[]}).matrix;
 }
+/* Exactly one card open, always (Rob: «пусть будет взаимозакрывание, чтобы не было
+   путаницы по настройкам»). Load-bearing as well as tidy: the program extras are a single
+   DOM node, so two open Word cards would fight over the same text field. Opening never
+   closes the one you clicked — that is what keeps the double-click rename alive. */
+function openOnly(id){ layers.forEach(L=>L.open=(L.id===id)); }
 function addLayer(prog,variant){
   const L=makeLayer(prog,variant);
   layers.unshift(L); focusLayer(L.id); seedRows(L);
+  /* the piece you just picked is the piece you want to tune — it opens, the rest close */
+  openOnly(L.id);
   renderLayers(); buildMatrix(); return L;
 }
 function removeLayer(id){
   const i=layers.findIndex(L=>L.id===id); if(i<0)return;
   layers.splice(i,1);
   if(activeId===id) activeId=layers.length?layers[0].id:null;
-  focusLayer(); renderLayers(); buildMatrix();
+  focusLayer();
+  /* fill the vacancy only — removing a closed layer must not yank the open state off the
+     card the user was working in */
+  if(!layers.some(L=>L.open)) openOnly(activeId);
+  renderLayers(); buildMatrix();
 }
 function duplicateLayer(id){
   const i=layers.findIndex(L=>L.id===id); if(i<0)return;
   const L=layers[i];
   const c={...L, id:++uid, seed:(Math.random()*1e6)|0,
     label:L.label+' copy', params:{...L.params}, matrix:L.matrix.map(r=>({...r}))};
-  layers.splice(i,0,c); focusLayer(c.id); renderLayers(); buildMatrix();
+  /* the spread copies `open` too, so without this a duplicate of an open card gives TWO */
+  layers.splice(i,0,c); focusLayer(c.id); openOnly(c.id); renderLayers(); buildMatrix();
 }
 function moveLayer(id,dir){
   const i=layers.findIndex(L=>L.id===id), j=i+dir;
@@ -2230,6 +2261,9 @@ function applyScene(sc){
     }
     activeId=sc.active && layers.some(L=>L.id===sc.active) ? sc.active : (layers[0]?layers[0].id:null);
     focusLayer();
+    /* a rebuilt stack has every card closed, which would strand the program extras in the
+       parking bay and leave the panel with no open card at all */
+    openOnly(activeId);
   }
   if(sc.quant) QUANT=sc.quant;
   formKey='';
@@ -2578,8 +2612,20 @@ document.querySelectorAll('legend[data-toggle]').forEach(l=>{
    Row 1: number · name (click = focus, dbl = rename) · ▲ ▼ ⧉ ✕
    Row 2: variant ▾ · PRESENCE · hide · solo
    Row 3 (open): share + the program's own declared params. */
+/* Which programs carry controls that a param declaration cannot express. The card is the
+   only honest home for them: `word`'s text IS the word layer, and keeping it in a separate
+   fieldset is what made the panel read as «настройки, потом выбор, потом опять настройки».
+   Debt, stated out loud: state.formation is still ONE global object, so two Word layers
+   share a text. It now READS per-layer and is not yet. Per-layer lands with L.shapes. */
+const PROG_EXTRAS={ word:'fExtras', logo:'lExtras' };
+
 function renderLayers(){
   const host=$('#layers'); if(!host)return;
+  /* Park the extras BEFORE the wipe. They are the only nodes in this subtree that must
+     outlive it — innerHTML='' would destroy them and every listener bound to them. */
+  const park=$('#progExtras');
+  if(park) for(const id of Object.values(PROG_EXTRAS)){
+    const el=document.getElementById(id); if(el) park.appendChild(el); }
   host.innerHTML='';
   layers.forEach((L,idx)=>{
     const d=document.createElement('div');
@@ -2590,7 +2636,7 @@ function renderLayers(){
     nm.innerHTML='<span class="ln">'+(idx+1)+'</span> · <b></b>';
     nm.querySelector('b').textContent=L.label;
     nm.title='Click to focus · double-click to rename';
-    nm.addEventListener('click',()=>{ focusLayer(L.id); L.open=!L.open; renderLayers(); buildMatrix(); });
+    nm.addEventListener('click',()=>{ focusLayer(L.id); openOnly(L.id); renderLayers(); buildMatrix(); });
     nm.addEventListener('dblclick',e=>{ e.stopPropagation();
       const v=prompt('Layer name',L.label); if(v!=null&&v.trim()){ L.label=v.trim(); renderLayers(); buildMatrix(); } });
     const ctl=document.createElement('span'); ctl.className='lctl';
@@ -2645,6 +2691,9 @@ function renderLayers(){
           label:L.label+' '+p.label, onInput:v=>p.set(v)});
         sl.appendChild(s2.el);
       }
+      /* the program's own non-scrub controls, moved in from the parking bay */
+      const exId=PROG_EXTRAS[L.prog];
+      if(exId){ const ex=document.getElementById(exId); if(ex) box.appendChild(ex); }
       d.appendChild(box);
     }
     host.appendChild(d);
