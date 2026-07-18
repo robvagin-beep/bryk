@@ -573,6 +573,10 @@ function mkScrub(cfg){
       v=(cfg.value!=null?+cfg.value:min),editing=false;
   const el=document.createElement('div');
   el.className='scrub'; el.tabIndex=0; el.setAttribute('role','slider');
+  /* the info dock looks a control up by `dataset.k`. Nothing ever assigned it, so the
+     lookup fell through to «the element's own text» and 52 sliders explained themselves
+     by repeating their own number back at the reader. */
+  if(cfg.k) el.dataset.k=cfg.k;
   if(cfg.label) el.setAttribute('aria-label',cfg.label);
   const fill=document.createElement('i'); fill.className='sfill';
   const val=document.createElement('span'); val.className='sval';
@@ -643,7 +647,8 @@ function mkScrub(cfg){
       const f=(max>min)?clamp((nv-min)/(max-min),0,1):0;
       live.style.left=(f*100)+'%'; if(live.style.display==='none')live.style.display='block'; } };
 }
-function mount(slot,cfg){ const host=document.querySelector('[data-mnt="'+slot+'"]');
+function mount(slot,cfg){
+  if(cfg.k==null) cfg.k=slot;   /* the data-mnt slot IS the DESC key */ const host=document.querySelector('[data-mnt="'+slot+'"]');
   /* CANON row() :3777 — the (0,1,1) signature IS a toggle and must render as a switch,
      not as a number field showing 0/1. Route it automatically so the call sites stay
      declarative and nobody has to remember. */
@@ -1060,11 +1065,31 @@ function faceList(){
     for(const k of MARKS) if(anyWants(k)) out.push({ kind:'cam', shape:k, w:1 });
   return out.length?out:[{kind:'prim',shape:'rect',w:1}];
 }
+/* One bank per LOOK, not one bank for the stage. `radius`, `stroke` and `tint` bake into
+   the texture, so while the bank was global those three card sliders wrote a per-layer
+   field that nothing read — measured: zero reads of LK.radius / LK.stroke / LK.tint — and
+   every drag frame rebuilt every texture for nothing. Layers that share a look share a
+   bank, so the cache collapses to one entry in the common case. */
+const BANKS=new Map();
+const lookSig=L=>{ const k=(L&&L.look)||state;
+  return [k.stroke|0, Math.round(k.radius||0), Math.round((k.tint??state.assetTint??0)*100)].join('|'); };
+function bankFor(L){
+  const sig=lookSig(L);
+  let b=BANKS.get(sig);
+  if(!b){ b=buildBank((L&&L.look)||state); BANKS.set(sig,b); }
+  return b;
+}
 function rebuildTextures(){
-  textures=[];
+  BANKS.clear();
+  textures=buildBank(state);          /* the stage default, still the fallback */
+  TEX_N=textures.length;
+  assignFaces();
+}
+function buildBank(LK){
+  const textures=[];
   const st=normStops();
   const faces=faceList();
-  const r = state.radius/100*TEX_PX;      /* pictures only — primitives stay sharp */
+  const r = (LK.radius??state.radius)/100*TEX_PX;   /* pictures only — primitives stay sharp */
   for(const face of faces){
     /* camera faces are LIVE — one shared canvas per shape, redrawn each frame in
        camTick's wake. They are not multiplied by the palette: the duotone already put
@@ -1081,7 +1106,7 @@ function rebuildTextures(){
       const col='rgb('+rgb[0]+','+rgb[1]+','+rgb[2]+')';
       if(face.kind==='prim'){
         pathFor(x,face.shape,TEX_PX,TEX_PX,face.vi);   /* sharp — no radius */
-        if(state.stroke>0.5){ x.lineWidth=Math.max(2,TEX_PX*0.045); x.strokeStyle=col; x.stroke(); }
+        if((LK.stroke??state.stroke)>0.5){ x.lineWidth=Math.max(2,TEX_PX*0.045); x.strokeStyle=col; x.stroke(); }
         else { x.fillStyle=col; x.fill(); }
       } else {
         /* cover-fit into the square, then a palette tint through source-atop so the
@@ -1091,9 +1116,10 @@ function rebuildTextures(){
         /* the ONLY place corner radius applies: an inserted picture */
         x.save(); roundRect(x,TEX_PX,TEX_PX,r); x.clip();
         x.drawImage(im,(TEX_PX-dw)/2,(TEX_PX-dh)/2,dw,dh);
-        if(state.assetTint>0){
+        const tint=LK.tint??state.assetTint;
+        if(tint>0){
           x.globalCompositeOperation='source-atop';
-          x.globalAlpha=state.assetTint; x.fillStyle=col; x.fillRect(0,0,TEX_PX,TEX_PX);
+          x.globalAlpha=tint; x.fillStyle=col; x.fillRect(0,0,TEX_PX,TEX_PX);
         }
         x.restore();
       }
@@ -1102,8 +1128,7 @@ function rebuildTextures(){
       textures.push(c);
     }
   }
-  TEX_N=textures.length;
-  assignFaces();
+  return textures;
 }
 
 /* Seeded, weighted assignment. Stable for a given mixSeed — the scene keeps its identity
@@ -1116,7 +1141,8 @@ function hash01(n){ const s=Math.sin(n*127.1+state.mixSeed*311.7)*43758.5453; re
    control. Ties go to the upper card, which is also the one you reach for first. */
 function assignFaces(){ layers.forEach(assignFacesFor); }
 function assignFacesFor(L){
-  if(!textures.length||!L)return;
+  if(!L)return;
+  const textures=bankFor(L); if(!textures.length)return;
   const arr=L.bodies;
   for(let i=0;i<arr.length;i++){
     arr[i].L=L;
@@ -2133,6 +2159,15 @@ function paramsOf(L){
     { key:'w', label:'opacity', min:0, max:1, step:0.01, get:()=>L.opacity, set:v=>L.opacity=v },
     { key:'count', label:'count', min:20, max:2000, step:1,
       get:()=>L.count, set:v=>{ L.count=Math.round(v); rebuildLayer(L); } },
+    /* the LOOK belongs here too. It was rendered into the card by a parallel path and
+       never entered paramsOf, so `applyMatrix` could not find `size` at all — the row was
+       skipped and the drive reached nothing. paramsOf is the single point of contact
+       between a layer and everything that addresses it; anything outside it is invisible
+       to the rack, to macros and to scenes. */
+    ...LOOK_PARAMS.map(d=>({ ...d,
+      get:()=>L.look[d.key]??d.def,
+      set:v=>{ L.look[d.key]=v;
+        if(d.key==='radius'||d.key==='stroke'||d.key==='tint') assignFacesFor(L); } })),
     /* STYLE_AXIS, shuffler :336-341. A preset declares WHICH keys it shows. Without this
        Waterfall displayed eight sliders and read four: angle, bend, bend freq and plane
        tilt turned and did nothing. `keys` is mandatory on every preset for that reason. */
@@ -2174,7 +2209,9 @@ function seedRows(L){
    last one silently winning (EQJ mvj-inject:564 — the first row just burned CPU).
    ══════════════════════════════════════════════════════════════════════════ */
 const GLOBAL_PARAMS = [
-  { key:'size',        label:'size',        min:8,  max:120, step:1,    get:()=>state.size,      set:v=>state.size=v },
+  /* `size` lives on the layer (LOOK_PARAMS) since bodies stopped being shared. The global
+     twin stayed in this list, so a rack row on `size` wrote state.size while the renderer
+     read L.look.size — the drive reached nothing. One concept, one field. */
   { key:'cam.persp',   label:'perspective', min:0,  max:1.2, step:0.01, get:()=>state.cam.persp, set:v=>state.cam.persp=v },
   { key:'cam.zoom',    label:'zoom',        min:0.4,max:2.4, step:0.01, get:()=>state.cam.zoom,  set:v=>state.cam.zoom=v },
   { key:'cam.tilt',    label:'tilt',        min:-1, max:1,   step:0.01, get:()=>state.cam.tilt,  set:v=>state.cam.tilt=v },
@@ -2271,7 +2308,7 @@ function applyMatrix(f){
 }
 function restoreMatrix(acc){ for(const [,s] of acc) s.p.set(s.base); }
 const SCRUB_FOR = { 'size':'size','cam.persp':'persp','cam.zoom':'zoom','cam.tilt':'tilt',
-  'face':'face','satDrift':'satDrift',
+  'satDrift':'satDrift',
   'phys.follow':'follow','phys.damp':'damp','phys.collide':'collide','phys.radius':'pradius',
   'phys.swirl':'swirl','phys.attract':'attract','phys.gravity':'gravity','phys.flock':'flock',
   'logoAvoid':'logoAvoid','cam.spin':'spin' };
@@ -3369,16 +3406,22 @@ const footDefault=()=>setFoot('Info');
 (function(){
   const keyOf=el=>{
     if(el.dataset&&el.dataset.desc) return null;                 /* literal wins */
+    const sc=el.closest('.scrub'); if(sc&&sc.dataset.k) return sc.dataset.k;
     const sl=el.closest('.row')?.querySelector('[data-mnt]');
     if(sl) return sl.getAttribute('data-mnt');
-    const sc=el.closest('.scrub'); if(sc&&sc.dataset.k) return sc.dataset.k;
     return null;
   };
   const show=e=>{
     const el=e.target.closest('label,button,select,input,.scrub,legend,.lname'); if(!el)return;
     const lit=el.dataset&&el.dataset.desc;
     const k=keyOf(el);
-    setFoot(lit || (k&&DESC[k]) || el.title || (el.textContent||'').trim() || 'Info');
+    /* `prog.key` first, then the bare key: the dictionary was written when the axis family
+       was called `axis`, and the port renamed it `flow`, so every ported preset asked for
+       a key that did not exist and fell through to «repeat your own number». A family
+       fallback is also simply right — `bend` means the same thing on every axis preset. */
+    const bare=k&&k.indexOf('.')>0 ? k.slice(k.indexOf('.')+1) : null;
+    setFoot(lit || (k&&DESC[k]) || (bare&&DESC[bare]) || (bare&&DESC['axis.'+bare])
+            || el.title || (el.textContent||'').trim() || 'Info');
   };
   for(const sel of ['#panel .pbody','#rightcol .pbody']){
     const host=document.querySelector(sel); if(!host)continue;
@@ -3500,7 +3543,7 @@ function renderLayers(){
         const lb=document.createElement('label'); lb.textContent=p.label; lb.title=p.label;
         const sl=document.createElement('span'); row.append(lb,sl); box.appendChild(row);
         const s2=mkScrub({min:p.min,max:p.max,step:p.step,value:p.get(),allowExtend:!!extend,
-          label:L.label+' '+p.label, onInput:v=>p.set(v)});
+          k:p.descKey||p.key, label:L.label+' '+p.label, onInput:v=>p.set(v)});
         sl.appendChild(s2.el);
       } };
 
@@ -3519,12 +3562,15 @@ function renderLayers(){
       box.appendChild(rr);
 
       cap('look');
-      mkRows(LOOK_PARAMS.map(d=>({ ...d,
-        get:()=>L.look[d.key]??d.def,
-        set:v=>{ L.look[d.key]=v; rebuildTextures(); } })), true);
+      /* from paramsOf, so the card and the rack address exactly the same objects */
+      { const all=paramsOf(L), byKey=k=>all.find(x=>x.key===k);
+        mkRows(LOOK_PARAMS.map(d=>byKey(d.key)).filter(Boolean), true); }
 
       if(P.params.length){ cap('form');
-        mkRows(P.params.map(x=>({...x, get:()=>L.params[x.key], set:v=>L.params[x.key]=v}))); }
+        /* allowExtend, like every other numeric row. Ten engine controls clamped because
+           this one call omitted the flag — the input law is not optional per call site. */
+        mkRows(P.params.map(x=>({...x, descKey:L.prog+'.'+x.key,
+          get:()=>L.params[x.key], set:v=>L.params[x.key]=v})), true); }
       /* the program's own non-scrub controls, moved in from the parking bay */
       const exId=PROG_EXTRAS[L.prog];
       if(exId){ const ex=document.getElementById(exId); if(ex) box.appendChild(ex); }
@@ -3615,12 +3661,13 @@ const lamp=$("#lamp"); let lampV=0, fpsAcc=0, fpsN=0, fpsShown=0, lastQuads=0;
    split: every layer now calls this with its own draw list, inside its own alpha and
    blend, so the body-level code below did not have to change at all. */
 let lastQuadsAcc=0;
+let DRIVEN_WATCH=false; const DRIVEN_LOG={};
 function paintDraws(draws,t,sizeMul){
 
   /* Size, tilt spread and heading are per-layer: a body wears the look of the layer
      that owns it (lookOf). `state` is the fallback for a body nobody claimed, so nothing
      is ever undefined. This is the wiring without which the card would only pretend. */
-  const size=state.size*sizeMul;
+  const size=sizeMul;      /* calibre comes from the owning layer's look below */
   let quads=0;   /* this layer's share of the frame's quad budget */
 
   /* ── quad budget ────────────────────────────────────────────────────────────
@@ -3642,11 +3689,13 @@ function paintDraws(draws,t,sizeMul){
   }
   for(const d of draws){
     const {b,P,i}=d;
-    const img=textures[b.tex]||textures[0]; if(!img)continue;
+    /* the OWNING layer's bank: radius, stroke and tint bake into the texture, so a body
+       has to read the bank built for its own look, not the stage default */
+    const bank=(b.L?bankFor(b.L):textures);
+    const img=bank[b.tex]||bank[0]||textures[0]; if(!img)continue;
     const pv=b.pd||{size:1,roll:0,spin:0};
     const LK=lookOf(b);
-    const calibre=lerp(1,pv.size,LK.varSize)*((LK.size??state.size)/state.size);
-                                                        /* 0 = every body identical */
+    const calibre=lerp(1,pv.size,LK.varSize)*(LK.size??state.size);   /* 0 = every body identical */
     const sc=size*P.k/220*(d.scale==null?1:d.scale)*calibre;
     const alpha=clamp(0.35+P.k*0.35,0,1)*(d.alpha==null?1:d.alpha);
     const px = sc*2.2;                       /* on-screen size of this body */
@@ -3748,6 +3797,13 @@ function frame(){
 
   /* ── drive: modulate, draw, restore the bases ── */
   const acc=applyMatrix(f);
+  /* A driven value exists only between here and restoreMatrix at the foot of the frame,
+     so nothing outside frame() can ever observe it — an rAF callback runs after the base
+     is already back. Without this hook a probe can only watch the panel riser, which is
+     painted whether or not the value reached anything. */
+  if(DRIVEN_WATCH){ for(const [,s2] of acc){
+    const key=(s2.layerId?s2.layerId+'::':'')+s2.key;
+    (DRIVEN_LOG[key]||(DRIVEN_LOG[key]=[])).push(s2.p.get()); } }
 
   /* quantised actions land here, on the musical grid, not on the click */
   servePending(f);
@@ -3926,6 +3982,11 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
      the ported reference set is MANNER_PRESET. One key for both let a gate go green on
      the table the UI does not use. */
   mannerPresets:()=>MANNER_PRESET, bodiesOf:L=>L.bodies,
+  /* watch what the ENGINE receives, not what the panel draws */
+  /* clear on ENABLE only: clearing on disable wiped the very log the caller was about to
+     read, so the gate saw «0 frames» and reported a dead drive on a live one */
+  watchDriven(on){ DRIVEN_WATCH=!!on; if(on) for(const k in DRIVEN_LOG) delete DRIVEN_LOG[k]; },
+  driven:()=>DRIVEN_LOG,
   /* count is a LAYER property now — setting it on the stage means setting it on every
      layer, which is what a probe asking for N bodies actually wants */
   setCount(n){ layers.forEach(L=>{ L.count=n; rebuildLayer(L); });

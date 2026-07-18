@@ -37,7 +37,8 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   await page.goto(URL, { waitUntil: 'load' });
   await page.waitForFunction(() => !!window.__bryk, null, { timeout: 8000 });
   await page.waitForTimeout(2500);
-  ok('console clean', errors.length === 0, errors.slice(0, 3).join(' | '));
+  ok('console clean at boot', errors.length === 0, errors.slice(0, 3).join(' | '));
+  const bootErrs = errors.length;
 
   // ── static: canon, geometry, contrast, spacing stress ──────────────────────
   for (const [n, p, e] of await page.evaluate(() => {
@@ -133,8 +134,14 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
        button», which is Rob's rule that any preset choice IS a new layer. */
     const bank = B.programs();
     const patIds = Object.keys(bank).filter(k => bank[k].group === 'particles');
-    put('every pattern in the bank has its own preset', patIds.length === B.patterns().length,
-        patIds.length + '/' + B.patterns().length + ' patterns on the shelf');
+    /* was `patIds.length === B.patterns().length` where patIds is derived FROM the bank —
+       the assertion compared a number with itself. Check the names actually line up. */
+    const bankNames = new Set(B.patterns().map(([id]) => id));
+    const shelfNames = new Set(patIds.map(k => k.replace(/^pat-/, '')));
+    put('every pattern in the bank has its own preset',
+        bankNames.size === shelfNames.size && [...bankNames].every(n => shelfNames.has(n)),
+        [...bankNames].filter(n => !shelfNames.has(n)).join(',') ||
+        shelfNames.size + ' patterns, one preset each');
     put('a formation preset is present', !!bank.word);
     put('boot does not arm', B.armed() === false);
 
@@ -143,20 +150,31 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     let lit = 0; for (let i = 3; i < px.length; i += 4) if (px[i] > 8) lit++;
     put('stage is painting', lit > 5000, lit + ' lit px');
 
-    // matrix drives, and the base survives (mutate-and-restore)
-    const seen = new Set();
-    for (let i = 0; i < 30; i++) {
-      const l = B.scrubs.size.el.querySelector('.slive');
-      if (l && l.style.display !== 'none') seen.add(l.style.left);
-      await new Promise(res => requestAnimationFrame(res));
+    /* Gate the VALUE the engine sees, inside the frame, not the riser on the panel.
+       The riser is painted by applyMatrix whether or not the value reaches anything, and
+       the companion assertion (`state == panel between frames`) becomes MORE true as the
+       modulation dies — a gate that rewards the defect it is meant to catch.
+       Sampling inside rAF is the only place the driven value is observable: restoreMatrix
+       hands the base back before the frame ends. */
+    {
+      const L0 = B.layers()[0];
+      L0.matrix.length = 0;
+      L0.matrix.push({ feat:'beat.sine', path:'size', mode:'up', depth:0.6, curve:'lin' });
+      const base = L0.look.size;
+      B.watchDriven(true);
+      await sleep(1500);
+      B.watchDriven(false);
+      const log = B.driven()[L0.id + '::size'] || [];
+      const span = log.length ? Math.max(...log) - Math.min(...log) : 0;
+      const p = B.paramsOf(L0).find(x => x.key === 'size');
+      const range = p ? (p.max - p.min) : 1;
+      put('the drive reaches the ENGINE, not just the riser', span > range * 0.6 * 0.4,
+          'size swung ' + span.toFixed(1) + ' of an expected ' + (range * 0.6).toFixed(1) +
+          ' over ' + log.length + ' frames');
+      put('and the base is handed back between frames', Math.abs(L0.look.size - base) < 0.001,
+          'base ' + base + ' now ' + L0.look.size);
+      L0.matrix.length = 0;
     }
-    put('matrix drives the size riser', seen.size > 3, seen.size + ' positions');
-    /* Read the base from the scrub, not a hardcoded constant — the default is a tuning
-       value and will move. What must hold is that the panel's value and the state agree
-       between frames, i.e. the drive restored what it borrowed. */
-    put('base survives the drive (state == panel between frames)',
-        Math.abs(B.state.size - B.scrubs.size.get()) < 0.001,
-        'state ' + B.state.size + ' / scrub ' + B.scrubs.size.get());
 
     // presence is a blend, not a stack
     solo('pulsing-circle'); await sleep(900);
@@ -364,6 +382,10 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      budget[2].peak <= budget[0].peak + 2,
      budget.map(r => r.n + ':' + r.peak).join(' → '));
 
+  /* the engine section runs for minutes after the boot snapshot; an exception thrown in
+     it used to be printed by nobody and counted by nobody */
+  ok('console clean through the whole run', errors.length === bootErrs,
+     errors.slice(bootErrs, bootErrs + 3).join(' | '));
   await browser.close();
   const bad = R.filter(x => !x.pass);
   for (const x of R) console.log('  ' + (x.pass ? 'ok  ' : 'FAIL') + '  ' + x.n.padEnd(50) + x.extra);

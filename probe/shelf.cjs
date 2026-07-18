@@ -12,9 +12,18 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
     const bank=B.programs(), ids=Object.keys(bank);
 
     put('the shelf carries the ported banks, not nine near-copies', ids.length>=30, ids.length+' presets');
-    put('every preset names a real source file:line',
-        ids.every(k=>/[a-zA-Z-]+:[0-9A-Za-z.+-]/.test(bank[k].source||'')),
-        ids.filter(k=>!/[a-zA-Z-]+:[0-9A-Za-z.+-]/.test(bank[k].source||'')).join(',')||'all sourced');
+    /* The old pattern accepted `z:0`. Pattern-matching was the wrong contract anyway: what
+       must hold is that a preset cites one of OUR files, because the whole point of the
+       field is to make «I wrote something similar» impossible to pass off as a port. */
+    const SOURCES = ['image-shuffler', 'particle-dance', 'Motion Primer', 'mvj-inject',
+                     'Synthex Engine', 'bryk'];
+    const badSrc = ids.filter(k => {
+      const src = (bank[k].source || '').trim();
+      return !SOURCES.some(f => src.includes(f)) || !/:[0-9A-Za-z]/.test(src);
+    });
+    put('every preset cites one of our own files', badSrc.length === 0,
+        badSrc.length ? badSrc.map(k => k + '=' + bank[k].source).join(' | ')
+                      : ids.length + ' presets, all sourced');
     put('every preset declares which keys it shows',
         ids.every(k=>Array.isArray(bank[k].keys)&&bank[k].keys.length));
 
@@ -83,9 +92,14 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
     /* ── Motion Primer behaviours are presets, not slider positions ─────────── */
     const beh = ids.filter(k => bank[k].group === 'behaviour');
     put('the six Motion Primer behaviours are on the shelf', beh.length === 6, beh.join(','));
-    put('each behaviour brings its own seeding and its own integration',
+    /* `typeof === 'function'` passes six references to ONE function, which is precisely
+       the shape of the defect this gate exists to catch (a table of numbers pretending to
+       be six behaviours). Identity, not existence. */
+    const inits = new Set(beh.map(k => bank[k].init)), steps = new Set(beh.map(k => bank[k].step));
+    put('each behaviour brings its OWN seeding and its OWN integration',
+        inits.size === beh.length && steps.size === beh.length &&
         beh.every(k => typeof bank[k].init === 'function' && typeof bank[k].step === 'function'),
-        beh.filter(k => !bank[k].step).join(',') || 'all six');
+        inits.size + ' distinct init, ' + steps.size + ' distinct step, of ' + beh.length);
     put('each behaviour shows only its own controls',
         bank.pack.keys.length < bank.swarm.keys.length &&
         bank.scatter.keys.length < bank.magnet.keys.length,
@@ -105,9 +119,15 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
       spread[id] = { h: +(Math.max(...ys) - Math.min(...ys)).toFixed(2),
                      w: +(Math.max(...xs) - Math.min(...xs)).toFixed(2) };
     }
-    put('the six seed differently, they are not one preset in six coats',
-        new Set(Object.values(spread).map(v => v.h + 'x' + v.w)).size >= 3,
-        Object.entries(spread).map(([k, v]) => k + ' ' + v.w + '×' + v.h).join('  '));
+    /* not `new Set` over two-decimal strings: 1.61 and 1.62 counted as different layouts.
+       Require a real separation between every pair. */
+    const vals = Object.entries(spread);
+    let minGap = Infinity;
+    for (let a = 0; a < vals.length; a++) for (let b2 = a + 1; b2 < vals.length; b2++)
+      minGap = Math.min(minGap, Math.hypot(vals[a][1].w - vals[b2][1].w, vals[a][1].h - vals[b2][1].h));
+    put('the six seed differently, they are not one preset in six coats', minGap > 0.25,
+        'closest pair differs by ' + minGap.toFixed(2) + '  ·  ' +
+        vals.map(([k, v]) => k + ' ' + v.w + '×' + v.h).join('  '));
 
     /* MANNER_PRESET orderings, the two that were inverted */
     /* the table the HAND turns, not the ported reference set. The gate used to read
@@ -133,16 +153,22 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
       if (!pl.every(q => [q.x,q.y,q.z].every(Number.isFinite))) { spans.push('NaN'); continue; }
       spans.push((Math.max(...xs)-Math.min(...xs)).toFixed(2)+'x'+(Math.max(...ys)-Math.min(...ys)).toFixed(2));
     }
+    const nums = spans.map(t => t === 'NaN' ? null : t.split('x').map(Number));
+    let gap = Infinity;
+    for (let a = 0; a < nums.length; a++) for (let b2 = a + 1; b2 < nums.length; b2++)
+      if (nums[a] && nums[b2]) gap = Math.min(gap, Math.hypot(nums[a][0]-nums[b2][0], nums[a][1]-nums[b2][1]));
     put('all eight polyhedra are reachable and distinct',
-        !spans.includes('NaN') && new Set(spans).size >= 6,
-        new Set(spans).size + '/8 distinct silhouettes');
+        !spans.includes('NaN') && gap > 0.15,
+        'closest pair differs by ' + (gap===Infinity?'n/a':gap.toFixed(2)));
     put('shapes only appear on the preset that reads them',
         !bank['pat-cloud'].keys.includes('formShape') && bank['pat-form'].keys.includes('formShape'));
 
     return out;
   });
   let bad=0; for(const [n,ok,e] of r){ if(!ok)bad++; console.log((ok?'  ok  ':'  FAIL')+'  '+n.padEnd(52)+e); }
-  console.log(errs.length?('\nPAGE ERRORS: '+errs.slice(0,3).join(' | ')):'\nno page errors');
-  console.log(bad?`\nSHELF FAIL — ${bad}/${r.length}`:`\nSHELF OK — ${r.length}/${r.length}`);
+  /* page errors were printed and then NOT counted, so a gate could pass while the console
+     was full of exceptions */
+  if(errs.length){ bad++; console.log('  FAIL  page errors'.padEnd(58)+errs.slice(0,3).join(' | ')); }
+  console.log(bad?`\nSHELF FAIL — ${bad}/${r.length+1}`:`\nSHELF OK — ${r.length}/${r.length}`);
   await b.close(); process.exit(bad?1:0);
 })();
