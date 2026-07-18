@@ -45,7 +45,13 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
            outside it mid-cycle; 12 is the frame plus a full recycle margin
          · a body the preset marks `skip` is not drawn, so its coordinate is meaningless —
            carousel parks its far cards at |x| 45 and skips them, by design (shuffler:311) */
-      const lim = bank[id].group==='particles' ? 5 : 12;
+      /* |p| <= 5 is particle-dance's contract on its OWN output, before BRYK scales the
+         bank onto the live viewport (ctx.vx/1.5 * spread). Applying it to the scaled world
+         position measured the wrong quantity: raising the default spread so presets reach
+         the edges — which is what Rob asked for — pushed legal points past a limit that
+         was never about world units. Both banks are judged in world units here, and the
+         raw contract belongs in a unit test on patternPoint, not in a viewport probe. */
+      const lim = 12;
       let mx=0, fin=true, drawn=0;
       for(let i=0;i<N;i++){
         const q=bank[id].target(i,N,1.7,L.params,ctx);

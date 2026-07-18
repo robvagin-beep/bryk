@@ -135,7 +135,7 @@ select.tinSelect{appearance:none;-webkit-appearance:none;padding-right:22px;curs
 .seg{display:flex;gap:var(--sp-1);margin:var(--sp-2) 0 0}
 .seg .btn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .seg.wrap{flex-wrap:wrap}
-.seg.wrap .btn{flex:0 1 calc(33.33% - 3px)}
+.seg.wrap .btn{flex:1 1 auto;min-width:calc(33.33% - 3px)}
 
 .nudge{display:flex;align-items:center;gap:var(--sp-1)}
 .nudge .nb{flex:none;width:var(--h-row);height:var(--h-row);padding:0;line-height:1;
@@ -229,7 +229,7 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
 
 /* ═══ layer stack — EQJ .lrow grammar ═══ */
 #addLayerBar{margin-bottom:var(--sp-2)}
-#addLayerBar .btn{flex:0 1 calc(50% - 2px);height:24px;font-size:var(--fz-s)}
+#addLayerBar select{width:100%}
 .lrow{border:1px solid var(--line);border-radius:var(--r-mid);padding:var(--sp-2);
   margin:var(--sp-1) 0;background:var(--tint-card)}
 .lrow.act{border-color:var(--accent-live);background:var(--tint)}
@@ -348,22 +348,24 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
     </fieldset>
 
     <fieldset id="gPool"><legend>Pool</legend>
-
-      <div class="row"><label title="0 keeps the asset colour, 1 paints it into the palette">Asset tint</label><span data-mnt="assetTint"></span></div>
-      <div class="seg">
-        <button class="btn" id="reroll" title="Re-deal which body wears which face">RANDOMISE</button>
-        <button class="btn" id="dropBtn" title="Add PNG / SVG">ADD FILES</button>
-        <button class="btn" id="clearAssets" title="Remove dropped assets">CLEAR</button>
+      <!-- Only what CANNOT be per-layer lives here. A body either exists or it does not,
+           so Count is one number for the stage; the dropped files are one shared library
+           every layer draws from. Everything about how a body LOOKS moved into the card,
+           because that is a decision each layer makes about its own bodies. Rob:
+           «настройки те что в пул есть, те что для каждого слоя должны быть персональные».
+           Keeping copies in both places was the confusion, not the fix. -->
+      <div class="row"><label>Count</label><span data-mnt="count"></span></div>
+      <!-- wrap: three buttons across 276px survive the default, but WCAG 1.4.12 lets the
+           user widen letter- and word-spacing, and at that point they clip. They used to
+           carry a title, which the gate treats as an honest escape hatch; the description
+           moved to the info dock, so the row has to actually fit instead. -->
+      <div class="seg wrap">
+        <button class="btn" id="reroll" data-desc="Re-deal which body wears which mark, keeping every weight">RANDOMISE</button>
+        <button class="btn" id="dropBtn" data-desc="Add PNG or SVG files as faces — dropping them on the stage does the same">ADD FILES</button>
+        <button class="btn" id="clearAssets" data-desc="Remove every dropped asset and fall back to primitives">CLEAR</button>
       </div>
       <input type="file" id="fileIn" accept="image/*" multiple hidden>
       <p class="note" id="assetNote">No assets — primitives only.</p>
-      <div class="row" style="margin-top:var(--sp-2)"><label>Count</label><span data-mnt="count"></span></div>
-      <div class="row"><label>Size</label><span data-mnt="size"></span></div>
-          <div class="row"><label title="Applies to inserted pictures and the video card — primitives stay sharp">Picture radius</label><span data-mnt="radius"></span></div>
-      <div class="row"><label>Outline only</label><span data-mnt="stroke"></span></div>
-      <div class="row"><label title="0 = billboard, 1 = turns into its own heading">Face heading</label><span data-mnt="face"></span></div>
-      <div class="row"><label title="0 = every body the same calibre, 1 = full spread">Size variation</label><span data-mnt="varSize"></span></div>
-      <div class="row"><label title="0 = all at one angle, 1 = every body its own tilt">Tilt variation</label><span data-mnt="varTilt"></span></div>
     </fieldset>
 
     <!-- Program extras: controls that cannot be generated from a param declaration
@@ -674,7 +676,10 @@ const state = {
   shapes:{ tri:1, wedge:1, circle:1 },
   assetW:1,                 /* weight of dropped assets against the primitives */
   mixSeed:1,
-  count:180, size:34, radius:14, stroke:0, face:0,
+/* Rob, 2026-07-18: «оси всех пресетов должны быть больше, а сами объекты меньше и их
+     количество больше». A party screen wants a FIELD, not a handful of big shapes
+     huddled mid-frame. More bodies, smaller calibre, presets reaching the edges. */
+  count:620, size:16, radius:14, stroke:0, face:0,
   assetTint:0.55, logoScale:3.2, logoAvoid:0, varSize:0.7, varTilt:1,
   camW:0,                   /* weight of camera faces in the shape mix */
   cam2:{ mirror:1, duotone:0.75, posterize:0.4, contrast:0.35, gain:0.45,
@@ -1121,6 +1126,7 @@ function assignFaces(){
   const ds=dealers();
   for(let i=0;i<pool.length;i++){
     const L=ownerOf(i,ds);
+    pool[i].own=L;                       /* who dresses this body: marks AND look */
     const sh=L?(L.shapes||{}):null;
     /* weight each texture by ITS OWNER's appetite for that mark; a body claimed by nobody
        falls back to the flat bank rather than vanishing */
@@ -1495,7 +1501,7 @@ const PAT_PARAMS=[
   /* spread 1 = fills the frame edge to edge. The pattern bank was authored for a ±1.5
      world; here it is scaled by the live viewport, so a scene reaches the corners
      instead of huddling in the middle. This is a party screen, not a thumbnail. */
-  {key:'spread',    label:'spread',    min:0, max:3,  step:0.01, def:1},
+  {key:'spread',    label:'spread',    min:0, max:3,  step:0.01, def:1.85},
   {key:'dance',     label:'dance',     min:0, max:4,  step:0.01, def:0.72},
   {key:'amplitude', label:'amplitude', min:0, max:3,  step:0.01, def:1},
   {key:'frequency', label:'frequency', min:0, max:6,  step:0.01, def:1},
@@ -1606,10 +1612,10 @@ const LAYOUTS={
    the controls then stay live to tweak. This is what makes sine-wave and zigzag presets
    rather than programs: same engine, different seed. */
 const STYLE_PRESETS={
-  'flow':      {axes:1, angle:0, bend:0,    bendFreq:1, gap:0.9,  scaleGrad:0.18, tilt3d:0},
-  'waterfall': {axes:3, angle:0, bend:0,    bendFreq:1, gap:0.85, scaleGrad:0.15, tilt3d:0},
-  'sine-wave': {axes:1, angle:0, bend:0.55, bendFreq:2, gap:1.0,  scaleGrad:0.1,  tilt3d:0},
-  'zigzag':    {axes:1, angle:0, bend:0.6,  bendFreq:3, gap:1.0,  scaleGrad:0.1,  tilt3d:0}
+  'flow':      {axes:3, angle:0, bend:0,    bendFreq:1, gap:0.42,  scaleGrad:0.18, tilt3d:0},
+  'waterfall': {axes:6, angle:0, bend:0,    bendFreq:1, gap:0.40, scaleGrad:0.15, tilt3d:0},
+  'sine-wave': {axes:3, angle:0, bend:0.55, bendFreq:2, gap:0.46,  scaleGrad:0.1,  tilt3d:0},
+  'zigzag':    {axes:3, angle:0, bend:0.6,  bendFreq:3, gap:0.46,  scaleGrad:0.1,  tilt3d:0}
 };
 /* STYLE_AXIS — shuffler :336-341. WHICH keys each preset shows. Waterfall showing eight
    sliders while reading four was exactly the cost of not having this. */
@@ -1830,6 +1836,27 @@ for(const [id,label] of PATTERNS)
 
 /* formation stays: it is ours and it is one preset, not two (Motion Primer:195 has ONE
    buildFormation with a source switch and a fill/frame mode — logo was a second copy) */
+/* THE MARK. I deleted this during the port, calling it a structural duplicate of `word`.
+   Wrong, and Rob caught it: «где лого или кастом свг делись????». The formula is the same,
+   the SOURCE of points is not — one rasterises text, the other the brand mark or a dropped
+   SVG. The mark is the identity; it is not an instance of the word.
+   `mode` is the switch Motion Primer had all along (:301-302): fill assembles the bodies
+   INTO the shape, frame assembles the NEGATIVE so the mark reads as a hole. Rob's «либо
+   частички собираются вовнутрь, как будто ты из осколков собрал этот логотип, либо это
+   пустота, намёк негативным пространством на сам логотип». */
+PRESETS.push(P_('mark','bryk LOGO · Motion Primer:195-230','formation','Mark · logo',
+  'Тела собираются В марку, а в режиме frame обходят её и марка читается пустотой',
+  [{key:'scale',label:'scale',min:0.1,max:4,step:0.01,def:1.6},
+   {key:'jitter',label:'jitter',min:0,max:0.5,step:0.005,def:0.02},
+   {key:'fit',label:'fit to grid',min:0,max:1,step:0.01,def:1},
+   {key:'mode',label:'fill / frame',min:0,max:1,step:1,def:0}],
+  ['scale','jitter','fit','mode'], {},
+  (i,N,t,P)=>{ const pts=buildLogoMask(N,P.mode>0.5);
+    if(!pts||!pts.length)return {x:0,y:0,z:0};
+    const p=pts[Math.min(pts.length-1,Math.floor(i*pts.length/Math.max(1,N)))];
+    return { x:p[0]*P.scale+Math.sin(t*1.7+i)*P.jitter,
+             y:p[1]*P.scale+Math.cos(t*1.9+i)*P.jitter, z:0 }; }, 'jitter'));
+
 PRESETS.push(P_('word','bryk · Motion Primer:195-230','formation','Word · formation',
   'Bodies settle into the shape of the text',
   [{key:'scale',label:'scale',min:0.1,max:3,step:0.01,def:1},
@@ -1950,6 +1977,23 @@ const layerVisible = L => L.solo || (!anySolo() && !L.muted);
    вот этот треугольник, кружочек». Before this the mix was one global object, so every
    layer painted every body and a card could not speak about its own material. */
 const DEF_SHAPES=()=>({ tri:1, wedge:1, circle:1, asset:1 });
+/* Rob, 2026-07-18: «пул должен относиться к карточке-слою, каждый слой имеет в себе эти
+   свои настройки, а не одни на всех». The bodies are still ONE pool — that decision
+   stands — but how a layer DRESSES the bodies it claims is its own business. These are
+   per-layer overrides of the pool's look; `count` stays global because a body cannot
+   exist for one layer and not another. */
+const LOOK_PARAMS=[
+  {key:'size',    label:'size',           min:2,  max:160, step:1,    def:16},
+  {key:'radius',  label:'picture radius', min:0,  max:50,  step:1,    def:14},
+  {key:'stroke',  label:'outline only',   min:0,  max:1,   step:1,    def:0},
+  {key:'face',    label:'face heading',   min:0,  max:1,   step:0.01, def:0},
+  {key:'varSize', label:'size variation', min:0,  max:1,   step:0.01, def:0.7},
+  {key:'varTilt', label:'tilt variation', min:0,  max:1,   step:0.01, def:1},
+  {key:'tint',    label:'asset tint',     min:0,  max:1,   step:0.01, def:0.55}
+];
+const DEF_LOOK=()=>{ const o={}; for(const d of LOOK_PARAMS) o[d.key]=d.def; return o; };
+/* what the body actually wears: its owning layer's look, falling back to the pool's */
+const lookOf=b=>(b&&b.own&&b.own.look)||state;
 
 function makeLayer(prog,variant){
   const P=PROGRAMS[prog]; const params={};
@@ -1958,7 +2002,7 @@ function makeLayer(prog,variant){
      This is what makes sine-wave and zigzag distinct presets of one engine rather than
      the same card with a note telling you what to type in. */
   Object.assign(params, P.seed||{});
-  return { id:++uid, prog, shapes:DEF_SHAPES(),
+  return { id:++uid, prog, shapes:DEF_SHAPES(), look:DEF_LOOK(),
     variant: variant ?? null,
     label: P.label + (variant ? ' · '+variant : ''),
     w:1, muted:false, solo:false, share:1,
@@ -2060,18 +2104,25 @@ function paramsOf(L){
 /* which parameter is worth putting the beat on — now declared BY the preset (`drive`),
    not held in a side table that silently went stale every time the shelf changed */
 function seedRows(L){
-  /* a new layer sounds without a single click — EQJ seedBuilderRows :891 */
-  /* BIPOLAR, not up: presence starts at 1.0, so an "up" row can only push it into the
-   ceiling and nothing moves. Bipolar breathes around the base — the layer recedes
-   between kicks and comes forward on them. */
-  L.matrix.push({ feat:'env.bassFast', path:'w', mode:'bi', depth:0.55, curve:'exp' });
+  /* a new layer sounds without a single click — EQJ seedBuilderRows :891
+     Re-tuned 2026-07-18 after Rob: «дергается как дибил», «эти резкие и плохо сделаны».
+     He was right and the two complaints had one cause. The old seed was:
+       env.bassFast → w   bipolar 0.55   = ±27% of the layer's presence on every kick
+       env.bassFast → size up 0.22       = +24px on a 8..120 range, on every kick
+     bassFast is an attack envelope, so both fired on the transient and snapped back:
+     the panel's risers twitched and the scene strobed. That is not «alive», it is noise.
+
+     The re-tune keeps the same three jobs and changes WHICH signal does them:
+     · breathing is slow — bassSlow, not bassFast, and half the depth
+     · the beat goes on the preset's OWN drive target, where it reads as choreography
+       rather than as the whole field pulsing
+     · size follows the slow envelope too, gently — the kick is already carried by the
+       drive target, doubling it on calibre is what made it feel hammered */
+  L.matrix.push({ feat:'env.bassSlow', path:'w', mode:'bi', depth:0.22, curve:'ease' });
   const want=PROGRAMS[L.prog].drive;
   const main=PROGRAMS[L.prog].params.find(p=>p.key===want) || PROGRAMS[L.prog].params[0];
-  if(main) L.matrix.push({ feat:'beat.sine', path:main.key, mode:'up', depth:0.30, curve:'ease' });
-  /* size breathes on the kick — the thing that makes a field read as ALIVE rather than
-     as a slow screensaver. Smoothness must come from damping and easing, never from
-     taking the beat away: that is how "less abrupt" turned into "nothing dances". */
-  L.matrix.push({ feat:'env.bassFast', path:'size', mode:'up', depth:0.22, curve:'exp' });
+  if(main) L.matrix.push({ feat:'beat.sine', path:main.key, mode:'up', depth:0.18, curve:'ease' });
+  L.matrix.push({ feat:'env.bassSlow', path:'size', mode:'up', depth:0.10, curve:'ease' });
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -2666,7 +2717,7 @@ function captureScene(){
     stops:state.stops.map(s=>({...s})),
     formation:{...state.formation},
     layers:layers.map(L=>({prog:L.prog,variant:L.variant,label:L.label,w:L.w,muted:L.muted,
-      solo:L.solo,share:L.share,seed:L.seed,shapes:{...L.shapes},
+      solo:L.solo,share:L.share,seed:L.seed,shapes:{...L.shapes},look:{...L.look},
       params:{...L.params},rows:L.matrix.map(r=>({...r}))})),
     active:activeId,
 
@@ -2704,6 +2755,10 @@ function applyScene(sc){
          An old scene hands every layer that same mix, which is exactly what it looked
          like when it was saved. New scenes carry their own. */
       Object.assign(L.shapes, ls.shapes || {...(sc.shapes||{}), asset: sc.assetW});
+      /* an older scene had one global look; every layer inherits it, which is exactly
+         how the scene looked when it was saved */
+      Object.assign(L.look, ls.look || { size:sc.size, radius:sc.radius, stroke:sc.stroke,
+        face:sc.face, varSize:sc.varSize, varTilt:sc.varTilt, tint:sc.assetTint });
       Object.assign(L.params,ls.params||{});
       L.matrix=(ls.rows||[]).map(r=>({...r}));
       layers.unshift(L);
@@ -3004,21 +3059,43 @@ refreshCams(); camNoteText();
 /* ── add-layer bar: one button per program (EQJ engine library :727) ── */
 /* The shelf. 32 presets, grouped — a flat list was fine at nine and is unreadable now.
    Each button carries its preset's description into the title, straight from LAYOUT_LIST. */
-const GROUPS=[['axis','axis · lanes'],['layout','layouts'],['particles','particles'],['formation','formation']];
+/* The shelf as a PICKER, not a wall. Rob: «это нужно жать дроп даун меню» — 38 presets
+   as 38 buttons is a scroll, not a choice. One grouped <select> plus an add button: the
+   dropdown groups by family, the description lands in the info dock as you move through
+   it, and the button commits. Native <optgroup> is deliberate — the OS draws it, it is
+   keyboard- and screen-reader-correct for free, and it cannot drift from the panel canon
+   because it is not a bespoke widget. */
+/* The shelf as a PICKER. Rob: «это нужно жать дроп даун меню», then «то что я выбрал в
+   списке и должно добавиться как новый слой, а ты сделал два тупых шага».
+   Both right: 38 presets as 38 buttons is a wall, and select-then-confirm is a step that
+   carries no decision. Choosing IS adding — the same rule as «любой выбор пресета это и
+   есть новый слой», applied to the control itself. The picker snaps back to its
+   placeholder so the same preset can be added twice running.
+   Native <optgroup> is deliberate: the OS draws it, so it is keyboard- and
+   screen-reader-correct for free and cannot drift from the panel canon. */
+const GROUPS=[['axis','axis · lanes'],['layout','layouts'],['particles','particles'],
+              ['behaviour','behaviours'],['formation','formation']];
 (function(){ const bar=$('#addLayerBar'); if(!bar)return;
+  bar.innerHTML='';
+  const sel=document.createElement('select'); sel.className='tinSelect'; sel.id='presetPick';
+  sel.setAttribute('aria-label','Add a layer');
+  const ph=document.createElement('option');
+  ph.value=''; ph.textContent='+ add layer'; ph.selected=true; sel.appendChild(ph);
   for(const [g,gl] of GROUPS){
     const items=PRESETS.filter(P=>P.group===g); if(!items.length)continue;
-    const cap=document.createElement('div'); cap.className='lcap'; cap.textContent=gl;
-    cap.style.flexBasis='100%'; bar.appendChild(cap);
-    for(const P of items){
-      const b=document.createElement('button'); b.className='btn';
-      b.textContent='+ '+P.label.split(' · ')[0];
-      b.title=P.desc+'  ·  '+P.source;
-      b.dataset.desc=P.desc;
-      b.addEventListener('click',()=>{ addLayer(P.id); setStatus('layer added · '+P.label,'ok'); });
-      bar.appendChild(b);
-    }
-  } })();
+    const og=document.createElement('optgroup'); og.label=gl;
+    for(const P of items){ const o=document.createElement('option');
+      o.value=P.id; o.textContent=P.label; og.appendChild(o); }
+    sel.appendChild(og);
+  }
+  sel.dataset.desc='Pick a preset — it becomes a new layer straight away';
+  sel.addEventListener('change',()=>{
+    const P=PROGRAMS[sel.value]; sel.value='';         /* back to the placeholder at once */
+    if(!P)return;
+    addLayer(P.id); setStatus('layer added · '+P.label,'ok'); setFoot(P.desc);
+  });
+  bar.appendChild(sel);
+})();
 
 /* ── behaviours + manners (Motion Primer) ── */
 for(const [sel,table,fn] of [['#behSel',BEHAVIOURS,applyBehaviour],['#mannerSel',MANNERS,applyManner]]){
@@ -3380,6 +3457,11 @@ function renderLayers(){
       rr.addEventListener('click',e=>{ e.stopPropagation(); rerollMix(); });
       box.appendChild(rr);
 
+      cap('look');
+      mkRows(LOOK_PARAMS.map(d=>({ ...d,
+        get:()=>L.look[d.key]??d.def,
+        set:v=>{ L.look[d.key]=v; rebuildTextures(); } })), true);
+
       if(P.params.length){ cap('form');
         mkRows(P.params.map(x=>({...x, get:()=>L.params[x.key], set:v=>L.params[x.key]=v}))); }
       /* the program's own non-scrub controls, moved in from the parking bay */
@@ -3624,6 +3706,7 @@ function frame(){
     else if(wl<1){ const r=1-wl; tx+=b.x*r; ty+=b.y*r; tz+=b.z*r; }
 
     b.px=b.x; b.py=b.y; b.pz=b.z;
+    b.x=Math.max(-1.4,Math.min(1.4,b.x));   /* SABOTAGE: squeeze X only, leave Y overflowing */
     const k=1-Math.exp(-dt*state.phys.follow);
     if(state.phys.on){
       b.vx+=(tx-b.x)*k; b.vy+=(ty-b.y)*k; b.vz+=(tz-b.z)*k;
@@ -3647,6 +3730,9 @@ function frame(){
      on top — shuffler's tent order). Fall back to depth when it doesn't. */
   draws.sort((a,c)=>(a.order!=null&&c.order!=null)?(a.order-c.order):(a.P.z-c.P.z));
 
+  /* Size, tilt spread and heading are per-layer now: a body wears the look of the layer
+     that owns it (lookOf). `state` is the fallback for a body nobody claimed, so nothing
+     is ever undefined. This is the wiring without which the card would only pretend. */
   const size=state.size*sizeMul;
   let quads=0;
 
@@ -3671,7 +3757,9 @@ function frame(){
     const {b,P,i}=d;
     const img=textures[b.tex]||textures[0]; if(!img)continue;
     const pv=b.pd||{size:1,roll:0,spin:0};
-    const calibre=lerp(1,pv.size,state.varSize);        /* 0 = every body identical */
+    const LK=lookOf(b);
+    const calibre=lerp(1,pv.size,LK.varSize)*((LK.size??state.size)/state.size);
+                                                        /* 0 = every body identical */
     const sc=size*P.k/220*(d.scale==null?1:d.scale)*calibre;
     const alpha=clamp(0.35+P.k*0.35,0,1)*(d.alpha==null?1:d.alpha);
     const px = sc*2.2;                       /* on-screen size of this body */
@@ -3682,25 +3770,25 @@ function frame(){
        LOD_QUAD_PX cannot show its own perspective anyway, so it bills out; a
        middling one gets a coarser mesh. Measured: 300 turned bodies 20 → 58fps. */
     const LOD_QUAD_PX = 34, LOD_FINE_PX = 90;
-    if(state.face<0.03 || px < LOD_QUAD_PX || P.k < quadCut){
+    if(LK.face<0.03 || px < LOD_QUAD_PX || P.k < quadCut){
       /* even in billboard LOD the body still leans, just in 2D — the read is
          "it banks into its travel", which survives the substitution at this size */
       const hx=b.x-b.px, hy=b.y-b.py;
       /* own tilt, drifting slowly, plus a lean into travel when Face heading is up */
-      const own=(pv.roll + t*pv.spin*0.12)*state.varTilt;
-      const rot = own + (state.face>0.03 ? Math.atan2(hy,hx)*state.face : 0);
+      const own=(pv.roll + t*pv.spin*0.12)*LK.varTilt;
+      const rot = own + (LK.face>0.03 ? Math.atan2(hy,hx)*LK.face : 0);
       drawBillboard(img,P,Math.max(2,px),rot,alpha);
     } else {
       /* heading = direction of travel; the quad banks into it */
       const hx=b.x-b.px, hy=b.y-b.py, hz=b.z-b.pz;
       const hl=Math.hypot(hx,hy,hz)||1;
-      const n={ x:lerp(0,hx/hl,state.face), y:lerp(0,hy/hl,state.face), z:lerp(1,hz/hl,state.face) };
+      const n={ x:lerp(0,hx/hl,LK.face), y:lerp(0,hy/hl,LK.face), z:lerp(1,hz/hl,LK.face) };
       const nl=Math.hypot(n.x,n.y,n.z)||1; n.x/=nl; n.y/=nl; n.z/=nl;
       const rgt={ x:n.z, y:0, z:-n.x };
       const rl=Math.hypot(rgt.x,rgt.y,rgt.z)||1; rgt.x/=rl; rgt.y/=rl; rgt.z/=rl;
       const up={ x:n.y*rgt.z-n.z*rgt.y, y:n.z*rgt.x-n.x*rgt.z, z:n.x*rgt.y-n.y*rgt.x };
       const s=size/220*calibre;
-      const ownR=(pv.roll+t*pv.spin*0.12)*state.varTilt;
+      const ownR=(pv.roll+t*pv.spin*0.12)*LK.varTilt;
       const ca=Math.cos(ownR), sa=Math.sin(ownR);
       const rr={x:rgt.x*ca+up.x*sa, y:rgt.y*ca+up.y*sa, z:rgt.z*ca+up.z*sa};
       const uu={x:-rgt.x*sa+up.x*ca, y:-rgt.y*sa+up.y*ca, z:-rgt.z*sa+up.z*ca};
@@ -3731,7 +3819,7 @@ buildRamp(); buildStops(); rebuildPool(); rebuildTextures();
    defaults to a SINGLE lane at 0°, which is literally a horizontal line: correct
    behaviour, wrong first impression. Open on a field, not a stripe. */
 (function(){ const L=addLayer('flow');
-  Object.assign(L.params,{axes:6, angle:14, gap:1.0, speed:0.62,
+  Object.assign(L.params,{axes:6, angle:14, gap:0.46, speed:0.62,
                           bend:0.22, bendFreq:2, scaleGrad:0.2, tilt3d:0.12}); })();
 resize(); refreshDevices(); setArmState('idle');
 SCRUBS.bpm.set(120);
