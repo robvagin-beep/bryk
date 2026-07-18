@@ -311,6 +311,15 @@ button,.tinSelect{touch-action:manipulation}
   #tray{transition:opacity 120ms linear;transform:none}
   #corner:hover #tray,#corner:focus-within #tray{transform:none}
 }
+legend svg{margin-right:6px;vertical-align:-2px;flex:none}
+/* the info dock — Synthex Engine :177-201. Pinned to the foot of the left panel, fed by
+   BOTH columns. Explanation lives here instead of in paragraphs between the controls,
+   which is what ate the height the controls needed. */
+#panel{display:flex;flex-direction:column}
+#foot{flex:none;display:flex;align-items:center;gap:8px;padding:8px 14px;
+  border-top:1px solid var(--line);min-height:46px}
+#footText{color:var(--muted);font:400 10px/14px system-ui,sans-serif;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .lcap{font-size:var(--fz-s);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
   margin:var(--sp-2) 0 var(--sp-1)}
 .lcap:first-child{margin-top:0}
@@ -336,15 +345,9 @@ button,.tinSelect{touch-action:manipulation}
     <fieldset id="gLayers"><legend>Layers</legend>
       <div class="seg wrap" id="addLayerBar" role="group" aria-label="Add layer"></div>
       <div id="layers"></div>
-      <p class="note">A layer is a way of placing bodies, with a PRESENCE weight.
-        <b>share</b> splits the pool so two forms stay legible instead of averaging into
-        one. Click a layer to focus it — the mapping rack on the right edits <b>its</b> rows.</p>
     </fieldset>
 
     <fieldset id="gPool"><legend>Pool</legend>
-      <p class="note" style="margin-top:0">One shared pool. Every layer above places THESE
-        bodies — count and calibre are the material, the stack decides where they go and
-        which marks they wear. Drop PNG or SVG anywhere to add more.</p>
 
       <div class="row"><label title="0 keeps the asset colour, 1 paints it into the palette">Asset tint</label><span data-mnt="assetTint"></span></div>
       <div class="seg">
@@ -379,6 +382,7 @@ button,.tinSelect{touch-action:manipulation}
       </div>
     </div>
   </div>
+  <div id="foot"><div id="footText" aria-live="polite">Info</div></div>
 </aside>
 
 <main id="stage">
@@ -3002,6 +3006,219 @@ $('#addRow').addEventListener('click',()=>{
   buildMatrix();
 });
 buildMatrix();
+
+/* ── info dock, ported from Synthex Engine :3703-3704 and :4296-4303 ──────────
+   Two delegated listeners per column, mouseover AND focusin, so the keyboard behaves
+   exactly like the mouse — that plus aria-live is the whole accessibility story.
+   Fallback chain: [data-desc] → DESC by key → title → the label's own text. Nothing is
+   left without a line, including a control added tomorrow. */
+const DESC={
+  /* ── pool: the material ────────────────────────────────────────────── */
+  'wTri':'Weight of triangles in the body mix; 0 removes them',
+  'wWedge':'Weight of wedges in the body mix; 0 removes them',
+  'wCircle':'Weight of circles in the body mix; 0 removes them',
+  'wAsset':'Weight of dropped PNG and SVG faces against the primitives; 0 keeps the pool primitive-only',
+  'assetTint':'0 keeps the asset colour, 1 paints it into the palette',
+  'reroll':'Re-deal which body wears which face, keeping the weights',
+  'dropBtn':'Add PNG or SVG files as faces — dropping them on the stage does the same',
+  'clearAssets':'Remove every dropped asset and fall back to primitives',
+  'count':'How many bodies live in the shared pool',
+  'size':'Base calibre of a body in pixels, before variation and drive',
+  'radius':'Corner radius of inserted pictures and the video card; primitives stay sharp',
+  'stroke':'Draw bodies as outlines instead of fills',
+  'face':'0 = billboard facing you, 1 = each body turns into its own heading',
+  'varSize':'0 = every body the same calibre, 1 = full spread',
+  'varTilt':'0 = all at one angle, 1 = every body its own tilt',
+
+  /* ── forces ────────────────────────────────────────────────────────── */
+  'behSel':'Motion Primer preset — a whole force set at once, overwrites the sliders below',
+  'mannerSel':'Manner of the swarm: cohesion against separation against flow',
+  'physOn':'Bodies gain velocity and start noticing each other; off pins them to the layout',
+  'dim3':'Off = they avoid each other in the plane, on = in full depth',
+  'follow':'How hard the layout pulls a body toward its target; low lets it lag and swing',
+  'damp':'How much velocity survives each frame; low is syrup, high keeps momentum alive',
+  'collide':'Bodies push each other apart; 0 lets them overlap freely',
+  'pradius':'Personal space of a body in world units, what collide and flock measure against',
+  'swirl':'Curl field — divergence-free, so they swirl instead of piling up',
+  'attract':'Magnet to centre, stronger the closer they get; negative pushes outward',
+  'gravity':'Constant downward pull; negative lifts',
+  'flock':'Cohesion toward the local mean — neighbours start travelling together',
+  'logoAvoid':'Bodies are pushed out of the mark, so streams part around it; 0 lets them cross',
+  'logoScale':'Size of the mark, both as a formation and as a void',
+
+  /* ── space ─────────────────────────────────────────────────────────── */
+  'persp':'0 = flat orthographic, up = depth opens out',
+  'zoom':'Scene zoom; the wheel on the stage turns this too',
+  'tilt':'Camera pitch; drag the stage to orbit',
+  'spin':'Let the scene rotate by itself; 0 holds still, sign sets the direction',
+
+  /* ── programs ──────────────────────────────────────────────────────── */
+  'axis.axes':'How many lanes cross the frame',
+  'axis.angle':'Direction the lanes run, degrees',
+  'axis.gap':'Centre spacing along a lane: low is dense, high is sparse',
+  'axis.speed':'Travel along the lane; 0 parks the run, sign sets the direction',
+  'axis.bend':'Curves the lane sideways; 0 is dead straight, sign flips the side',
+  'axis.bendFreq':'How many bends fit across the visible run',
+  'axis.scaleGrad':'Bodies shrink toward the ends of the run; 0 keeps one calibre',
+  'axis.tilt3d':'Lays the lane plane into depth; 0 keeps it flat to the frame',
+
+  'waterfall.axes':'How many columns fall',
+  'waterfall.angle':'Unused by the fall — columns are always vertical',
+  'waterfall.gap':'Vertical spacing inside a column: low is dense, high is sparse',
+  'waterfall.speed':'Fall rate; 0 freezes the column, negative runs it upward',
+  'waterfall.bend':'Unused by the fall',
+  'waterfall.bendFreq':'Unused by the fall',
+  'waterfall.scaleGrad':'Bodies shrink toward the top and bottom edges; 0 keeps one calibre',
+  'waterfall.tilt3d':'Unused by the fall',
+
+  'pattern.spread':'How far the pattern reaches: 1 fills the frame edge to edge',
+  'pattern.dance':'Tempo of the pattern’s own motion; 0 holds the shape still',
+  'pattern.amplitude':'Depth of the pattern’s displacement; 0 flattens it toward the base grid',
+  'pattern.frequency':'How many periods the pattern packs into the frame',
+  'pattern.twist':'Rotation through the form; 0 is untwisted, sign flips the handedness',
+  'pattern.lanes':'How many rows, arms or strands the variant builds from',
+
+  'grid.gap':'Cell pitch: low packs the grid tight, high opens it out',
+  'grid.sway':'Cells breathe in depth; 0 is a dead flat grid',
+
+  'ring.radius':'Size of the ring against the shorter side of the frame',
+  'ring.depth':'How far the ring waves in and out of depth; 0 is a flat circle',
+  'ring.turns':'How many times the run wraps around; below 1 leaves an arc',
+
+  'tunnel.speed':'Flight through the tunnel; 0 parks it, negative pulls you backwards',
+  'tunnel.spread':'Mouth width of the tunnel',
+  'tunnel.rings':'How many rings the bodies are dealt into',
+
+  'scatter.spread':'How far the throw reaches: 1 fills the frame',
+  'scatter.drift':'Slow wander on top of the fixed scatter; 0 leaves it frozen',
+
+  'logo.scale':'Size of the mark the bodies settle into',
+  'logo.jitter':'Bodies wobble around their place in the mark; 0 is a clean silhouette',
+  'logo.fit':'Retunes body calibre to the mark’s cell spacing so it reads; 0 keeps the global size',
+
+  'word.scale':'Size of the formation',
+  'word.jitter':'Bodies wobble around their place in the letters; 0 is clean type',
+  'word.fit':'Retunes body calibre to the letter’s cell spacing so it reads; 0 keeps the global size',
+  'word.text':'The word the bodies form',
+  'word.font':'Typeface the formation is sampled from',
+  'word.fonts':'Ask the browser for the installed families — permission is requested once',
+
+  /* ── layer card ────────────────────────────────────────────────────── */
+  'layer.name':'Click to focus so the mapping rack edits this layer; double-click to rename',
+  'layer.presence':'How much of this layer reaches the scene; 0 leaves its bodies at rest',
+  'layer.share':'Slice of the pool this layer may claim: 1 is all of it, lower lets two forms coexist instead of averaging',
+  'layer.hide':'Mute this layer without losing its settings',
+  'layer.solo':'Play only the soloed layers; everything else steps aside',
+  'layer.up':'Move the layer up the stack',
+  'layer.down':'Move the layer down the stack',
+  'layer.dup':'Duplicate the layer with a fresh seed, so the copy diverges',
+  'layer.del':'Remove the layer and its mapping rows',
+  'layer.add':'Add another layer to the stack — programs can repeat',
+  'layer.variant':'Which shape of the program this layer runs',
+
+  /* ── sound and clock ───────────────────────────────────────────────── */
+  'source':'Audio input the analysis listens to',
+  'arm':'Open the selected input; a gesture is required before the browser starts audio',
+  'bpm':'Tempo of the internal clock everything quantises to',
+  'trim':'Live ± on top of the clock while detection keeps running; 0 is the detected tempo',
+  'phase':'Where the downbeat sits — nudge until the lamp lands with the kick',
+  'phMinus':'Pull the downbeat back ( [ )',
+  'phPlus':'Push the downbeat forward ( ] )',
+  'tap':'Tap 4× in time to set the tempo by hand (T)',
+  'auto':'Hand the clock back to the detector',
+  'sync':'Slam the downbeat to now',
+
+  /* ── camera ────────────────────────────────────────────────────────── */
+  'camW':'Weight of camera-filled faces in the body mix; 0 keeps the video out of the shapes',
+  'camLayer':'Opacity of the full-frame video layer; 0 hides it',
+  'camBlend':'How the video layer mixes with the geometry',
+  'camOver':'Layer sits above the geometry instead of behind it',
+  'camMirror':'Flip the video horizontally, the way a mirror reads',
+  'camDuo':'Maps the video into the palette; 0 is raw webcam colour',
+  'camContrast':'Contrast of the camera image before it is tinted',
+  'camGain':'Brightness of the camera image; 1 is unity',
+
+  /* ── mod rack ──────────────────────────────────────────────────────── */
+  'rack.feature':'Which part of the sound drives the row',
+  'rack.param':'Which parameter of the focused layer the row moves',
+  'rack.depth':'How far the parameter swings from its base; 0 is no movement, sign inverts it',
+  'rack.curve':'Shape of the response between silence and full: exp punches, ease breathes, gate snaps',
+  'rack.mode':'up adds on top of the base, ± bi swings both ways around it',
+  'rack.add':'Add a mapping row to the focused layer',
+  'rack.del':'Remove this mapping row',
+  'rack.layer':'The layer these rows belong to — click a card on the left to switch',
+
+  /* ── moves ─────────────────────────────────────────────────────────── */
+  'move.magnet':'Build-up sucks in, the drop throws out (1)',
+  'move.gather':'Chaos, then a hard snap to the grid (2)',
+  'move.crowd':'Camera to full frame for two bars (3)',
+  'move.snap':'Freeze into the grid and release (4)',
+  'quantise':'Everything you fire lands on the music, not on your reaction time; off is instant',
+  'autoRoll':'Re-deal the body mix every bar',
+
+  /* ── look ──────────────────────────────────────────────────────────── */
+  'stops':'Colour stops of the palette; bodies are dealt across the ramp',
+  'addStop':'Add a colour to the ramp',
+  'bgL':'Lightness of the paper behind everything',
+  'satDrift':'Spectral brightness breathes the palette saturation; hue never moves',
+  'chroma':'Plate separation across the frame; 0 is clean',
+  'chromaAng':'Direction the plates pull apart, degrees',
+
+  /* ── scenes ────────────────────────────────────────────────────────── */
+  'scene.slot':'Recall this scene, or overwrite it when SAVE is armed',
+  'scene.save':'Arm saving, then pick a slot',
+  'scene.export':'Download the current scene as json',
+  'scene.import':'Load a scene json',
+
+  /* ── stage ─────────────────────────────────────────────────────────── */
+  'ui':'Hide the interface and leave the stage alone (H)'
+};;
+const setFoot=txt=>{ const f=$('#footText'); if(f)f.textContent=txt; };
+const footDefault=()=>setFoot('Info');
+(function(){
+  const keyOf=el=>{
+    if(el.dataset&&el.dataset.desc) return null;                 /* literal wins */
+    const sl=el.closest('.row')?.querySelector('[data-mnt]');
+    if(sl) return sl.getAttribute('data-mnt');
+    const sc=el.closest('.scrub'); if(sc&&sc.dataset.k) return sc.dataset.k;
+    return null;
+  };
+  const show=e=>{
+    const el=e.target.closest('label,button,select,input,.scrub,legend,.lname'); if(!el)return;
+    const lit=el.dataset&&el.dataset.desc;
+    const k=keyOf(el);
+    setFoot(lit || (k&&DESC[k]) || el.title || (el.textContent||'').trim() || 'Info');
+  };
+  for(const sel of ['#panel .pbody','#rightcol .pbody']){
+    const host=document.querySelector(sel); if(!host)continue;
+    host.addEventListener('mouseover',show);
+    host.addEventListener('focusin',show);
+    host.addEventListener('mouseleave',footDefault);
+    host.addEventListener('focusout',footDefault);
+  }
+})();
+
+/* legend icons — Synthex Engine :5853-5888, mechanism 1:1 */
+(function(){
+  const P={
+    layers:'<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/>',   /* lucide layers */
+    pool:'<path d="M8.3 10a.7.7 0 0 1-.626-1.079L11.4 3a.7.7 0 0 1 1.198-.043L16.3 8.9a.7.7 0 0 1-.572 1.1Z"/><rect x="3" y="14" width="7" height="7" rx="1"/><circle cx="17.5" cy="17.5" r="3.5"/>',   /* lucide shapes */
+    forces:'<circle cx="12" cy="12" r="1"/><path d="M20.2 20.2c2.04-2.03.02-7.36-4.5-11.9-4.54-4.52-9.87-6.54-11.9-4.5-2.04 2.03-.02 7.36 4.5 11.9 4.54 4.52 9.87 6.54 11.9 4.5Z"/><path d="M15.7 15.7c4.52-4.54 6.54-9.87 4.5-11.9-2.03-2.04-7.36-.02-11.9 4.5-4.52 4.54-6.54 9.87-4.5 11.9 2.03 2.04 7.36.02 11.9-4.5Z"/>',   /* lucide atom */
+    space:'<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',   /* lucide box */
+    sound:'<path d="M2 10v3"/><path d="M6 6v11"/><path d="M10 3v18"/><path d="M14 8v7"/><path d="M18 5v13"/><path d="M22 10v3"/>',   /* lucide audio-lines */
+    camera:'<path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"/><rect x="2" y="6" width="14" height="12" rx="2"/>',   /* lucide video */
+    mod:'<path d="m10.586 5.414-5.172 5.172"/><path d="m18.586 13.414-5.172 5.172"/><path d="M6 12h12"/><circle cx="12" cy="20" r="2"/><circle cx="12" cy="4" r="2"/><circle cx="20" cy="12" r="2"/><circle cx="4" cy="12" r="2"/>',   /* lucide waypoints */
+    moves:'<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"/><path d="m14 7 3 3"/><path d="M5 6v4"/><path d="M19 14v4"/><path d="M10 2v2"/><path d="M7 8H3"/><path d="M21 16h-4"/><path d="M11 3H9"/>',   /* lucide wand-sparkles */
+    look:'<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',   /* lucide eye */
+    scenes:'<path d="m12.296 3.464 3.02 3.956"/><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3z"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m6.18 5.276 3.1 3.899"/>'   /* lucide clapperboard */
+  };
+  const wrap=d=>'<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+d+'</svg>';
+  document.querySelectorAll('#panel legend,#rightcol legend').forEach(l=>{
+    if(l.querySelector('svg'))return;
+    const key=l.textContent.trim().toLowerCase().split(/[\s·&]+/)[0];
+    if(P[key]) l.insertAdjacentHTML('afterbegin',wrap(P[key])); });
+})();
+;
 
 /* collapsible groups */
 document.querySelectorAll('legend[data-toggle]').forEach(l=>{
