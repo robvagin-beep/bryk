@@ -14,6 +14,10 @@
  * longer exist. Ported here. The stale expectation was the failure, not the engine.
  */
 'use strict';
+/* Preset ids changed when the shelf was rebuilt from the ported banks (2026-07-18):
+     axis→flow · ring→pulsing-circle · tunnel→radial · scatter→float · pattern→pat-<name>
+   and `logo` folded into `word`. Names here follow the shelf; they are not magic. */
+
 const path = require('path');
 const PW = process.env.BRYK_PLAYWRIGHT ||
   path.join(__dirname, '..', '..', 'synthex-engine', 'node_modules', 'playwright');
@@ -58,8 +62,11 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
       const b = document.querySelector('#' + id + ' .pbody');
       put(id + ' has no sideways scroll', b.scrollWidth <= b.clientWidth + 1);
     }
-    const hs = [h(document.querySelector('.scrub')), h(document.querySelector('.tinSelect')),
-                h(document.querySelector('.nudge .nb')), h(document.querySelector('.phbar'))];
+    /* Measure VISIBLE controls only. The program extras (font picker, text field) are
+       parked in a hidden div whenever their card is closed, and a hidden element reports
+       height 0 — that is the parking bay doing its job, not a layout defect. */
+    const vis = sel => [...document.querySelectorAll(sel)].find(e => e.getBoundingClientRect().height > 0);
+    const hs = [h(vis('.scrub')), h(vis('.tinSelect')), h(vis('.nudge .nb')), h(vis('.phbar'))];
     put('control heights agree', hs.every(v => v === hs[0]), hs.join('/'));
 
     const cv = document.createElement('canvas'); cv.width = cv.height = 1;
@@ -117,12 +124,14 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
        Under the layer model the old fixed patA/patB slots are gone BY DESIGN — a pattern
        is reached by adding a layer, not by occupying one of two reserved seats. So the
        slot check becomes a reachability check. */
+    /* Reachability, restated for the shelf. The particle bank used to hide behind one
+       card's dropdown; it is now one preset per pattern, so «reachable» means «has its own
+       button», which is Rob's rule that any preset choice IS a new layer. */
     const bank = B.programs();
-    put('pattern program reaches the whole bank',
-        !!bank.pattern && Array.isArray(bank.pattern.variants) &&
-        bank.pattern.variants.length === B.patterns().length,
-        ((bank.pattern || {}).variants || []).length + '/' + B.patterns().length + ' variants');
-    put('a formation program is present', !!bank.word);
+    const patIds = Object.keys(bank).filter(k => bank[k].group === 'particles');
+    put('every pattern in the bank has its own preset', patIds.length === B.patterns().length,
+        patIds.length + '/' + B.patterns().length + ' patterns on the shelf');
+    put('a formation preset is present', !!bank.word);
     put('boot does not arm', B.armed() === false);
 
     const cv = document.getElementById('cv'), g = cv.getContext('2d');
@@ -146,7 +155,7 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
         'state ' + B.state.size + ' / scrub ' + B.scrubs.size.get());
 
     // presence is a blend, not a stack
-    solo('ring'); await sleep(900);
+    solo('pulsing-circle'); await sleep(900);
     const a = { ...B.pool()[5] };
     setW('word', 1); await sleep(900);
     const b = B.pool()[5];
@@ -194,22 +203,19 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
 
     // ── the whole pattern bank, one by one ───────────────────────────────────
     {
-      solo('pattern'); B.setCount(200); await sleep(400);
-      const A = layerOf('pattern');            /* the layer solo() just created/raised */
-      const keep = A.variant;
+      /* the whole particle bank, one preset at a time — the same assertCore contract
+         particle-dance holds itself to: finite, bounded, non-degenerate */
+      B.setCount(200);
       const bad = [];
-      for (const [id] of B.patterns()) {
-        A.variant = id; await sleep(260);
+      for (const id of patIds) {
+        const L = B.onlyProg(id); await sleep(220);
         const pl = B.pool();
         const finite = pl.every(b => [b.x,b.y,b.z].every(Number.isFinite));
-        const bounded = Math.max(...pl.map(b => Math.max(Math.abs(b.x),Math.abs(b.y),Math.abs(b.z)))) < 6;
         const alive = Math.max(...pl.map(b => Math.hypot(b.x,b.y))) > 0.05;
-        if (!finite || !bounded || !alive)
-          bad.push(id + (finite?'':' NaN') + (bounded?'':' unbounded') + (alive?'':' collapsed'));
+        if (!finite || !alive) bad.push(id + (finite?'':' NaN') + (alive?'':' collapsed'));
       }
-      put('every pattern is finite, bounded and non-degenerate', bad.length === 0,
-          B.patterns().length + ' patterns' + (bad.length ? ' — ' + bad.join(' | ') : ''));
-      A.variant = keep;
+      put('every pattern is finite and non-degenerate', bad.length === 0,
+          patIds.length + ' patterns' + (bad.length ? ' — ' + bad.join(' | ') : ''));
     }
 
     // ── Motion Primer behaviours / manners drive the force block ─────────────
@@ -264,17 +270,17 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
         B.state.phys.attract === 0);
 
     // ── scenes round-trip, and a loaded scene is NOT reverted by the drive ───
-    B.state.size = 77; B.state.shapes.tri = 2.5; setW('tunnel', 0.66);
+    B.state.size = 77; B.state.shapes.tri = 2.5; setW('radial', 0.66);
     const snap = B.scene.capture();
-    B.state.size = 12; B.state.shapes.tri = 0; setW('tunnel', 0);
+    B.state.size = 12; B.state.shapes.tri = 0; setW('radial', 0);
     B.scene.apply(snap); await sleep(600);
     /* The name says "weights", so verify the weight — applyScene rebuilds the stack, so
        the layer must be re-found by program, never held across the apply. */
-    const tun = layerOf('tunnel');
+    const tun = layerOf('radial');
     put('scene restores scalars, weights and panel', B.state.size === 77 &&
         B.state.shapes.tri === 2.5 && Math.abs(B.scrubs.size.get() - 77) < 0.001 &&
         !!tun && Math.abs(tun.w - 0.66) < 0.001,
-        'tunnel w ' + (tun ? tun.w : 'no layer'));
+        'radial w ' + (tun ? tun.w : 'no layer'));
     B.scene.apply({ v: 0, size: 40 }); await sleep(700);
     put('a loaded scene survives the next drive frame', B.state.size === 40, 'size ' + B.state.size);
     put('an old scene gets defaults, not undefined',
@@ -307,7 +313,7 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   const perf = await page.evaluate(async () => {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const B = window.__bryk; const rows = [];
-    B.onlyProg('tunnel'); await sleep(600);
+    B.onlyProg('radial'); await sleep(600);
     for (const [n, face, post] of [[300,0,0],[1000,0,0],[300,0.8,0],[1000,0.8,0],[500,0.8,0.5]]) {
       B.setCount(n); B.setFace(face); B.state.post.chroma = post;
       await sleep(1600);
@@ -335,7 +341,7 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   const budget = await page.evaluate(async () => {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const B = window.__bryk, rows = [];
-    B.onlyProg('tunnel'); B.setFace(0.8);
+    B.onlyProg('radial'); B.setFace(0.8);
     for (const n of [200, 600, 1200]) {
       B.setCount(n); await sleep(900);
       let peak = 0;

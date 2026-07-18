@@ -16,6 +16,10 @@
  * that must hold whatever the design becomes.
  */
 'use strict';
+/* Preset ids changed when the shelf was rebuilt from the ported banks (2026-07-18):
+     axis→flow · ring→pulsing-circle · tunnel→radial · scatter→float · pattern→pat-<name>
+   and `logo` folded into `word`. Names here follow the shelf; they are not magic. */
+
 const path = require('path');
 const PW = process.env.BRYK_PLAYWRIGHT ||
   path.join(__dirname, '..', '..', 'synthex-engine', 'node_modules', 'playwright');
@@ -67,7 +71,7 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
     put('removing the hosting layer does not destroy the extras', alive('fText') && parked('fText'));
     put('a vacancy is refilled, one card still open', openCount() === 1, openCount() + ' open');
 
-    const D = B.addLayer('ring'); await sleep(150);
+    const D = B.addLayer('radial'); await sleep(150);
     B.duplicateLayer(D.id); await sleep(200);
     put('duplicating an open card yields one open, not two', openCount() === 1, openCount() + ' open');
 
@@ -79,7 +83,7 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
     B.addLayer('word'); await sleep(150);
     const t = document.getElementById('fText'); t.value = 'BRYK'; t.dispatchEvent(new Event('input'));
     const snap = B.scene.capture();
-    B.addLayer('tunnel'); await sleep(150);
+    B.addLayer('helix'); await sleep(150);
     B.scene.apply(snap); await sleep(600);
     put('a scene load leaves exactly one card open', openCount() === 1, openCount() + ' open');
     put('extras survive a scene load', alive('fText'));
@@ -87,7 +91,7 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
 
     /* ── per-layer marks: the whole point of moving them off the pool ────────── */
     B.layers().slice().forEach(L => B.removeLayer(L.id));
-    const A = B.addLayer('grid'), C = B.addLayer('ring');
+    const A = B.addLayer('grid'), C = B.addLayer('pulsing-circle');
     A.share = 0.5; C.share = 0.5; A.w = 1; C.w = 1;
     A.shapes = { tri:1, wedge:0, circle:0, asset:0 };
     C.shapes = { tri:0, wedge:0, circle:1, asset:0 };
@@ -108,7 +112,7 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
 
     /* an old scene has no per-layer marks — every layer must inherit the global mix */
     B.scene.apply({ v:1, shapes:{ tri:0, wedge:2, circle:0 }, assetW:0,
-                    layers:[{prog:'grid'},{prog:'ring'}] });
+                    layers:[{prog:'grid'},{prog:'pulsing-circle'}] });
     await sleep(500);
     put('a pre-2026-07-18 scene migrates its global mix onto every layer',
         B.layers().length === 2 && B.layers().every(L => (L.shapes.wedge||0) === 2 && (L.shapes.tri||0) === 0),

@@ -363,6 +363,32 @@ button,.tinSelect{touch-action:manipulation}
       <div class="row"><label title="0 = all at one angle, 1 = every body its own tilt">Tilt variation</label><span data-mnt="varTilt"></span></div>
     </fieldset>
 
+    <fieldset id="gPhys"><legend>Forces</legend>
+      <div class="row"><label title="Motion Primer behaviours — a whole force set at once">Behaviour</label>
+        <select id="behSel" class="tinSelect" aria-label="Behaviour"><option value="">—</option></select></div>
+      <div class="row"><label title="Manner of the swarm — cohesion vs separation vs flow">Manner</label>
+        <select id="mannerSel" class="tinSelect" aria-label="Manner"><option value="">—</option></select></div>
+      <div class="row"><label title="Bodies gain velocity and start noticing each other">Physics on</label><span data-mnt="physOn"></span></div>
+      <div class="row"><label title="Off = they avoid each other in the plane. On = in full depth.">Interact in 3D</label><span data-mnt="dim3"></span></div>
+      <div class="row"><label title="How hard the layout pulls">Follow</label><span data-mnt="follow"></span></div>
+      <div class="row"><label>Damping</label><span data-mnt="damp"></span></div>
+      <div class="row"><label title="Bodies push each other apart">Collide</label><span data-mnt="collide"></span></div>
+      <div class="row"><label>Body radius</label><span data-mnt="pradius"></span></div>
+      <div class="row"><label title="Curl field — divergence-free, so they swirl">Swirl</label><span data-mnt="swirl"></span></div>
+      <div class="row"><label title="Magnet to centre, stronger the closer they get">Attract</label><span data-mnt="attract"></span></div>
+      <div class="row"><label>Gravity</label><span data-mnt="gravity"></span></div>
+      <div class="row"><label title="Cohesion toward the local mean">Flock</label><span data-mnt="flock"></span></div>
+      <div class="row" style="margin-top:var(--sp-2)"><label title="Bodies are pushed out of the mark, so streams part around it">Logo as void</label><span data-mnt="logoAvoid"></span></div>
+    </fieldset>
+
+    <fieldset id="gSpace"><legend>Space</legend>
+      <div class="row"><label title="0 = flat orthographic, up = depth opens out">Perspective</label><span data-mnt="persp"></span></div>
+      <div class="row"><label>Zoom</label><span data-mnt="zoom"></span></div>
+      <div class="row"><label>Tilt</label><span data-mnt="tilt"></span></div>
+      <div class="row"><label>Auto spin</label><span data-mnt="spin"></span></div>
+      <p class="note">Drag the stage to orbit, wheel to zoom, double-click to reset.</p>
+    </fieldset>
+
     <!-- Program extras: controls that cannot be generated from a param declaration
          (a text field, a font picker). They live here once, keep their wiring, and are
          MOVED into the open card by renderLayers — moving a node preserves its listeners,
@@ -450,37 +476,6 @@ button,.tinSelect{touch-action:manipulation}
       <button class="btn wide" id="addRow" style="margin-top:var(--sp-1)">+ mapping</button>
       <p class="note">feature ▸ parameter ▸ depth ▸ curve. Rows belong to the focused
         layer. Several rows on one target <b>sum</b> their deviations from the base.</p>
-    </fieldset>
-
-    <!-- ANIMATION LIVES HERE. Rob, 2026-07-18: «У нас левой панели нету построения
-         анимации. Все связанное с анимацией и связанное с привязкой ритма это на правой
-         стороне. Слева мы сугубо строим нашу фигуру». Forces and Space used to sit in the
-         left column, which put every question about HOW IT MOVES next to the answer to
-         WHAT IT IS. They are here now, in signal order: rack → forces → moves. -->
-    <fieldset id="gPhys"><legend>Forces</legend>
-      <div class="row"><label title="Motion Primer behaviours — a whole force set at once">Behaviour</label>
-        <select id="behSel" class="tinSelect" aria-label="Behaviour"><option value="">—</option></select></div>
-      <div class="row"><label title="Manner of the swarm — cohesion vs separation vs flow">Manner</label>
-        <select id="mannerSel" class="tinSelect" aria-label="Manner"><option value="">—</option></select></div>
-      <div class="row"><label title="Bodies gain velocity and start noticing each other">Physics on</label><span data-mnt="physOn"></span></div>
-      <div class="row"><label title="Off = they avoid each other in the plane. On = in full depth.">Interact in 3D</label><span data-mnt="dim3"></span></div>
-      <div class="row"><label title="How hard the layout pulls">Follow</label><span data-mnt="follow"></span></div>
-      <div class="row"><label>Damping</label><span data-mnt="damp"></span></div>
-      <div class="row"><label title="Bodies push each other apart">Collide</label><span data-mnt="collide"></span></div>
-      <div class="row"><label>Body radius</label><span data-mnt="pradius"></span></div>
-      <div class="row"><label title="Curl field — divergence-free, so they swirl">Swirl</label><span data-mnt="swirl"></span></div>
-      <div class="row"><label title="Magnet to centre, stronger the closer they get">Attract</label><span data-mnt="attract"></span></div>
-      <div class="row"><label>Gravity</label><span data-mnt="gravity"></span></div>
-      <div class="row"><label title="Cohesion toward the local mean">Flock</label><span data-mnt="flock"></span></div>
-      <div class="row" style="margin-top:var(--sp-2)"><label title="Bodies are pushed out of the mark, so streams part around it">Logo as void</label><span data-mnt="logoAvoid"></span></div>
-    </fieldset>
-
-    <fieldset id="gSpace"><legend>Space</legend>
-      <div class="row"><label title="0 = flat orthographic, up = depth opens out">Perspective</label><span data-mnt="persp"></span></div>
-      <div class="row"><label>Zoom</label><span data-mnt="zoom"></span></div>
-      <div class="row"><label>Tilt</label><span data-mnt="tilt"></span></div>
-      <div class="row"><label>Auto spin</label><span data-mnt="spin"></span></div>
-      <p class="note">Drag the stage to orbit, wheel to zoom, double-click to reset.</p>
     </fieldset>
 
     <fieldset id="gMoves"><legend>Moves</legend>
@@ -1464,183 +1459,74 @@ const PAT_PARAMS=[
   {key:'lanes',     label:'lanes',     min:2, max:24, step:1,    def:7}
 ];
 
-/* ══════════════════════════════════════════════════════════════════════════
-   PRESETS — the shelf. Ported from image-shuffler `LAYOUTS` (index.html:253-327),
-   its preset contract (`STYLE_PRESETS` :329-334, `AXIS_KEYS_ALL` :335, `STYLE_AXIS`
-   :336-341, `applyStylePreset` :342) and `LAYOUT_LIST` :343-357.
-
-   Why this shape and not the old `PROGRAMS`: a preset is not a placement formula. Three
-   of our own sources independently converged on the same contract — name + description +
-   seed values + WHICH KEYS IT SHOWS + the formula. The missing piece was `keys`, and its
-   absence is why Waterfall displayed eight sliders while its code read four: angle, bend,
-   bend freq and plane tilt were live, turned, and did nothing.
-
-   `source` is mandatory and must be a real file:line. A preset with no source does not go
-   on the shelf. That rule exists because the last three banks here were written from
-   scratch under a comment citing a file that did not contain them.
-   ══════════════════════════════════════════════════════════════════════════ */
-
-/* Scene-level transport the shuffler layouts read as `S.speed` / `S.spin`. In the shuffler
-   these live on `state.scene`; here they are per-preset so two layers can run at different
-   rates, which is the whole point of a stack. */
-const SCENE_PARAMS=[
-  {key:'speed', label:'speed', min:-3, max:3,  step:0.01, def:1},
-  {key:'spin',  label:'spin',  min:0,  max:2,  step:0.01, def:0.4}
-];
-const AXIS_KEYS_ALL=['axes','angle','gap','scaleGrad','bend','bendFreq','tilt3d','speed'];
-
-/* LAYOUTS — carried over identifier for identifier from image-shuffler:253-327.
-   Signature adapted: the shuffler passes one `C` bag, we pass (i,N,t,P,ctx) where P is the
-   layer's own params and ctx carries {vx,vy,rnd,seed,variant}. Nothing else is changed;
-   the author's comments come with the code. */
-const LAYOUTS={
-  'pulsing-circle':(i,N,t,P,C)=>{
-    const a=i/Math.max(1,N)*TAU + t*0.18*P.speed*(0.4+P.spin);
-    const rad=0.7+0.18*Math.sin(t*1.2);
-    return {x:Math.cos(a)*rad*1.1*C.vx/1.9, y:Math.sin(a)*rad*C.vy/1.09, z:0, scale:1};
-  },
-  'float':(i,N,t,P,C)=>{
-    const r1=C.rnd(i), r2=C.rnd(i+911), r3=C.rnd(i+53);
-    const x=(r1*2-1)*C.vx*0.9 + Math.sin(t*0.3*P.speed + r1*10)*0.12;
-    const y=(r2*2-1)*C.vy*0.9 + Math.cos(t*0.27*P.speed + r2*10)*0.12;
-    return {x:x,y:y,z:0,scale:lerp(0.85,1.1,r3)};
-  },
-  'radial':(i,N,t,P,C)=>{
-    const a=i/Math.max(1,N)*TAU + t*0.3*P.speed*(0.5+P.spin), R=1.0;
-    return {x:Math.cos(a)*R*C.vx/1.9, y:0, z:Math.sin(a)*R, scale:1};
-  },
-  'grid':(i,N,t,P,C)=>{
-    const cols=Math.ceil(Math.sqrt(N)), rows=Math.ceil(N/cols);
-    const cyc=Math.floor(t*0.25*P.speed), perm=(i+cyc*7)%Math.max(1,N);
-    const gx=perm%cols, gy=Math.floor(perm/cols);
-    const x=(gx-(cols-1)/2)*(C.vx*1.7/Math.max(1,cols));
-    const y=(gy-(rows-1)/2)*(C.vy*1.7/Math.max(1,rows));
-    return {x:x,y:-y,z:0,scale:0.92};
-  },
-  'vortex':(i,N,t,P,C)=>{
-    const u=i/Math.max(1,N), a=u*TAU*3 + t*0.5*P.speed, rad=(0.14+u*1.05)*C.vy/1.09;
-    return {x:Math.cos(a)*rad, y:Math.sin(a)*rad, z:0, scale:lerp(1.12,0.5,u)};
-  },
-  'helix':(i,N,t,P,C)=>{
-    const u=i/Math.max(1,N), strand=i%2, a=u*TAU*2.2 + t*0.6*P.speed + strand*Math.PI;
-    return {x:Math.sin(a)*0.55, y:(u*2-1)*1.05*C.vy/1.09, z:Math.cos(a)*0.55, scale:1};
-  },
-  'spring':(i,N,t,P,C)=>{
-    const u=i/Math.max(1,N), a=u*TAU*4 + t*0.5*P.speed;
-    return {x:(u*2-1)*1.5*C.vx/1.9, y:Math.sin(a)*0.5, z:Math.cos(a)*0.5, scale:1};
-  },
-  'flip-book':(i,N,t,P,C)=>{
-    const u=i/Math.max(1,N), op=t*0.9*P.speed + i*0.45;
-    return {x:0, y:(u*2-1)*0.95*C.vy/1.09, z:0, scale:1.0, op:op};
-  },
-  'carousel':(i,N,t,P,C)=>{
-    // TRUE cover-flow. d = signed card-distance from the centre (front). Paint order = -|d|, so the
-    // centre card is ALWAYS on top and clearly protrudes (flat, biggest, nearest); its neighbours rotate
-    // away in Y and recede in Z, each inner card overlapping the outer one. A card entering from a side
-    // starts far out (order very low = UNDER everything) and fades in fast, then rises as it nears the
-    // centre and finally overtakes the previous centre card.
-    const N1=Math.max(1,N), front=t*0.14*P.speed*N1;
-    let d=i-front; d=((d%N1)+N1)%N1; if(d>N1/2) d-=N1;       // d in [-N/2, N/2]; 0 = centre
-    const ax=Math.abs(d), sgn=d<0?-1:1, e=Math.min(ax,1);
-    const x  = sgn*( e*0.74 + Math.max(0,ax-1)*0.5 );        // centre wide gap, outer packs tighter
-    const z  = -Math.min(ax,6)*0.7;                          // recede hard → sides shrink in perspective
-    const sc = lerp(1.16,0.6, clamp(ax/6,0,1));              // centre noticeably bigger → protrudes
-    const a  = clamp((4.2-ax)/0.7,0,1);                      // opaque within ~3.5 cards, quick fade past that
-    return {x:x*C.vx/1.9, y:0, z:z, scale:sc, alpha:a, skip:a<0.02, order:-ax};
-  },
-  'card-deck':(i,N,t,P,C)=>{
-    // a flip-through stack: centre card on top & protruding, pile recedes with a small offset to one side;
-    // entering card comes in behind the pile (low order = under), leaving card slides & fades — recycle unseen.
-    const N1=Math.max(1,N), front=t*0.4*P.speed;
-    let d=i-front; d=((d%N1)+N1)%N1; if(d>N1/2) d-=N1;       // d in [-N/2, N/2]; 0 = current top
-    const ax=Math.abs(d), sgn=d<0?-1:1;
-    const x  = sgn*(0.05*Math.min(ax,5));
-    const y  = -Math.min(ax,6)*0.028;
-    const z  = -Math.min(ax,6)*0.16;
-    const sc = lerp(1.1,0.78, clamp(ax/6,0,1));
-    const a  = clamp((4.5-ax)/0.8,0,1);
-    return {x:x*C.vx/1.9, y:y, z:z, scale:sc, alpha:a, skip:a<0.02, order:-ax};
-  }
-};
-
-/* STYLE_PRESETS — shuffler :329-334. Selecting a flow-family style SEEDS the axis params;
-   the controls then stay live to tweak. This is what makes sine-wave and zigzag presets
-   rather than programs: same engine, different seed. */
-const STYLE_PRESETS={
-  'flow':      {axes:1, angle:0, bend:0,    bendFreq:1, gap:0.9,  scaleGrad:0.18, tilt3d:0},
-  'waterfall': {axes:3, angle:0, bend:0,    bendFreq:1, gap:0.85, scaleGrad:0.15, tilt3d:0},
-  'sine-wave': {axes:1, angle:0, bend:0.55, bendFreq:2, gap:1.0,  scaleGrad:0.1,  tilt3d:0},
-  'zigzag':    {axes:1, angle:0, bend:0.6,  bendFreq:3, gap:1.0,  scaleGrad:0.1,  tilt3d:0}
-};
-/* STYLE_AXIS — shuffler :336-341. WHICH keys each preset shows. Waterfall showing eight
-   sliders while reading four was exactly the cost of not having this. */
-const STYLE_AXIS={
-  'flow':      AXIS_KEYS_ALL,
-  'sine-wave': ['angle','gap','scaleGrad','bend','bendFreq','tilt3d','speed'],
-  'zigzag':    ['angle','gap','scaleGrad','bend','bendFreq','tilt3d','speed'],
-  'waterfall': ['axes','gap','scaleGrad','speed']
-};
-
-const P_ = (id,src,group,label,desc,params,keys,seed,target,drive)=>
-  ({ id, source:src, group, label, desc, params, keys, seed:seed||{}, target, drive });
-
-const PRESETS=[
-  /* ── the axis family: one engine, four seeds (shuffler LAYOUT_LIST :344-347) ── */
-  P_('flow','image-shuffler:193-235','axis','Flow · lanes',
-     'The core axis engine. Rotate the Angle for horizontal / vertical / diagonal lanes; bend them, add lanes, set spacing, size falloff and per-image 3D. Seamless recycle',
-     AXIS_PARAMS.concat(SCENE_PARAMS), STYLE_AXIS['flow'], STYLE_PRESETS['flow'], axisTarget, 'bend'),
-  P_('waterfall','image-shuffler:237-252','axis','Waterfall',
-     'Frames fall in several columns, staggered and overlapping — a continuous cascade',
-     AXIS_PARAMS.concat(SCENE_PARAMS), STYLE_AXIS['waterfall'], STYLE_PRESETS['waterfall'], waterfallTarget, 'gap'),
-  P_('sine-wave','image-shuffler:255+329','axis','Sine Wave',
-     'Frames ride a curved sine axis — a flow preset',
-     AXIS_PARAMS.concat(SCENE_PARAMS), STYLE_AXIS['sine-wave'], STYLE_PRESETS['sine-wave'], axisTarget, 'bend'),
-  P_('zigzag','image-shuffler:256+330','axis','Zigzag',
-     'A sharply folded axis — a flow preset',
-     AXIS_PARAMS.concat(SCENE_PARAMS), STYLE_AXIS['zigzag'], STYLE_PRESETS['zigzag'], axisTarget, 'bendFreq')
-];
-
-/* the ten standalone layouts, each with the keys it actually reads */
-for(const [id,label,desc,keys] of [
-  ['pulsing-circle','Pulsing Circle','A ring whose radius breathes in and out',['speed','spin']],
-  ['radial','Rotating Radial','A ring rotating in depth — the orbit ticker',['speed','spin']],
-  ['vortex','Vortex','A spiral winding out from the centre',['speed']],
-  ['helix','DNA Helix','Two strands winding through 3-D space',['speed']],
-  ['spring','Spring','A coil travelling through depth',['speed']],
-  ['grid','Grid Layout','Frames on a grid, reshuffling cells',['speed']],
-  ['float','Random Float','Loose drift, no rigid path',['speed']],
-  ['carousel','Perspective Carousel','Cover-flow arc — centre faces you, sides turn away',['speed']],
-  ['card-deck','Card Deck','A stacked deck fanning out; recycle hidden at the faded sides',['speed']],
-  ['flip-book','Flip Book','A stack of frames flipping like a calendar',['speed']]
-]) PRESETS.push(P_(id,'image-shuffler:LAYOUTS.'+id,'layout',label,desc,
-     SCENE_PARAMS, keys, {}, (i,N,t,P,ctx)=>LAYOUTS[id](i,N,t,P,ctx), 'speed'));
-
-/* the 17-strong particle-dance bank, RAISED ONTO THE SHELF. It was carried over correctly
-   and then buried in a dropdown inside a single card, which inverted Rob's rule that any
-   preset choice IS a new layer: nine near-identical formulas got nine buttons while the
-   one genuinely varied bank got one. */
-for(const [id,label] of PATTERNS)
-  PRESETS.push(P_('pat-'+id,'particle-dance:patternPoint.'+id,'particles',label,
-    'particle-dance · '+label, PAT_PARAMS, PAT_PARAMS.map(x=>x.key), {},
-    (i,N,t,P,ctx)=>{ const b=pool[i]; if(!b||!b.pd)return {x:0,y:0,z:0};
-      const q=patternPoint(b.pd, id, t, {...P, spread:1, count:N, seed:ctx.seed});
+const PROGRAMS = {
+  axis:      { label:'Axis · lanes', params:AXIS_PARAMS, target:axisTarget },
+  waterfall: { label:'Waterfall',    params:AXIS_PARAMS, target:waterfallTarget },
+  pattern:   { label:'Pattern', variants:PATTERNS, params:PAT_PARAMS,
+    target(i,N,t,P,ctx){ const p=pool[i]; if(!p||!p.pd)return {x:0,y:0,z:0};
+      const q=patternPoint(p.pd, ctx.variant, t, {...P, spread:1, count:N, seed:ctx.seed});
+      /* the bank works in ±1.5; stretch it onto the real frame so it goes edge to edge */
       const kx=ctx.vx/1.5*P.spread, ky=ctx.vy/1.5*P.spread;
-      return { x:q.x*kx, y:q.y*ky, z:q.z*Math.min(kx,ky) }; }, 'amplitude'));
-
-/* formation stays: it is ours and it is one preset, not two (Motion Primer:195 has ONE
-   buildFormation with a source switch and a fill/frame mode — logo was a second copy) */
-PRESETS.push(P_('word','bryk · Motion Primer:195-230','formation','Word · formation',
-  'Bodies settle into the shape of the text',
-  [{key:'scale',label:'scale',min:0.1,max:3,step:0.01,def:1},
-   {key:'jitter',label:'jitter',min:0,max:0.5,step:0.005,def:0.02},
-   {key:'fit',label:'fit to grid',min:0,max:1,step:0.01,def:1}],
-  ['scale','jitter','fit'], {},
-  (i,N,t,P)=>{ const pts=buildFormation(N); if(!pts.length)return {x:0,y:0,z:0};
-    const p=pts[Math.min(pts.length-1,Math.floor(i*pts.length/Math.max(1,N)))];
-    return { x:p[0]*P.scale+Math.sin(t*2+i)*P.jitter,
-             y:p[1]*P.scale+Math.cos(t*2.2+i)*P.jitter, z:0 }; }, 'jitter'));
-
-const PROGRAMS={}; for(const P of PRESETS) PROGRAMS[P.id]=P;
+      return { x:q.x*kx, y:q.y*ky, z:q.z*Math.min(kx,ky) }; } },
+  grid: { label:'Grid',
+    params:[{key:'gap',label:'gap',min:0.1,max:3,step:0.01,def:1},
+            {key:'sway',label:'sway',min:0,max:1,step:0.01,def:0.18}],
+    target(i,N,t,P,ctx){
+      const cols=Math.ceil(Math.sqrt(N)), rows=Math.ceil(N/cols);
+      const cx=i%cols, cy=(i/cols)|0;
+      const EXT=Math.min(ctx.vx,ctx.vy)*2.0;      /* fill the frame, not a fixed box */
+      const pitch=EXT/Math.max(cols,rows)*P.gap;
+      return { x:(cx-(cols-1)/2)*pitch, y:((rows-1)/2-cy)*pitch,
+               z:Math.sin(t*0.4+i*0.3)*P.sway }; } },
+  ring: { label:'Ring',
+    params:[{key:'radius',label:'radius',min:0.1,max:3,step:0.01,def:1.05},
+            {key:'depth',label:'depth',min:0,max:2,step:0.01,def:0.35},
+            {key:'turns',label:'turns',min:0.25,max:6,step:0.05,def:1}],
+    target(i,N,t,P,ctx){ const a=(i/N)*TAU*P.turns, R=P.radius*Math.min(ctx.vx,ctx.vy)*0.62;
+      return { x:Math.cos(a)*R, y:Math.sin(a)*R*0.62,
+               z:Math.sin(a*2)*P.depth }; } },
+  tunnel: { label:'Tunnel',
+    params:[{key:'speed',label:'speed',min:-2,max:2,step:0.01,def:0.28},
+            {key:'spread',label:'spread',min:0.1,max:3,step:0.01,def:0.9},
+            {key:'rings',label:'rings',min:1,max:24,step:1,def:7}],
+    target(i,N,t,P,ctx){
+      const RINGS=Math.max(1,Math.round(P.rings));
+      const per=Math.max(1,Math.floor(N/RINGS)), ring=(i/per)|0, k=i%per;
+      const a=(k/per)*TAU;
+      const zz=((ring/RINGS)*3-t*P.speed)%3, z=zz<0?zz+3:zz, shrink=1-z*0.22;
+      const R=P.spread*Math.min(ctx.vx,ctx.vy)*0.7;
+      return { x:Math.cos(a)*R*shrink, y:Math.sin(a)*R*shrink, z:1.5-z }; } },
+  scatter: { label:'Scatter',
+    params:[{key:'spread',label:'spread',min:0.1,max:3,step:0.01,def:1.2},
+            {key:'drift',label:'drift',min:0,max:1,step:0.01,def:0.2}],
+    target(i,N,t,P,ctx){
+      const r=n=>{ const v=Math.sin(n*127.1+i*311.7+ctx.seed)*43758.5453; return v-Math.floor(v); };
+      /* scatter fills the whole frame — this is the "objects spread across the room"
+         look, not a cloud parked in the middle */
+      return { x:(r(1)-0.5)*2*P.spread*ctx.vx+Math.sin(t*0.3+i)*P.drift,
+               y:(r(2)-0.5)*2*P.spread*ctx.vy+Math.cos(t*0.26+i*1.3)*P.drift,
+               z:(r(3)-0.5)*1.6 }; } },
+  logo: { label:'Logo · mark',
+    params:[{key:'scale',label:'scale',min:0.1,max:3,step:0.01,def:1},
+            {key:'jitter',label:'jitter',min:0,max:0.5,step:0.005,def:0.015},
+            {key:'fit',label:'fit to grid',min:0,max:1,step:0.01,def:1}],
+    sizeScale(N,P){ if(P.fit<=0)return 1; buildLogoMask(N);
+      return lerp(1, clamp((LOGO.spacing||0.1)/Math.max(1e-4,state.size/100),0.15,4), P.fit); },
+    target(i,N,t,P){ const pts=buildLogoMask(N); if(!pts.length)return {x:0,y:0,z:0};
+      const p=pts[Math.min(pts.length-1,Math.floor(i*pts.length/Math.max(1,N)))];
+      return { x:p[0]*P.scale+Math.sin(t*1.7+i)*P.jitter,
+               y:p[1]*P.scale+Math.cos(t*1.9+i)*P.jitter, z:0 }; } },
+  word: { label:'Word · formation',
+    params:[{key:'scale',label:'scale',min:0.1,max:3,step:0.01,def:1},
+            {key:'jitter',label:'jitter',min:0,max:0.5,step:0.005,def:0.02},
+            {key:'fit',label:'fit to grid',min:0,max:1,step:0.01,def:1}],
+    sizeScale(N,P){ if(P.fit<=0)return 1; buildFormation(N);
+      return lerp(1, clamp(formSpacing/Math.max(1e-4,state.size/100),0.15,4), P.fit); },
+    target(i,N,t,P){ const pts=buildFormation(N); if(!pts.length)return {x:0,y:0,z:0};
+      const p=pts[Math.min(pts.length-1,Math.floor(i*pts.length/Math.max(1,N)))];
+      return { x:p[0]*P.scale+Math.sin(t*2+i)*P.jitter,
+               y:p[1]*P.scale+Math.cos(t*2.2+i)*P.jitter, z:0 }; } }
+};
 
 /* ══════════════════════════════════════════════════════════════════════════
    LOGO — the mark itself, used two ways (both asked for):
@@ -1753,12 +1639,8 @@ const DEF_SHAPES=()=>({ tri:1, wedge:1, circle:1, asset:1 });
 function makeLayer(prog,variant){
   const P=PROGRAMS[prog]; const params={};
   for(const d of P.params) params[d.key]=d.def;
-  /* applyStylePreset, shuffler :342 — the preset's own start values over the defaults.
-     This is what makes sine-wave and zigzag distinct presets of one engine rather than
-     the same card with a note telling you what to type in. */
-  Object.assign(params, P.seed||{});
   return { id:++uid, prog, shapes:DEF_SHAPES(),
-    variant: variant ?? null,
+    variant: variant ?? (P.variants ? P.variants[0][0] : null),
     label: P.label + (variant ? ' · '+variant : ''),
     w:1, muted:false, solo:false, share:1,
     seed:(Math.random()*1e6)|0,      /* two copies of one program diverge here */
@@ -1822,26 +1704,22 @@ function paramsOf(L){
   return [
     { key:'w',     label:'presence', min:0, max:1, step:0.01, get:()=>L.w,     set:v=>L.w=v },
     { key:'share', label:'share',    min:0, max:1, step:0.01, get:()=>L.share, set:v=>L.share=v },
-    /* STYLE_AXIS, shuffler :336-341. A preset declares WHICH keys it shows. Without this
-       Waterfall displayed eight sliders and read four: angle, bend, bend freq and plane
-       tilt turned and did nothing. `keys` is mandatory on every preset for that reason. */
-    ...P.params.filter(d=>!P.keys || P.keys.includes(d.key))
-              .map(d=>({ ...d, get:()=>L.params[d.key], set:v=>L.params[d.key]=v })),
+    ...P.params.map(d=>({ ...d, get:()=>L.params[d.key], set:v=>L.params[d.key]=v })),
     ...GLOBAL_PARAMS
   ];
 }
 /* Which parameter of a program is worth putting the beat on. Picking "the first one"
    landed the beat on `axes` — an integer lane COUNT — so every kick re-dealt the lanes
    in visible jumps. A drive target must be continuous and expressive. */
-/* which parameter is worth putting the beat on — now declared BY the preset (`drive`),
-   not held in a side table that silently went stale every time the shelf changed */
+const DRIVE_TARGET={ axis:'bend', waterfall:'gap', pattern:'amplitude', grid:'sway',
+  ring:'radius', tunnel:'speed', scatter:'drift', logo:'jitter', word:'jitter' };
 function seedRows(L){
   /* a new layer sounds without a single click — EQJ seedBuilderRows :891 */
   /* BIPOLAR, not up: presence starts at 1.0, so an "up" row can only push it into the
    ceiling and nothing moves. Bipolar breathes around the base — the layer recedes
    between kicks and comes forward on them. */
   L.matrix.push({ feat:'env.bassFast', path:'w', mode:'bi', depth:0.55, curve:'exp' });
-  const want=PROGRAMS[L.prog].drive;
+  const want=DRIVE_TARGET[L.prog];
   const main=PROGRAMS[L.prog].params.find(p=>p.key===want) || PROGRAMS[L.prog].params[0];
   if(main) L.matrix.push({ feat:'beat.sine', path:main.key, mode:'up', depth:0.30, curve:'ease' });
   /* size breathes on the kick — the thing that makes a field read as ALIVE rather than
@@ -1862,22 +1740,7 @@ const GLOBAL_PARAMS = [
   { key:'cam.tilt',    label:'tilt',        min:-1, max:1,   step:0.01, get:()=>state.cam.tilt,  set:v=>state.cam.tilt=v },
   { key:'cam.yaw',     label:'yaw',         min:-3.2,max:3.2,step:0.01, get:()=>state.cam.yaw,   set:v=>state.cam.yaw=v },
   { key:'face',        label:'face heading',min:0,  max:1,   step:0.01, get:()=>state.face,      set:v=>state.face=v },
-  { key:'satDrift',    label:'shimmer',     min:0,  max:1,   step:0.01, get:()=>state.satDrift,  set:v=>state.satDrift=v },
-  /* Everything that moved to the right column has to be REACHABLE from the rack, or the
-     move was cosmetic. Before this, physics sat in the left column AND could not be given
-     a beat — both halves of Rob's ask failed at once: «чтобы мы могли к любому нашему
-     варианту отображения присвоить какое-то взаимодействие с input звука». */
-  { key:'phys.follow',  label:'follow',   min:0, max:20,  step:0.1,  get:()=>state.phys.follow,  set:v=>state.phys.follow=v },
-  { key:'phys.damp',    label:'damping',  min:0.5,max:1,  step:0.005,get:()=>state.phys.damp,    set:v=>state.phys.damp=v },
-  { key:'phys.collide', label:'collide',  min:0, max:3,   step:0.01, get:()=>state.phys.collide, set:v=>state.phys.collide=v },
-  { key:'phys.radius',  label:'body radius',min:0.02,max:0.4,step:0.005,get:()=>state.phys.radius,set:v=>state.phys.radius=v },
-  { key:'phys.swirl',   label:'swirl',    min:0, max:3,   step:0.01, get:()=>state.phys.swirl,   set:v=>state.phys.swirl=v },
-  { key:'phys.attract', label:'attract',  min:-2,max:3,   step:0.01, get:()=>state.phys.attract, set:v=>state.phys.attract=v },
-  { key:'phys.gravity', label:'gravity',  min:-2,max:2,   step:0.01, get:()=>state.phys.gravity, set:v=>state.phys.gravity=v },
-  { key:'phys.flock',   label:'flock',    min:0, max:2,   step:0.01, get:()=>state.phys.flock,   set:v=>state.phys.flock=v },
-  { key:'logoAvoid',    label:'logo as void',min:0,max:2, step:0.01, get:()=>state.logoAvoid,    set:v=>state.logoAvoid=v },
-  { key:'cam.spin',     label:'auto spin',min:-0.5,max:0.5,step:0.005,get:()=>state.cam.spin,    set:v=>state.cam.spin=v },
-  { key:'count',        label:'count',    min:20,max:2000,step:1,    get:()=>state.count,        set:v=>{ state.count=Math.round(v); rebuildPool(); } }
+  { key:'satDrift',    label:'shimmer',     min:0,  max:1,   step:0.01, get:()=>state.satDrift,  set:v=>state.satDrift=v }
 ];
 
 const CURVE = { lin:v=>v, exp:v=>v*v, sqrt:v=>Math.sqrt(v),
@@ -1952,10 +1815,7 @@ function applyMatrix(f){
 }
 function restoreMatrix(acc){ for(const [,s] of acc) s.p.set(s.base); }
 const SCRUB_FOR = { 'size':'size','cam.persp':'persp','cam.zoom':'zoom','cam.tilt':'tilt',
-  'face':'face','satDrift':'satDrift',
-  'phys.follow':'follow','phys.damp':'damp','phys.collide':'collide','phys.radius':'pradius',
-  'phys.swirl':'swirl','phys.attract':'attract','phys.gravity':'gravity','phys.flock':'flock',
-  'logoAvoid':'logoAvoid','cam.spin':'spin','count':'count' };
+  'face':'face','satDrift':'satDrift' };
 /* Any edit OUTSIDE the matrix must rewrite the base, or the drive overwrites the
    user's hand on the very next frame (the classic EQJ trap). */
 function rebase(key,v){ /* bases are keyed layer::path — clear every match for this path */
@@ -2033,7 +1893,7 @@ const MOVES={
        so pressing 2 on a fresh page used to throw and kill the whole rAF loop. A move
        that needs a layer summons it rather than assuming it; ensureProg leaves it silent
        (w:0) so nothing appears until the move actually raises it. */
-    const g=ensureProg('grid'), s=ensureProg('float');
+    const g=ensureProg('grid'), s=ensureProg('scatter');
     if(k<0.62){ const a=k/0.62; s.w=lerp(ctx.sw,1,a); g.w=lerp(ctx.gw,0,a);
       state.phys.on=1; state.phys.swirl=lerp(ctx.swirl,1.6,a); }
     else { const b=easeOut((k-0.62)/0.38);
@@ -2068,7 +1928,7 @@ function triggerMove(id){
   const m=MOVES[id]; if(!m)return;
   fire(()=>{
     const ctx={ persp:state.cam.persp, swirl:state.phys.swirl, follow:state.phys.follow,
-                layer:state.cam2.layer, gw:(layerOfProg('grid')||{}).w||0, sw:(layerOfProg('float')||{}).w||0 };
+                layer:state.cam2.layer, gw:(layerOfProg('grid')||{}).w||0, sw:(layerOfProg('scatter')||{}).w||0 };
     startMove({...m,ctx});
     setStatus(m.name,'live');
   }, m.name);
@@ -2116,7 +1976,7 @@ function tightestCell(){
   let c=Infinity;
   for(const L of layers){
     if(!layerVisible(L) || L.w<=0.001) continue;
-    if(L.prog!=='word') continue;
+    if(L.prog!=='word' && L.prog!=='logo') continue;
     if((L.params.fit??1)<=0) continue;                 /* fit 0 = «leave my calibre alone» */
     buildFormation(pool.length);
     c=Math.min(c,formSpacing*(L.params.scale??1));
@@ -2775,22 +2635,13 @@ $('#camBlend').addEventListener('change',e=>state.cam2.blend=e.target.value);
 refreshCams(); camNoteText();
 
 /* ── add-layer bar: one button per program (EQJ engine library :727) ── */
-/* The shelf. 32 presets, grouped — a flat list was fine at nine and is unreadable now.
-   Each button carries its preset's description into the title, straight from LAYOUT_LIST. */
-const GROUPS=[['axis','axis · lanes'],['layout','layouts'],['particles','particles'],['formation','formation']];
 (function(){ const bar=$('#addLayerBar'); if(!bar)return;
-  for(const [g,gl] of GROUPS){
-    const items=PRESETS.filter(P=>P.group===g); if(!items.length)continue;
-    const cap=document.createElement('div'); cap.className='lcap'; cap.textContent=gl;
-    cap.style.flexBasis='100%'; bar.appendChild(cap);
-    for(const P of items){
-      const b=document.createElement('button'); b.className='btn';
-      b.textContent='+ '+P.label.split(' · ')[0];
-      b.title=P.desc+'  ·  '+P.source;
-      b.dataset.desc=P.desc;
-      b.addEventListener('click',()=>{ addLayer(P.id); setStatus('layer added · '+P.label,'ok'); });
-      bar.appendChild(b);
-    }
+  for(const key of Object.keys(PROGRAMS)){
+    const b=document.createElement('button'); b.className='btn';
+    b.textContent='+ '+PROGRAMS[key].label.split(' · ')[0];
+    b.title='Add a '+PROGRAMS[key].label+' layer';
+    b.addEventListener('click',()=>{ addLayer(key); setStatus('layer added · '+PROGRAMS[key].label,'ok'); });
+    bar.appendChild(b);
   } })();
 
 /* ── behaviours + manners (Motion Primer) ── */
@@ -2890,11 +2741,16 @@ function renderLayers(){
 
     const r2=document.createElement('div'); r2.className='l2';
     const P=PROGRAMS[L.prog];
-    /* No variant dropdown any more: the 17-strong particle bank sits on the shelf, one
-       button per pattern, because Rob's rule is that any preset choice IS a new layer.
-       The card just says which preset it is. */
-    { const sp=document.createElement('span'); sp.className='lprog';
-      sp.textContent=P.label; sp.title=P.desc+'  ·  '+P.source; r2.appendChild(sp); }
+    if(P.variants){
+      const sel=document.createElement('select'); sel.className='tinSelect';
+      sel.setAttribute('aria-label',L.label+' variant');
+      for(const [v,l] of P.variants){ const o=document.createElement('option');
+        o.value=v; o.textContent=l; if(v===L.variant)o.selected=true; sel.appendChild(o); }
+      sel.addEventListener('change',()=>{ L.variant=sel.value;
+        L.label=P.label+' · '+sel.value; renderLayers(); });
+      r2.appendChild(sel);
+    } else { const sp=document.createElement('span'); sp.className='lprog';
+      sp.textContent=P.label; r2.appendChild(sp); }
     const lop=document.createElement('span'); lop.className='lop'; r2.appendChild(lop);
     for(const [cls,txt,lbl,get,fn] of [
       ['lhide','hide','Mute',()=>L.muted,()=>{ L.muted=!L.muted; if(L.muted)L.solo=false; }],
@@ -3141,8 +2997,7 @@ function frame(){
     for(const L of act){
       if(!belongs(i,L))continue;                       /* share: this body isn't its business */
       const P=PROGRAMS[L.prog];
-      const tg=P.target(i,N,t,L.params,{variant:L.variant,seed:L.seed,vx:vxw,vy:vyw,
-        rnd:k=>hash01(k+L.seed)});                    /* shuffler C.rnd */
+      const tg=P.target(i,N,t,L.params,{variant:L.variant,seed:L.seed,vx:vxw,vy:vyw});
       const w=L.w/wnorm;
       tx+=tg.x*w; ty+=tg.y*w; tz+=tg.z*w; wl+=w;
       if(tg.alpha!=null) alpha=Math.min(alpha,tg.alpha);
@@ -3271,7 +3126,7 @@ buildRamp(); buildStops(); rebuildPool(); rebuildTextures();
 /* One layer at boot — two at full weight average into a band. And the axis engine
    defaults to a SINGLE lane at 0°, which is literally a horizontal line: correct
    behaviour, wrong first impression. Open on a field, not a stripe. */
-(function(){ const L=addLayer('flow');
+(function(){ const L=addLayer('axis');
   Object.assign(L.params,{axes:6, angle:14, gap:1.0, speed:0.62,
                           bend:0.22, bendFreq:2, scaleGrad:0.2, tilt3d:0.12}); })();
 resize(); refreshDevices(); setArmState('idle');
