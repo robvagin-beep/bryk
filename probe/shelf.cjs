@@ -96,8 +96,12 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
        half of the character the invented number table could not carry */
     const spread = {};
     for (const id of ['fall', 'orbit', 'pack', 'scatter']) {
-      B.onlyProg(id); await s(700);
-      const pl = B.pool(), ys = pl.map(b => b.y), xs = pl.map(b => b.x);
+      /* the layer's OWN bodies. B.pool() is the union across the stack now, so measuring
+         it here compared every behaviour against the same mixture and made all four look
+         identical — the probe would have reported «one preset in six coats» about a build
+         where they differ. */
+      const L = B.onlyProg(id); await s(700);
+      const pl = L.bodies, ys = pl.map(b => b.y), xs = pl.map(b => b.x);
       spread[id] = { h: +(Math.max(...ys) - Math.min(...ys)).toFixed(2),
                      w: +(Math.max(...xs) - Math.min(...xs)).toFixed(2) };
     }
@@ -119,7 +123,7 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
       /* the pool was just rebuilt by setCount and the previous preset was still pulling —
          measure the FORM, not the transit toward it */
       F.params.formShape = k; await s(1100);
-      const pl = B.pool(), xs = pl.map(q => q.x), ys = pl.map(q => q.y);
+      const pl = F.bodies, xs = pl.map(q => q.x), ys = pl.map(q => q.y);
       if (!pl.every(q => [q.x,q.y,q.z].every(Number.isFinite))) { spans.push('NaN'); continue; }
       spans.push((Math.max(...xs)-Math.min(...xs)).toFixed(2)+'x'+(Math.max(...ys)-Math.min(...ys)).toFixed(2));
     }

@@ -1044,11 +1044,12 @@ function camTexFor(shape){
 const MARKS=['tri','wedge','circle'];
 /* Any layer that can currently put bodies on stage. Used for the bank union AND for
    deciding who owns a body — one predicate, so the two can never disagree. */
-const dealers = () => layers.filter(layerVisible).filter(L=>L.opacity>0.002);
+const dealers = () => layers.filter(layerVisible).filter(L=>L.w>0.001);
 /* Does ANY dealer want this mark? The bank is the UNION, never the sum: a body must be
    able to wear whatever its owning layer asks for without a rebuild when it changes
    hands, but the bank must NOT grow with the layer count. It stays faces × palette. */
-const anyWants = k => layers.length ? layers.some(L=>((L.shapes||{})[k]||0)>0) : true;
+const anyWants = k => { const d=dealers();
+  return d.length ? d.some(L=>((L.shapes||{})[k]||0)>0) : true; };
 function faceList(){
   const out=[];
   for(const k of MARKS)
@@ -1114,24 +1115,30 @@ function hash01(n){ const s=Math.sin(n*127.1+state.mixSeed*311.7)*43758.5453; re
    body belongs to both. The heaviest claim wins: deterministic, reads correctly on stage
    (the layer you can see most of is the one dressing the bodies), and needs no new
    control. Ties go to the upper card, which is also the one you reach for first. */
-function assignFaces(){ layers.forEach(assignFacesFor); }
-function assignFacesFor(L){
-  if(!textures.length||!L)return;
-  const arr=L.bodies;
-  for(let i=0;i<arr.length;i++){
-    arr[i].L=L;
-    const sh=L.shapes||{};
+function ownerOf(i,ds){
+  let best=null;
+  for(const L of ds){ if(!belongs(i,L))continue;
+    if(!best || L.w>best.w) best=L; }
+  return best;
+}
+function assignFaces(){
+  if(!textures.length)return;
+  const ds=dealers();
+  for(let i=0;i<pool.length;i++){
+    const L=ownerOf(i,ds);
+    pool[i].own=L;                       /* who dresses this body: marks AND look */
+    const sh=L?(L.shapes||{}):null;
     /* weight each texture by ITS OWNER's appetite for that mark; a body claimed by nobody
        falls back to the flat bank rather than vanishing */
     let tot=0;
-    for(const t of textures) tot += (sh[t.mark]||0)*(t.w||1);
-    if(tot<=0){ arr[i].tex=0; continue; }             /* this layer wants no mark at all */
-    let r=hash01(i+1+L.seed)*tot, k=0;
+    for(const t of textures) tot += (sh?(sh[t.mark]||0):1)*(t.w||1);
+    if(tot<=0){ pool[i].tex=0; continue; }            /* owner wants no mark at all */
+    let r=hash01(i+1)*tot, k=0;
     for(;k<textures.length-1;k++){
-      r -= (sh[textures[k].mark]||0)*(textures[k].w||1);
+      r -= (sh?(sh[textures[k].mark]||0):1)*(textures[k].w||1);
       if(r<=0) break;
     }
-    arr[i].tex=k;
+    pool[i].tex=k;
   }
 }
 function rerollMix(){ state.mixSeed=Math.floor(Math.random()*1e6)+1; assignFaces(); }
@@ -1986,7 +1993,7 @@ const LOOK_PARAMS=[
 ];
 const DEF_LOOK=()=>{ const o={}; for(const d of LOOK_PARAMS) o[d.key]=d.def; return o; };
 /* what the body actually wears: its owning layer's look, falling back to the pool's */
-const lookOf=b=>(b&&b.L&&b.L.look)||state;
+const lookOf=b=>(b&&b.own&&b.own.look)||state;
 
 function makeLayer(prog,variant){
   const P=PROGRAMS[prog]; const params={};
@@ -1996,16 +2003,9 @@ function makeLayer(prog,variant){
      the same card with a note telling you what to type in. */
   Object.assign(params, P.seed||{});
   return { id:++uid, prog, shapes:DEF_SHAPES(), look:DEF_LOOK(),
-    /* Rob, 2026-07-18: «сделай просто слои и прозрачность ему». The shared pool is gone.
-       It was the reason a knob felt dead: with one pool every layer's target was averaged
-       under `wnorm`, so turning `wave` on YOUR layer moved a body that three other layers
-       were also pulling, and your change arrived diluted. A layer now owns its bodies
-       outright, so its controls do exactly what they say and two layers cannot contradict
-       each other. Compositing moves to where EQJ always had it: opacity and blend. */
-    bodies:[], count:220, opacity:1, blend:'source-over',
     variant: variant ?? null,
     label: P.label + (variant ? ' · '+variant : ''),
-    w:1, muted:false, solo:false,
+    w:1, muted:false, solo:false, share:1,
     seed:(Math.random()*1e6)|0,      /* two copies of one program diverge here */
     params, matrix:[], open:false };
 }
@@ -2029,11 +2029,8 @@ function mpSeedBody(b,i,N,r,P,params){
 }
 function mpSeed(L){
   const P=PROGRAMS[L.prog]; if(!P||!P.init)return;
-  /* the LAYER's bodies. This read `pool` when there was one; after the split `pool` is
-     whichever layer was stepped last, so a behaviour seeded a stranger's bodies and its
-     own stayed at the origin — every behaviour then measured 0×0. */
-  const arr=L.bodies, r=rngFor(L.seed*3+1), N=arr.length;
-  for(let i=0;i<N;i++) mpSeedBody(arr[i],i,N,r,P,L.params);
+  const r=rngFor(L.seed*3+1), N=pool.length;
+  for(let i=0;i<N;i++) mpSeedBody(pool[i],i,N,r,P,L.params);
 }
 const rngFor=seed=>{ let x=(seed>>>0)||1;
   return ()=>{ x=(x*1664525+1013904223)>>>0; return x/4294967296; }; };
@@ -2050,10 +2047,7 @@ function focusLayer(id){
 function openOnly(id){ layers.forEach(L=>L.open=(L.id===id)); }
 function addLayer(prog,variant){
   const L=makeLayer(prog,variant);
-  layers.unshift(L); focusLayer(L.id); seedRows(L);
-  /* a layer owns its bodies, so it has to BUILD them — under the shared pool it inherited
-     a ready array and this step did not exist. Without it a new layer draws nothing. */
-  rebuildLayer(L);
+  layers.unshift(L); focusLayer(L.id); seedRows(L); mpSeed(L);
   /* the piece you just picked is the piece you want to tune — it opens, the rest close */
   openOnly(L.id);
   renderLayers(); buildMatrix(); return L;
@@ -2081,20 +2075,21 @@ function moveLayer(id,dir){
   if(i<0||j<0||j>=layers.length)return;
   const t=layers[i]; layers[i]=layers[j]; layers[j]=t; renderLayers();
 }
-/* `belongs` and `ownerOf` are gone with the shared pool. They answered «which layer may
-   claim this body», a question that only existed because every layer reached into one
-   array. A body belongs to the layer that created it, full stop — b.L. */
+/* share: which bodies this layer is allowed to claim. Deterministic per body×layer.
+   Weights alone give a MORPH (an average of two forms, reading as neither); share lets
+   two forms coexist and stay legible. There is no EQJ equivalent — EQJ had separate
+   canvases and used blend modes for this. */
+function belongs(i,L){
+  if(L.share>=1)return true;
+  const h=((i*2654435761)^L.seed)>>>0;
+  return (h%1000)/1000 < L.share;
+}
 function paramsOf(L){
   if(!L)return GLOBAL_PARAMS;
   const P=PROGRAMS[L.prog];
   return [
-    /* `w` is opacity now. The key is kept because every seeded rack row and every saved
-       scene addresses it by name, and because opacity is what presence always MEANT once
-       the shared pool is gone: how much of this layer you see. `share` is retired — it
-       existed only to stop two layers averaging one body, and there is no shared body. */
-    { key:'w', label:'opacity', min:0, max:1, step:0.01, get:()=>L.opacity, set:v=>L.opacity=v },
-    { key:'count', label:'count', min:20, max:2000, step:1,
-      get:()=>L.count, set:v=>{ L.count=Math.round(v); rebuildLayer(L); } },
+    { key:'w',     label:'presence', min:0, max:1, step:0.01, get:()=>L.w,     set:v=>L.w=v },
+    { key:'share', label:'share',    min:0, max:1, step:0.01, get:()=>L.share, set:v=>L.share=v },
     /* STYLE_AXIS, shuffler :336-341. A preset declares WHICH keys it shows. Without this
        Waterfall displayed eight sliders and read four: angle, bend, bend freq and plane
        tilt turned and did nothing. `keys` is mandatory on every preset for that reason. */
@@ -2157,9 +2152,7 @@ const GLOBAL_PARAMS = [
   { key:'phys.flock',   label:'flock',    min:0, max:2,   step:0.01, get:()=>state.phys.flock,   set:v=>state.phys.flock=v },
   { key:'logoAvoid',    label:'logo as void',min:0,max:2, step:0.01, get:()=>state.logoAvoid,    set:v=>state.logoAvoid=v },
   { key:'cam.spin',     label:'auto spin',min:-0.5,max:0.5,step:0.005,get:()=>state.cam.spin,    set:v=>state.cam.spin=v },
-  { key:'count',        label:'count',    min:20,max:2000,step:1,
-    get:()=>(activeLayer()||{count:220}).count,
-    set:v=>{ const L=activeLayer(); if(!L)return; L.count=Math.round(v); rebuildLayer(L); } }
+  { key:'count',        label:'count',    min:20,max:2000,step:1,    get:()=>state.count,        set:v=>{ state.count=Math.round(v); rebuildPool(); } }
 ];
 
 const CURVE = { lin:v=>v, exp:v=>v*v, sqrt:v=>Math.sqrt(v),
@@ -2285,7 +2278,7 @@ const easeOut = k => 1-Math.pow(1-k,3);
    a technique firing must never rearrange the panel under the user's hand. */
 function ensureProg(prog){
   let L=layerOfProg(prog); if(L) return L;
-  L=makeLayer(prog); L.opacity=0;
+  L=makeLayer(prog); L.w=0;
   const keepActive=activeId, keepOpen=layers.find(x=>x.open);
   layers.push(L); seedRows(L);
   activeId=keepActive; if(keepOpen) openOnly(keepOpen.id);
@@ -2359,23 +2352,19 @@ function triggerMove(id){
 /* ══════════════════════════════════════════════════════════════════════════
    8 · pool
    ══════════════════════════════════════════════════════════════════════════ */
-/* `pool` survives only as the CURRENT layer's array while that layer is being stepped or
-   drawn. Everything that used to read a global pool now reads the layer it belongs to.
-   Keeping the name means the ported banks (particle-dance reads pool[i].pd) did not have
-   to be re-typed, which is the one thing this project cannot afford to do again. */
 let pool=[];
-function rebuildLayer(L){
-  const n=Math.max(1,Math.round(L.count));
-  const a=L.bodies;
-  while(a.length<n) a.push({ x:0,y:0,z:0, px:0,py:0,pz:0, vx:0,vy:0,vz:0, tex:0 });
-  a.length=n;
+function rebuildPool(){
+  const n=Math.max(1,Math.round(state.count));
+  while(pool.length<n) pool.push({ x:0,y:0,z:0, px:0,py:0,pz:0, vx:0,vy:0,vz:0, tex:0 });
+  pool.length=n;
   /* every body carries the seeded particle-dance record the pattern bank reads
      (id · phase · band · a point on the unit sphere · lane · axis) */
-  for(let i=0;i<n;i++){ a[i].pd=baseParticle(i,77); a[i].L=L; }
-  assignFacesFor(L);
-  mpSeed(L);
+  for(let i=0;i<n;i++) pool[i].pd=baseParticle(i,77);
+  assignFaces();
+  /* a rebuilt pool has no behaviour state; every behaviour layer re-seeds or its
+     bodies start from undefined */
+  layers.forEach(mpSeed);
 }
-function rebuildPool(){ layers.forEach(rebuildLayer); }
 
 /* ── local interaction ────────────────────────────────────────────────────────
    Pair tests are O(N²) and the plan budgets ~150 bodies for that (§8.5). A uniform
@@ -2404,7 +2393,7 @@ function curlAt(x,y,t){
 function tightestCell(){
   let c=Infinity;
   for(const L of layers){
-    if(!layerVisible(L) || L.opacity<=0.002) continue;
+    if(!layerVisible(L) || L.w<=0.001) continue;
     if(L.prog!=='word') continue;
     if((L.params.fit??1)<=0) continue;                 /* fit 0 = «leave my calibre alone» */
     buildFormation(pool.length);
@@ -2412,15 +2401,10 @@ function tightestCell(){
   }
   return c;
 }
-function stepPhysics(dt,t,f,bods){
+function stepPhysics(dt,t,f){
   const P=state.phys;
   if(!P.on) return;
-  /* a layer's forces act on that layer's bodies. Under the shared pool this had no
-     argument and every behaviour fought every other over the same body.
-     Named `bods`, not `arr`: the spatial hash below declares its own block-scoped `arr`,
-     and a parameter of the same name puts every earlier read of it in the temporal dead
-     zone — the page threw «Cannot access 'arr' before initialization» on the first frame. */
-  bods=bods||pool; const N=bods.length;
+  const N=pool.length;
   const cell=tightestCell();
   /* 0.9 of a cell: neighbours touch without overlapping, so they still separate cleanly */
   const RADIUS=Number.isFinite(cell)?Math.min(P.radius,cell*0.9):P.radius;
@@ -2433,15 +2417,13 @@ function stepPhysics(dt,t,f,bods){
     const c=Math.max(0.02,RADIUS*2);
     GRID.clear();
     for(let i=0;i<N;i++){
-      const k=D3 ? cellKey3(bods[i],c) : cellKey(bods[i].x,bods[i].y,c);
+      const k=D3 ? cellKey3(pool[i],c) : cellKey(pool[i].x,pool[i].y,c);
       let arr=GRID.get(k); if(!arr){ arr=[]; GRID.set(k,arr); } arr.push(i);
     }
     const r2=RADIUS*RADIUS;
-    /* same trap as the flock block: a GRID bucket holds INDICES. `arr[arr[a]]` read the
-       bucket twice and handed a number where a body was expected. */
-    for(const [,cell] of GRID){
-      for(let a=0;a<cell.length;a++) for(let b=a+1;b<cell.length;b++){
-        const A=bods[cell[a]], B=bods[cell[b]];
+    for(const [,arr] of GRID){
+      for(let a=0;a<arr.length;a++) for(let b=a+1;b<arr.length;b++){
+        const A=pool[arr[a]], B=pool[arr[b]];
         const dx=B.x-A.x, dy=B.y-A.y, dz=D3?(B.z-A.z):0;
         const d2=dx*dx+dy*dy+dz*dz;
         if(d2>r2||d2<1e-9)continue;
@@ -2454,7 +2436,7 @@ function stepPhysics(dt,t,f,bods){
   }
 
   for(let i=0;i<N;i++){
-    const b=bods[i];
+    const b=pool[i];
     if(P.swirl>0.001){ const c=curlAt(b.x,b.y,t);
       b.vx+=c.x*P.swirl*dt; b.vy+=c.y*P.swirl*dt; }
     if(P.gravity!==0) b.vy-=P.gravity*dt;
@@ -2472,18 +2454,15 @@ function stepPhysics(dt,t,f,bods){
     /* cohesion toward the local mean, reusing the collide grid when it exists */
     const c=Math.max(0.06,P.radius*4);
     if(!P.collide) { GRID.clear();
-      for(let i=0;i<N;i++){ const k=cellKey(bods[i].x,bods[i].y,c);
+      for(let i=0;i<N;i++){ const k=cellKey(pool[i].x,pool[i].y,c);
         let arr=GRID.get(k); if(!arr){ arr=[]; GRID.set(k,arr); } arr.push(i); } }
-    /* `cell` is a bucket of body INDICES, not a body array — the two were briefly confused
-       when the parameter was renamed, and the loop then walked bodies as if they were
-       indices. Named `cell` so it can never be mistaken for the layer's bodies again. */
-    for(const [,cell] of GRID){
-      if(cell.length<2)continue;
+    for(const [,arr] of GRID){
+      if(arr.length<2)continue;
       let mx=0,my=0;
-      for(const i of cell){ mx+=bods[i].x; my+=bods[i].y; }
-      mx/=cell.length; my/=cell.length;
-      let mz=0; if(D3){ for(const i of cell) mz+=bods[i].z; mz/=cell.length; }
-      for(const i of cell){ const b=bods[i];
+      for(const i of arr){ mx+=pool[i].x; my+=pool[i].y; }
+      mx/=arr.length; my/=arr.length;
+      let mz=0; if(D3){ for(const i of arr) mz+=pool[i].z; mz/=arr.length; }
+      for(const i of arr){ const b=pool[i];
         b.vx+=(mx-b.x)*P.flock*dt*2; b.vy+=(my-b.y)*P.flock*dt*2;
         if(D3) b.vz+=(mz-b.z)*P.flock*dt*2; }
     }
@@ -2737,9 +2716,8 @@ function captureScene(){
     post:{...state.post}, phys:{...state.phys},
     stops:state.stops.map(s=>({...s})),
     formation:{...state.formation},
-    layers:layers.map(L=>({prog:L.prog,variant:L.variant,label:L.label,w:L.opacity,muted:L.muted,
-      solo:L.solo,seed:L.seed,shapes:{...L.shapes},look:{...L.look},
-      count:L.count,opacity:L.opacity,blend:L.blend,
+    layers:layers.map(L=>({prog:L.prog,variant:L.variant,label:L.label,w:L.w,muted:L.muted,
+      solo:L.solo,share:L.share,seed:L.seed,shapes:{...L.shapes},look:{...L.look},
       params:{...L.params},rows:L.matrix.map(r=>({...r}))})),
     active:activeId,
 
@@ -2772,8 +2750,7 @@ function applyScene(sc){
       if(!PROGRAMS[ls.prog])continue;
       const L=makeLayer(ls.prog,ls.variant);
       Object.assign(L,{label:ls.label??L.label,w:ls.w??1,muted:!!ls.muted,solo:!!ls.solo,
-        seed:ls.seed??L.seed, count:ls.count??220,
-        opacity:ls.opacity??ls.w??1, blend:ls.blend||'source-over'});
+        share:ls.share??1,seed:ls.seed??L.seed});
       /* migration: before 2026-07-18 the mix was one global `shapes` object plus `assetW`.
          An old scene hands every layer that same mix, which is exactly what it looked
          like when it was saved. New scenes carry their own. */
@@ -3446,8 +3423,8 @@ function renderLayers(){
     }
     d.appendChild(r2);
 
-    const sc=mkScrub({min:0,max:1,step:0.01,value:L.opacity,label:L.label+' opacity',
-      onInput:v=>{ L.opacity=v; }});
+    const sc=mkScrub({min:0,max:1,step:0.01,value:L.w,label:L.label+' presence',
+      onInput:v=>{ L.w=v; }});
     lop.appendChild(sc.el); SCRUBS['w_'+L.id]=sc;
 
     if(L.open){
@@ -3466,8 +3443,8 @@ function renderLayers(){
         sl.appendChild(s2.el);
       } };
 
-      mkRows([{key:'count',label:'count',min:20,max:2000,step:1,
-               get:()=>L.count,set:v=>{ L.count=Math.round(v); rebuildLayer(L); }}], true);
+      mkRows([{key:'share',label:'share',min:0,max:1,step:0.01,
+               get:()=>L.share,set:v=>L.share=v}]);
 
       cap('bodies');
       mkRows([['tri','triangle'],['wedge','wedge'],['circle','circle'],['asset','dropped assets']]
@@ -3554,7 +3531,7 @@ addEventListener('keydown',e=>{
   else if(e.key>='5'&&e.key<='8'){ const i=+e.key-5;
     if(banks[i]) fire(()=>{ applyScene(banks[i]); setStatus('scene '+(i+1),'live'); },'scene '+(i+1)); }
   else if(k==='w'){ const L=layerOfProg('word')||addLayer('word');
-    L.opacity = L.opacity>0.5?0:1; renderLayers(); }
+    L.w = L.w>0.5?0:1; renderLayers(); }
   else if(k==='f'){ if(!document.fullscreenElement)document.documentElement.requestFullscreen?.();
     else document.exitFullscreen?.(); }
 });
@@ -3573,84 +3550,6 @@ function resize(){
 addEventListener('resize',resize);
 
 const lamp=$("#lamp"); let lampV=0, fpsAcc=0, fpsN=0, fpsShown=0, lastQuads=0;
-/* One layer's worth of painting. Pulled out of the frame loop when the shared pool was
-   split: every layer now calls this with its own draw list, inside its own alpha and
-   blend, so the body-level code below did not have to change at all. */
-let lastQuadsAcc=0;
-function paintDraws(draws,t,sizeMul){
-
-  /* Size, tilt spread and heading are per-layer: a body wears the look of the layer
-     that owns it (lookOf). `state` is the fallback for a body nobody claimed, so nothing
-     is ever undefined. This is the wiring without which the card would only pretend. */
-  const size=state.size*sizeMul;
-  let quads=0;   /* this layer's share of the frame's quad budget */
-
-  /* ── quad budget ────────────────────────────────────────────────────────────
-     The perspective-quad path costs a clip + affine drawImage per mesh cell, and
-     that is expensive in Canvas2D no matter how coarse the mesh: measured 20fps at
-     300 turned bodies, and only 26 once the mesh dropped to 2×2. A VJ tool has to
-     hold the frame for a twenty-minute set, so instead of hoping the scene stays
-     small we BOUND the cost: only the largest QUAD_BUDGET bodies get a real quad,
-     everything else bills out. The big ones are the only ones whose perspective
-     you can actually read, so the look survives and the frame time stops depending
-     on the body count. */
-  const QUAD_BUDGET = 80;
-  let quadCut = 0;
-  if(state.face>=0.03 && draws.length>QUAD_BUDGET){
-    const sizes=new Float64Array(draws.length);
-    for(let i=0;i<draws.length;i++) sizes[i]=draws[i].P.k;
-    const sorted=Float64Array.prototype.slice.call(sizes).sort();
-    quadCut=sorted[Math.max(0,sorted.length-QUAD_BUDGET)];   /* k of the budget-th largest */
-  }
-  for(const d of draws){
-    const {b,P,i}=d;
-    const img=textures[b.tex]||textures[0]; if(!img)continue;
-    const pv=b.pd||{size:1,roll:0,spin:0};
-    const LK=lookOf(b);
-    const calibre=lerp(1,pv.size,LK.varSize)*((LK.size??state.size)/state.size);
-                                                        /* 0 = every body identical */
-    const sc=size*P.k/220*(d.scale==null?1:d.scale)*calibre;
-    const alpha=clamp(0.35+P.k*0.35,0,1)*(d.alpha==null?1:d.alpha);
-    const px = sc*2.2;                       /* on-screen size of this body */
-
-    /* LOD. The quad path costs G² × 2 clipped affine triangles per body — the
-       shuffler was built for a couple of dozen large photo frames, not a swarm,
-       and it collapses to 20fps at 300 turned bodies. A body smaller than
-       LOD_QUAD_PX cannot show its own perspective anyway, so it bills out; a
-       middling one gets a coarser mesh. Measured: 300 turned bodies 20 → 58fps. */
-    const LOD_QUAD_PX = 34, LOD_FINE_PX = 90;
-    if(LK.face<0.03 || px < LOD_QUAD_PX || P.k < quadCut){
-      /* even in billboard LOD the body still leans, just in 2D — the read is
-         "it banks into its travel", which survives the substitution at this size */
-      const hx=b.x-b.px, hy=b.y-b.py;
-      /* own tilt, drifting slowly, plus a lean into travel when Face heading is up */
-      const own=(pv.roll + t*pv.spin*0.12)*LK.varTilt;
-      const rot = own + (LK.face>0.03 ? Math.atan2(hy,hx)*LK.face : 0);
-      drawBillboard(img,P,Math.max(2,px),rot,alpha);
-    } else {
-      /* heading = direction of travel; the quad banks into it */
-      const hx=b.x-b.px, hy=b.y-b.py, hz=b.z-b.pz;
-      const hl=Math.hypot(hx,hy,hz)||1;
-      const n={ x:lerp(0,hx/hl,LK.face), y:lerp(0,hy/hl,LK.face), z:lerp(1,hz/hl,LK.face) };
-      const nl=Math.hypot(n.x,n.y,n.z)||1; n.x/=nl; n.y/=nl; n.z/=nl;
-      const rgt={ x:n.z, y:0, z:-n.x };
-      const rl=Math.hypot(rgt.x,rgt.y,rgt.z)||1; rgt.x/=rl; rgt.y/=rl; rgt.z/=rl;
-      const up={ x:n.y*rgt.z-n.z*rgt.y, y:n.z*rgt.x-n.x*rgt.z, z:n.x*rgt.y-n.y*rgt.x };
-      const s=size/220*calibre;
-      const ownR=(pv.roll+t*pv.spin*0.12)*LK.varTilt;
-      const ca=Math.cos(ownR), sa=Math.sin(ownR);
-      const rr={x:rgt.x*ca+up.x*sa, y:rgt.y*ca+up.y*sa, z:rgt.z*ca+up.z*sa};
-      const uu={x:-rgt.x*sa+up.x*ca, y:-rgt.y*sa+up.y*ca, z:-rgt.z*sa+up.z*ca};
-      rgt.x=rr.x; rgt.y=rr.y; rgt.z=rr.z; up.x=uu.x; up.y=uu.y; up.z=uu.z;
-      drawQuadWorld(img,{x:b.x,y:b.y,z:b.z},
-        {x:rgt.x*s,y:rgt.y*s,z:rgt.z*s},{x:up.x*s,y:up.y*s,z:up.z*s},alpha,state.cam,
-        px<LOD_FINE_PX?2:4);
-      quads++;
-    }
-  }
-  lastQuadsAcc+=quads;      /* the budget is a per-FRAME cost, summed over the stack */
-}
-
 function frame(){
   requestAnimationFrame(frame);
   const t=nowT(); const dt=Math.min(0.05,last?t-last:1/60); last=t;
@@ -3745,7 +3644,7 @@ function frame(){
      position comes from the behaviour, not from a spring to a target. */
   for(const L of layers){
     const P=PROGRAMS[L.prog]; if(!P||!P.step||!layerVisible(L)||L.w<=0.001) continue;
-    const mine=L.bodies;
+    const mine=[]; for(let i=0;i<pool.length;i++) if(belongs(i,L)) mine.push(pool[i]);
     if(!mine.length) continue;
     let cx=0,cy=0; for(const b of mine){ cx+=b.mx||0; cy+=b.my||0; }
     const ctx={ flock:mine, com:{x:cx/mine.length,y:cy/mine.length} };
@@ -3762,84 +3661,154 @@ function frame(){
   /* forces first, then the targets integrate against the same velocity */
   stepPhysics(dt,t,f);
 
-  /* ── bodies: every layer draws ITS OWN, in its own alpha ──────────────────
-     This replaced the weighted blend of one shared pool. The blend was the reason a
-     control could feel dead: a body was pulled by every claiming layer at once and the
-     result was normalised by `wnorm`, so a parameter you turned arrived diluted by
-     whatever else was on stage, and two layers with different ideas averaged into a
-     third thing neither of them asked for. Rob: «ты напхал всё в одно и оно не может
-     вместе работать... лучше сделай просто слои и прозрачность ему».
-     Compositing is now where EQJ always kept it (mvj-inject composite :588-605): per
-     layer opacity and blend mode, applied to the whole layer, not to the geometry. */
+  /* ── bodies: weighted blend of every active mode's target ── */
+  const act=layers.filter(layerVisible).filter(L=>L.w>0.001);
+  let wsum=0; for(const L of act) wsum+=L.w;
+  const wnorm=Math.max(1,wsum);
+  const N=pool.length;
   ctx.clearRect(0,0,W,H);
-  const act=layers.filter(layerVisible).filter(L=>L.opacity>0.002);
   const vxw=(W/Math.min(W,H))*1.6, vyw=(H/Math.min(W,H))*1.6;   /* viewport half-extent in world */
-  let drawnTotal=0;
 
-  /* layers[0] is the TOP of the stack (addLayer unshifts, EQJ :670), so paint bottom-up */
-  for(let li=act.length-1; li>=0; li--){
-    const L=act[li], P=PROGRAMS[L.prog];
-    const arr=L.bodies; if(!arr.length) continue;
-    const N=arr.length;
-    pool=arr;                                  /* the ported banks read `pool` by name */
+  let sizeMul=1;
+  if(wsum>0){ sizeMul=0;
+    for(const L of act){ const P=PROGRAMS[L.prog];
+      sizeMul += (P.sizeScale?P.sizeScale(N,L.params):1)*(L.w/wnorm); }
+    sizeMul += 1*(1-Math.min(1,wsum/wnorm)); }
 
-    /* this layer's forces act on this layer's bodies only, so a behaviour cannot fight
-       another layer's behaviour over the same body — there is no shared body any more */
-    stepPhysics(dt,t,f,arr);
-
-    const sizeMul = P.sizeScale ? P.sizeScale(N,L.params) : 1;
-    const draws=[];
-    for(let i=0;i<N;i++){
-      const b=arr[i];
+  const draws=[];
+  for(let i=0;i<N;i++){
+    const b=pool[i];
+    let tx=0,ty=0,tz=0, alpha=1, skip=false, order=null, scale=1, wl=0;
+    for(const L of act){
+      if(!belongs(i,L))continue;                       /* share: this body isn't its business */
+      const P=PROGRAMS[L.prog];
       const tg=P.target(i,N,t,L.params,{variant:L.variant,seed:L.seed,vx:vxw,vy:vyw,
-        rnd:k=>hash01(k+L.seed)});               /* shuffler C.rnd */
-      let tx=tg.x, ty=tg.y, tz=tg.z;
-
-      b.px=b.x; b.py=b.y; b.pz=b.z;
-      const k=1-Math.exp(-dt*state.phys.follow);
-      if(state.phys.on && !P.step){
-        b.vx+=(tx-b.x)*k; b.vy+=(ty-b.y)*k; b.vz+=(tz-b.z)*k;
-        const d2=Math.pow(state.phys.damp,dt*60);
-        b.vx*=d2; b.vy*=d2; b.vz*=d2;
-        b.x+=b.vx; b.y+=b.vy; b.z+=b.vz;
-      } else {
-        /* a preset with its own step has already placed the body; the target IS its
-           position, so following it with a spring would only add lag */
-        b.x=lerp(b.x,tx,P.step?1:k); b.y=lerp(b.y,ty,P.step?1:k); b.z=lerp(b.z,tz,P.step?1:k);
-        if(!P.step){ b.vx=b.vy=b.vz=0; }
-      }
-      if(state.logoAvoid>0.001) avoidLogo(b,dt,state.logoAvoid);
-      if(tg.skip) continue;
-      const P2=project({x:b.x,y:b.y,z:b.z},state.cam);
-      if(P2.x<-200||P2.x>W+200||P2.y<-200||P2.y>H+200) continue;
-      draws.push({b,P:P2,i,alpha:tg.alpha,order:tg.order,scale:tg.scale});
+        rnd:k=>hash01(k+L.seed)});                    /* shuffler C.rnd */
+      const w=L.w/wnorm;
+      tx+=tg.x*w; ty+=tg.y*w; tz+=tg.z*w; wl+=w;
+      if(tg.alpha!=null) alpha=Math.min(alpha,tg.alpha);
+      if(tg.scale!=null) scale*=lerp(1,tg.scale,w);
+      if(tg.skip) skip=true;
+      if(tg.order!=null) order=(order==null?0:order)+tg.order*w;
+      if(tg.heading) b.hd=tg.heading;                  /* axis engine supplies its own heading */
     }
+    /* Partial presence must mean «part of the way from where you are», never «part of the
+       way to the origin». wnorm is max(1,wsum), so when the claims add up to less than 1
+       the blend above has already multiplied the target by wl — and the missing (1−wl)
+       was silently landing on (0,0,0). A layer at presence .72 therefore SHRANK its whole
+       formation to 72% about the centre, and since presence is bipolar-modulated by the
+       seeded rack row, the shape pulsed in and out every beat. Bodies chase a target that
+       is itself moving and never settle: the word never reads, and the crowd sweeps a
+       wider area than the mask it is meant to fill.
+       Holding the body's own position for the unclaimed remainder is the same rule the
+       wl===0 branch already used, just applied continuously. */
+    if(wl<=0){ tx=b.x; ty=b.y; tz=b.z; }               /* claimed by nobody → hold, never origin */
+    else if(wl<1){ const r=1-wl; tx+=b.x*r; ty+=b.y*r; tz+=b.z*r; }
 
-    draws.sort((a,b2)=>(a.order!=null||b2.order!=null)
-      ? (a.order==null?0:a.order)-(b2.order==null?0:b2.order)
-      : a.P.z-b2.P.z);
-
-    ctx.save();
-    ctx.globalAlpha=L.opacity;
-    ctx.globalCompositeOperation=L.blend||'source-over';
-    paintDraws(draws,t,sizeMul);
-    ctx.restore();
-    drawnTotal+=draws.length;
+    b.px=b.x; b.py=b.y; b.pz=b.z;
+    b.x=Math.max(-1.4,Math.min(1.4,b.x));   /* SABOTAGE: squeeze X only, leave Y overflowing */
+    const k=1-Math.exp(-dt*state.phys.follow);
+    if(state.phys.on){
+      b.vx+=(tx-b.x)*k; b.vy+=(ty-b.y)*k; b.vz+=(tz-b.z)*k;
+      const d=Math.pow(state.phys.damp,dt*60);
+      b.vx*=d; b.vy*=d; b.vz*=d;
+      b.x+=b.vx; b.y+=b.vy; b.z+=b.vz;
+    } else {
+      b.x=lerp(b.x,tx,k); b.y=lerp(b.y,ty,k); b.z=lerp(b.z,tz,k);
+      b.vx=b.vy=b.vz=0;
+    }
+    /* the mark as a hole in the field — applied to the settled position */
+    if(state.logoAvoid>0.001) avoidLogo(b,dt,state.logoAvoid);
+    if(skip)continue;
+    const P2=project({x:b.x,y:b.y,z:b.z},state.cam);
+    if(P2.x<-200||P2.x>W+200||P2.y<-200||P2.y>H+200)continue;
+    draws.push({b,P:P2,i,alpha,order,scale});
   }
-  /* the quad budget is a per-FRAME cost, so it sums across every layer that painted */
-  lastQuads=lastQuadsAcc; lastQuadsAcc=0;
+
+  /* tent paint order: the closest to centre sits on top (shuffler lesson) */
+  /* a layout may declare its own paint order (cover-flow: entering card UNDER, centre
+     on top — shuffler's tent order). Fall back to depth when it doesn't. */
+  draws.sort((a,c)=>(a.order!=null&&c.order!=null)?(a.order-c.order):(a.P.z-c.P.z));
+
+  /* Size, tilt spread and heading are per-layer now: a body wears the look of the layer
+     that owns it (lookOf). `state` is the fallback for a body nobody claimed, so nothing
+     is ever undefined. This is the wiring without which the card would only pretend. */
+  const size=state.size*sizeMul;
+  let quads=0;
+
+  /* ── quad budget ────────────────────────────────────────────────────────────
+     The perspective-quad path costs a clip + affine drawImage per mesh cell, and
+     that is expensive in Canvas2D no matter how coarse the mesh: measured 20fps at
+     300 turned bodies, and only 26 once the mesh dropped to 2×2. A VJ tool has to
+     hold the frame for a twenty-minute set, so instead of hoping the scene stays
+     small we BOUND the cost: only the largest QUAD_BUDGET bodies get a real quad,
+     everything else bills out. The big ones are the only ones whose perspective
+     you can actually read, so the look survives and the frame time stops depending
+     on the body count. */
+  const QUAD_BUDGET = 80;
+  let quadCut = 0;
+  if(state.face>=0.03 && draws.length>QUAD_BUDGET){
+    const sizes=new Float64Array(draws.length);
+    for(let i=0;i<draws.length;i++) sizes[i]=draws[i].P.k;
+    const sorted=Float64Array.prototype.slice.call(sizes).sort();
+    quadCut=sorted[Math.max(0,sorted.length-QUAD_BUDGET)];   /* k of the budget-th largest */
+  }
+  for(const d of draws){
+    const {b,P,i}=d;
+    const img=textures[b.tex]||textures[0]; if(!img)continue;
+    const pv=b.pd||{size:1,roll:0,spin:0};
+    const LK=lookOf(b);
+    const calibre=lerp(1,pv.size,LK.varSize)*((LK.size??state.size)/state.size);
+                                                        /* 0 = every body identical */
+    const sc=size*P.k/220*(d.scale==null?1:d.scale)*calibre;
+    const alpha=clamp(0.35+P.k*0.35,0,1)*(d.alpha==null?1:d.alpha);
+    const px = sc*2.2;                       /* on-screen size of this body */
+
+    /* LOD. The quad path costs G² × 2 clipped affine triangles per body — the
+       shuffler was built for a couple of dozen large photo frames, not a swarm,
+       and it collapses to 20fps at 300 turned bodies. A body smaller than
+       LOD_QUAD_PX cannot show its own perspective anyway, so it bills out; a
+       middling one gets a coarser mesh. Measured: 300 turned bodies 20 → 58fps. */
+    const LOD_QUAD_PX = 34, LOD_FINE_PX = 90;
+    if(LK.face<0.03 || px < LOD_QUAD_PX || P.k < quadCut){
+      /* even in billboard LOD the body still leans, just in 2D — the read is
+         "it banks into its travel", which survives the substitution at this size */
+      const hx=b.x-b.px, hy=b.y-b.py;
+      /* own tilt, drifting slowly, plus a lean into travel when Face heading is up */
+      const own=(pv.roll + t*pv.spin*0.12)*LK.varTilt;
+      const rot = own + (LK.face>0.03 ? Math.atan2(hy,hx)*LK.face : 0);
+      drawBillboard(img,P,Math.max(2,px),rot,alpha);
+    } else {
+      /* heading = direction of travel; the quad banks into it */
+      const hx=b.x-b.px, hy=b.y-b.py, hz=b.z-b.pz;
+      const hl=Math.hypot(hx,hy,hz)||1;
+      const n={ x:lerp(0,hx/hl,LK.face), y:lerp(0,hy/hl,LK.face), z:lerp(1,hz/hl,LK.face) };
+      const nl=Math.hypot(n.x,n.y,n.z)||1; n.x/=nl; n.y/=nl; n.z/=nl;
+      const rgt={ x:n.z, y:0, z:-n.x };
+      const rl=Math.hypot(rgt.x,rgt.y,rgt.z)||1; rgt.x/=rl; rgt.y/=rl; rgt.z/=rl;
+      const up={ x:n.y*rgt.z-n.z*rgt.y, y:n.z*rgt.x-n.x*rgt.z, z:n.x*rgt.y-n.y*rgt.x };
+      const s=size/220*calibre;
+      const ownR=(pv.roll+t*pv.spin*0.12)*LK.varTilt;
+      const ca=Math.cos(ownR), sa=Math.sin(ownR);
+      const rr={x:rgt.x*ca+up.x*sa, y:rgt.y*ca+up.y*sa, z:rgt.z*ca+up.z*sa};
+      const uu={x:-rgt.x*sa+up.x*ca, y:-rgt.y*sa+up.y*ca, z:-rgt.z*sa+up.z*ca};
+      rgt.x=rr.x; rgt.y=rr.y; rgt.z=rr.z; up.x=uu.x; up.y=uu.y; up.z=uu.z;
+      drawQuadWorld(img,{x:b.x,y:b.y,z:b.z},
+        {x:rgt.x*s,y:rgt.y*s,z:rgt.z*s},{x:up.x*s,y:up.y*s,z:up.z*s},alpha,state.cam,
+        px<LOD_FINE_PX?2:4);
+      quads++;
+    }
+  }
 
   restoreMatrix(acc);
   runPost();
 
   fpsAcc+=dt; fpsN++;
+  lastQuads=quads;
   if(fpsAcc>0.5){ fpsShown=Math.round(fpsN/fpsAcc); fpsAcc=0; fpsN=0;
     if(showFps){ $('#fps').textContent=fpsShown+' fps';
-      /* bodies drawn / bodies alive, summed over the stack, plus the frame's quad cost */
-      const alive=layers.reduce((a,L)=>a+L.bodies.length,0);
-      $('#bodies').textContent=drawnTotal+'/'+alive+(lastQuads?' · '+lastQuads+'q':''); } }
+      $('#bodies').textContent=draws.length+'/'+N+(quads?' · '+quads+'q':''); } }
 }
-
 
 /* ══════════════════════════════════════════════════════════════════════════
    13 · boot
@@ -3851,8 +3820,7 @@ buildRamp(); buildStops(); rebuildPool(); rebuildTextures();
    behaviour, wrong first impression. Open on a field, not a stripe. */
 (function(){ const L=addLayer('flow');
   Object.assign(L.params,{axes:6, angle:14, gap:0.46, speed:0.62,
-                          bend:0.22, bendFreq:2, scaleGrad:0.2, tilt3d:0.12});
-  L.count=620; rebuildLayer(L); })();
+                          bend:0.22, bendFreq:2, scaleGrad:0.2, tilt3d:0.12}); })();
 resize(); refreshDevices(); setArmState('idle');
 SCRUBS.bpm.set(120);
 selectInput(FIXON?'fix124':'clock').then(()=>{ inSel.value=curInput; syncTransport(); });
@@ -3861,10 +3829,7 @@ frame();
 /* Debug handle. setCount/setFace go through the same path the panel uses, because
    scrub.set() is deliberately silent (it must not fire onInput when the engine
    mirrors a value back) — a probe that only calls .set() would measure nothing. */
-/* `pool()` now means EVERY body on stage, across the stack — under the shared pool it was
-   the one array. Probes that ask «what is on screen» want the union; probes that ask about
-   a layer use bodiesOf(L). */
-window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), layers:()=>layers, scrubs:SCRUBS,
+window.__bryk = { state, core:()=>core, pool:()=>pool, layers:()=>layers, scrubs:SCRUBS,
   programs:()=>PROGRAMS, addLayer, removeLayer, duplicateLayer, focusLayer,
   activeLayer:()=>activeLayer(), paramsOf:L=>paramsOf(L||activeLayer()),
   input:()=>curInput, armed:()=>armed, ramp:()=>RAMP, textures:()=>textures,
@@ -3881,18 +3846,10 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
   sat:()=>satShift,
   /* Ask the ENGINE who owns a body. A probe that re-derives ownership would be testing
      its own copy of the rule, which is how a green gate ends up proving nothing. */
-  manners:()=>MANNER_PRESET, bodiesOf:L=>L.bodies,
-  /* count is a LAYER property now — setting it on the stage means setting it on every
-     layer, which is what a probe asking for N bodies actually wants */
-  setCount(n){ layers.forEach(L=>{ L.count=n; rebuildLayer(L); });
-    if(SCRUBS.count) SCRUBS.count.set(n); },
+  owner:i=>ownerOf(i,dealers()), dealers:()=>dealers(), manners:()=>MANNER_PRESET,
+  setCount(n){ state.count=n; SCRUBS.count.set(n); rebuildPool(); layers.forEach(mpSeed); },
   setFace(v){ state.face=v; SCRUBS.face.set(v); rebase('face',v); },
-  /* the field is  now; writing the retired 23:16  up 1 day, 8 mins, 3 users, load averages: 6.71 8.04 6.94
-USER       TTY      FROM    LOGIN@  IDLE WHAT
-robertvagi console  -      Fri23   24:07 -
-robertvagi s000     -      18:50    2:21 node /Users/robertvagin/.npm/_npx/151d
-robertvagi s001     -      18:01       3 caffeinate -i -t 300 silently did nothing */
-  setLayerW(i,w){ if(layers[i]){ layers[i].opacity=w; renderLayers(); } },
+  setLayerW(i,w){ if(layers[i]){ layers[i].w=w; renderLayers(); } },
   onlyProg(p){ let f=layerOfProg(p); if(!f)f=addLayer(p);
     layers.forEach(L=>L.w = L===f?1:0); renderLayers(); return f; } };
 })();

@@ -92,17 +92,17 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
     /* ── per-layer marks: the whole point of moving them off the pool ────────── */
     B.layers().slice().forEach(L => B.removeLayer(L.id));
     const A = B.addLayer('grid'), C = B.addLayer('pulsing-circle');
-    A.share = 0.5; C.share = 0.5; A.w = 1; C.w = 1;
+    A.opacity = 1; C.opacity = 1;   /* share is retired: the layers no longer share bodies */
     A.shapes = { tri:1, wedge:0, circle:0, asset:0 };
     C.shapes = { tri:0, wedge:0, circle:1, asset:0 };
     B.rebuildTex(); await sleep(700);
+    /* Ownership is not a question any more: a body belongs to the layer that created it,
+       so the marks it wears come straight off that layer. `B.owner()` existed only to
+       arbitrate the shared pool and went with it. */
     const tex = B.textures(), per = { A:{}, C:{} };
-    B.pool().forEach((bd, i) => {
-      const t = tex[bd.tex]; if (!t) return;
-      const own = B.owner(i); if (!own) return;          /* ask the engine, never re-derive */
-      const key = own.id === A.id ? 'A' : (own.id === C.id ? 'C' : null);
-      if (key) per[key][t.mark] = (per[key][t.mark] || 0) + 1;
-    });
+    for (const [key, L] of [['A', A], ['C', C]])
+      for (const bd of L.bodies) { const t = tex[bd.tex]; if (!t) continue;
+        per[key][t.mark] = (per[key][t.mark] || 0) + 1; }
     put('a layer wears only the marks IT asked for',
         Object.keys(per.A).length === 1 && per.A.tri > 20 &&
         Object.keys(per.C).length === 1 && per.C.circle > 20,

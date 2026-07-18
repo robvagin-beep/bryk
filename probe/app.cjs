@@ -114,7 +114,11 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
       if (i < 0) { B.addLayer(p); i = B.layers().findIndex(L => L.prog === p); }
       B.setLayerW(i, w); };
 
-    put('pool matches count', B.pool().length === Math.round(B.state.count), B.pool().length);
+    /* count moved onto the layer when the shared pool was split, so the stage total is
+       the sum over the stack rather than one number */
+    put('every layer holds exactly its own count',
+        B.layers().every(L => L.bodies.length === Math.round(L.count)),
+        B.layers().map(L => L.bodies.length + '/' + L.count).join(' '));
     put('no NaN in the pool', B.pool().every(b => [b.x,b.y,b.z].every(Number.isFinite)));
     put('ramp is 256 wide', B.ramp().length === 256);
     /* Don't count programs — that number is a design choice and will keep moving. Check
@@ -171,8 +175,9 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
        forces (collide/swirl off changes little). The transport is what does not converge.
        Threshold is the mask's own point spacing × 3 — three cells of slack is generous and
        still nowhere near what the build does. This gate stays red until the word reads. */
-    solo('word'); await sleep(2600);
-    const pts = B.formation(), pool = B.pool(), NB = pool.length;
+    const WL = solo('word'); await sleep(2600);
+    /* the word layer's own bodies: B.pool() is the whole stage now */
+    const pts = B.formation(WL.count), pool = WL.bodies, NB = pool.length;
     const errs = pool.map((b, i) => {
       const q = pts[Math.min(pts.length - 1, Math.floor(i * pts.length / NB))];
       return Math.hypot(q[0] - b.x, q[1] - b.y);
