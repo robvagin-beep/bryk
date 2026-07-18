@@ -1615,6 +1615,162 @@ for(const [id,label,desc,keys] of [
 ]) PRESETS.push(P_(id,'image-shuffler:LAYOUTS.'+id,'layout',label,desc,
      SCENE_PARAMS, keys, {}, (i,N,t,P,ctx)=>LAYOUTS[id](i,N,t,P,ctx), 'speed'));
 
+/* ══════════════════════════════════════════════════════════════════════════
+   MOTION PRIMER — the six behaviours, carried over as REAL presets.
+   Source: `Motion Primer — Skeleton.html` — force core :110-141, seeding `reinit()`
+   :249-262, integration `step()` :267-300, per-behaviour controls
+   `buildBehaviorParams()` :386-394, copy `BEHAVIORS` :146-153.
+
+   What was here before: a table of six rows of eight numbers captioned «Motion Primer
+   BEHAVIORS as force presets». The source's `BEHAVIORS` is a list of DESCRIPTIONS —
+   {id,name,ru,desc}, zero numbers. Those numbers were invented under a citation to a file
+   that does not contain them, and the whole character of the six was lost: each one has
+   its own SEEDING (where bodies appear) and its own INTEGRATION (how they move), which is
+   exactly what makes it a preset rather than a slider position.
+
+   Space: the source works in canvas pixels. Rather than re-derive fifty constants into
+   our ±3 world and lose the relations between them, the behaviour runs in its OWN pixel
+   field and is mapped to world only at the boundary. Every constant below is the source's,
+   untouched. MPW/MPH are the source's own default canvas.
+   ══════════════════════════════════════════════════════════════════════════ */
+const MPW=1440, MPH=900;
+const dampFactor=(k,dt,rate=3)=>Math.pow(k,dt*rate);
+const springAccel=(px,py,vx,vy,tx,ty,stiffness,damping)=>
+  ({ ax:-stiffness*(px-tx)-damping*vx, ay:-stiffness*(py-ty)-damping*vy });
+/* МАГНИТ / всасывание: тяга к цели, усиливается у центра (boost/(dist+soft)) */
+const mpAttract=(bx,by,tx,ty,urge,boost=90,soft=70)=>{ const dx=tx-bx, dy=ty-by,
+  dist=Math.hypot(dx,dy)||1, pull=urge*(1+boost/(dist+soft));
+  return { ax:(dx/dist)*pull, ay:(dy/dist)*pull, dist }; };
+const flowPotential=(x,y,t,sc)=>Math.sin(x*sc+t*0.6)*Math.cos(y*sc*1.3-t*0.4)
+  +0.6*Math.sin(y*sc*0.7-t*0.5)*Math.cos(x*sc*1.1+t*0.3)+0.4*Math.sin((x+y)*sc*0.9+t*0.2);
+/* named mpCurl, not curlAt: BRYK already has its own analytic curl (:2254) for the shared
+   force block. Two different fields, two names — one CSS class never gets two meanings. */
+const mpCurl=(x,y,t,sc,e=1)=>({ x:(flowPotential(x,y+e,t,sc)-flowPotential(x,y-e,t,sc))/(2*e),
+                                y:-(flowPotential(x+e,y,t,sc)-flowPotential(x-e,y,t,sc))/(2*e) });
+function boidForce(b,flock,R,wSep,wAli,wCoh){
+  let sx=0,sy=0,ax=0,ay=0,cx=0,cy=0,n=0;
+  for(const o of flock){ if(o===b)continue; const dx=o.mx-b.mx, dy=o.my-b.my, d2=dx*dx+dy*dy;
+    if(d2>R*R||d2<1e-6)continue;
+    const d=Math.sqrt(d2); sx-=dx/d/d; sy-=dy/d/d; ax+=o.mvx; ay+=o.mvy; cx+=o.mx; cy+=o.my; n++; }
+  if(!n) return { fx:0, fy:0 };
+  ax/=n; ay/=n; cx=cx/n-b.mx; cy=cy/n-b.my;
+  return { fx:sx*wSep+ax*wAli+cx*wCoh, fy:sy*wSep+ay*wAli+cy*wCoh };
+}
+/* MANNER_PRESET :155-158 verbatim. The previous table inverted two of its three orderings:
+   cohesion had Flock above Free (source: Free .12 > Flock .05) and flow had Vortex above
+   Flow (source: Flow 60 > Vortex 40). Manner is a sub-parameter of `swarm` here, as in the
+   source, not a global peer of behaviour — that was the second source of truth on physics. */
+const MANNER_PRESET={
+  Free:{cohesion:0.12,separation:170,flow:20}, Cluster:{cohesion:0.7,separation:90,flow:8},
+  Disperse:{cohesion:0,separation:560,flow:8}, Flock:{cohesion:0.05,separation:420,flow:12},
+  Flow:{cohesion:0,separation:70,flow:60},     Vortex:{cohesion:0.02,separation:90,flow:40}
+};
+const MANNER_LIST=['Free','Cluster','Disperse','Flock','Flow','Vortex'];
+
+const mpTarget=()=>({x:MPW/2,y:MPH/2});
+/* slotsFor :243-248 */
+function mpSlots(n,spreadK){
+  const cols=Math.ceil(Math.sqrt(n*1.6)), rows=Math.ceil(n/cols);
+  const gw=Math.min(MPW*0.52,cols*30*spreadK), gh=Math.min(MPH*0.6,rows*30*spreadK);
+  const ox=mpTarget().x-gw/2, oy=mpTarget().y-gh/2, out=[];
+  for(let k=0;k<n;k++){ const c=k%cols, rw=Math.floor(k/cols);
+    out.push({x:ox+(cols>1?c/(cols-1):0.5)*gw, y:oy+(rows>1?rw/(rows-1):0.5)*gh}); }
+  return out;
+}
+
+/* seeding — reinit() :253-260, branch for branch */
+const MP_INIT={
+  fall:(b,i,N,r)=>{ b.mx=r()*MPW; b.my=-r()*MPH*0.5; },
+  scatter:(b,i,N,r)=>{ const T=mpTarget(), a=r()*Math.PI*2, sp=(0.5+r())*150;
+    b.mx=T.x; b.my=T.y; b.mvx=Math.cos(a)*sp; b.mvy=Math.sin(a)*sp; },
+  orbit:(b,i,N,r,P)=>{ const T=mpTarget(), a=r()*Math.PI*2,
+    rr=(0.3+r()*P.spread)*Math.min(MPW,MPH)*0.34;
+    b.oR=rr; b.mx=T.x+Math.cos(a)*rr; b.my=T.y+Math.sin(a)*rr;
+    b.mvx=-Math.sin(a)*P.speed; b.mvy=Math.cos(a)*P.speed; },
+  pack:(b,i,N,r,P)=>{ const s2=(mpSlots(N,P.spread))[i]||mpTarget();
+    b.tx=s2.x; b.ty=s2.y; b.mx=r()*MPW; b.my=r()*MPH; },
+  magnet:(b,i,N,r,P)=>{ const T=mpTarget(), a=r()*Math.PI*2, d=(0.3+r()*0.5)*Math.min(MPW,MPH)*0.42;
+    b.mx=T.x+Math.cos(a)*d; b.my=T.y+Math.sin(a)*d;
+    b.mvx=(r()-0.5)*70; b.mvy=(r()-0.5)*70; b.age=0; b.delay=0.15+r()*P.floatTime; },
+  swarm:(b,i,N,r)=>{ b.mx=r()*MPW; b.my=r()*MPH; b.mvx=(r()-0.5)*30; b.mvy=(r()-0.5)*30; }
+};
+/* integration — step() :272-299, branch for branch */
+const MP_STEP={
+  swarm:(b,dt,t,P,ctx)=>{ const M=MANNER_PRESET[P.manner]||MANNER_PRESET.Free;
+    const ali=P.manner==='Flock'?0.9:0;
+    const f=boidForce(b,ctx.flock,P.reach,M.separation,ali,M.cohesion);
+    let ax=f.fx, ay=f.fy;
+    const c=mpCurl(b.mx,b.my,t,P.swirl*0.003,1), m=Math.hypot(c.x,c.y)||1;
+    ax+=c.x/m*M.flow*3; ay+=c.y/m*M.flow*3;
+    if(P.manner==='Vortex'){ const dx=b.mx-ctx.com.x, dy=b.my-ctx.com.y, d=Math.hypot(dx,dy)||1;
+      ax+=-dy/d*M.flow*2.4; ay+=dx/d*M.flow*2.4; }
+    b.mvx+=ax*dt; b.mvy+=ay*dt;
+    b.mvx*=dampFactor(P.smooth,dt); b.mvy*=dampFactor(P.smooth,dt);
+    const sp=Math.hypot(b.mvx,b.mvy), floor=10;
+    if(sp<floor && sp>1e-3){ b.mvx=b.mvx/sp*floor; b.mvy=b.mvy/sp*floor; }
+    b.mx+=b.mvx*dt*P.speed; b.my+=b.mvy*dt*P.speed;
+    if(b.mx<-30)b.mx=MPW+30; if(b.mx>MPW+30)b.mx=-30;
+    if(b.my<-30)b.my=MPH+30; if(b.my>MPH+30)b.my=-30; },
+  pack:(b,dt,t,P)=>{ const a=springAccel(b.mx,b.my,b.mvx,b.mvy,b.tx,b.ty,60,17);
+    b.mvx+=a.ax*dt; b.mvy+=a.ay*dt;
+    b.mvx*=dampFactor(0.85,dt); b.mvy*=dampFactor(0.85,dt);
+    b.mx+=b.mvx*dt*P.speed; b.my+=b.mvy*dt*P.speed; },
+  magnet:(b,dt,t,P)=>{ const T=mpTarget(); b.age=(b.age||0)+dt;
+    /* сначала летают */
+    if(b.age<b.delay){ const c=mpCurl(b.mx,b.my,t,P.swirl*0.003,1), m=Math.hypot(c.x,c.y)||1;
+      b.mvx+=c.x/m*44*dt; b.mvy+=c.y/m*44*dt; }
+    const k=clamp((b.age-b.delay)/0.7,0,1), mk=k*k*(3-2*k);   /* плавный «захват» магнита */
+    const a=mpAttract(b.mx,b.my,T.x,T.y,P.urge*mk);           /* всасывание, сильнее у центра */
+    b.mvx+=a.ax*dt; b.mvy+=a.ay*dt;
+    b.mvx*=dampFactor(0.8,dt); b.mvy*=dampFactor(0.8,dt);
+    b.mx+=b.mvx*dt*P.speed; b.my+=b.mvy*dt*P.speed; },
+  orbit:(b,dt,t,P)=>{ const T=mpTarget(), dx=b.mx-T.x, dy=b.my-T.y, d=Math.hypot(dx,dy)||1;
+    const tang={x:-dy/d,y:dx/d}, radialErr=d-(b.oR||d);
+    const vtx=tang.x*P.speed-(dx/d)*radialErr*P.centerPull;
+    const vty=tang.y*P.speed-(dy/d)*radialErr*P.centerPull;
+    b.mvx=lerp(b.mvx,vtx,0.12); b.mvy=lerp(b.mvy,vty,0.12);
+    b.mx+=b.mvx*dt; b.my+=b.mvy*dt; },
+  fall:(b,dt,t,P)=>{ b.mvy+=P.gravity*dt; b.mvx+=Math.sin(t*0.5+(b.seed||0)*6)*dt*5;
+    b.mvx*=dampFactor(0.9,dt);
+    b.mx+=b.mvx*dt*P.speed; b.my+=b.mvy*dt*P.speed;
+    const fl=MPH-24-14; if(b.my>fl){ b.my=fl; b.mvy*=-0.34; if(Math.abs(b.mvy)<5)b.mvy=0; }
+    if(b.mx<-20)b.mx=MPW+20; if(b.mx>MPW+20)b.mx=-20; },
+  scatter:(b,dt,t,P)=>{ b.mvx*=dampFactor(0.5,dt); b.mvy*=dampFactor(0.5,dt);
+    b.mx+=b.mvx*dt*P.speed; b.my+=b.mvy*dt*P.speed; }
+};
+/* buildBehaviorParams() :387-393 — each behaviour shows only its own controls */
+const MP_SPEED={key:'speed',label:'speed',min:0,max:3,step:0.01,def:1};
+const MP_PARAMS={
+  swarm:[MP_SPEED,{key:'manner',label:'manner',min:0,max:5,step:1,def:0},
+         {key:'reach',label:'reach',min:20,max:300,step:1,def:120},
+         {key:'swirl',label:'swirl',min:0,max:3,step:0.01,def:1},
+         {key:'smooth',label:'smoothing',min:0.5,max:0.99,step:0.01,def:0.9}],
+  pack:[MP_SPEED,{key:'spread',label:'spread',min:0.3,max:3,step:0.01,def:1}],
+  magnet:[MP_SPEED,{key:'urge',label:'urge',min:10,max:400,step:1,def:120},
+          {key:'floatTime',label:'float time',min:0,max:3,step:0.01,def:1},
+          {key:'swirl',label:'swirl',min:0,max:3,step:0.01,def:1}],
+  orbit:[MP_SPEED,{key:'spread',label:'spread',min:0.2,max:2,step:0.01,def:1},
+         {key:'centerPull',label:'center pull',min:0,max:3,step:0.01,def:1}],
+  fall:[MP_SPEED,{key:'gravity',label:'gravity',min:0,max:1200,step:5,def:420}],
+  scatter:[MP_SPEED]
+};
+for(const [id,label,desc,drive] of [
+  ['swarm','Swarm · рой','Тела свободно летают и взаимодействуют. Manner: ровно / сбор / разброс / стая / поток / вихрь','swirl'],
+  ['pack','Pack · укладка','Аккуратно выстраиваются в неперекрывающуюся упаковку у точки. Spread — плотность','spread'],
+  ['magnet','Magnet · магнит','Появляются фейдом, сначала ЛЕТАЮТ, затем всасываются к центру (сила растёт у центра)','urge'],
+  ['orbit','Orbit · орбита','Кольцо вокруг центра; center pull стягивает, чтобы не разлетались','centerPull'],
+  ['fall','Fall · падение','Гравитация вниз, тела пилятся друг на друге у пола','gravity'],
+  ['scatter','Scatter · разлёт','Импульс из центра наружу и затухание','speed']
+]){
+  const P=P_(id,'Motion Primer:249-300','behaviour',label,desc,
+    MP_PARAMS[id], MP_PARAMS[id].map(x=>x.key), {}, null, drive);
+  P.init=MP_INIT[id]; P.step=MP_STEP[id];
+  /* world position from the behaviour's own pixel field — the only conversion */
+  P.target=(i,N,t,pr,ctx)=>{ const b=pool[i]; if(!b||b.mx==null)return {x:0,y:0,z:0};
+    return { x:(b.mx/MPW-0.5)*2*ctx.vx, y:-(b.my/MPH-0.5)*2*ctx.vy, z:0 }; };
+  PRESETS.push(P);
+}
+
 /* the 17-strong particle-dance bank, RAISED ONTO THE SHELF. It was carried over correctly
    and then buried in a dropdown inside a single card, which inverted Rob's rule that any
    preset choice IS a new layer: nine near-identical formulas got nine buttons while the
@@ -1767,6 +1923,20 @@ function makeLayer(prog,variant){
 /* Idempotent, ported from EQJ `mvj-inject:653` with the author's reason: re-clicking the
    ALREADY active layer must not churn the comb, or a double-click rename on it cannot
    survive the rebuild the first click triggers. */
+/* reinit(), Motion Primer :249-262. A behaviour preset SEEDS its bodies — where they
+   appear is half of what makes fall look like falling and orbit look like an orbit. The
+   old table of numbers had no equivalent, which is why all six looked the same. */
+function mpSeed(L){
+  const P=PROGRAMS[L.prog]; if(!P||!P.init)return;
+  const r=rngFor(L.seed*3+1);
+  const N=pool.length;
+  for(let i=0;i<N;i++){ const b=pool[i];
+    b.mvx=0; b.mvy=0; b.age=0; b.seed=(b.seed==null?hash01(i)*1e3:b.seed);
+    P.init(b,i,N,r,L.params); }
+}
+const rngFor=seed=>{ let x=(seed>>>0)||1;
+  return ()=>{ x=(x*1664525+1013904223)>>>0; return x/4294967296; }; };
+
 function focusLayer(id){
   if(id!=null && id===activeId && activeLayer()) return;
   if(id!=null) activeId=id;
@@ -1779,7 +1949,7 @@ function focusLayer(id){
 function openOnly(id){ layers.forEach(L=>L.open=(L.id===id)); }
 function addLayer(prog,variant){
   const L=makeLayer(prog,variant);
-  layers.unshift(L); focusLayer(L.id); seedRows(L);
+  layers.unshift(L); focusLayer(L.id); seedRows(L); mpSeed(L);
   /* the piece you just picked is the piece you want to tune — it opens, the rest close */
   openOnly(L.id);
   renderLayers(); buildMatrix(); return L;
@@ -3117,6 +3287,21 @@ function frame(){
   /* ── camera (the viewing one) ── */
   setDriven('cam.yaw', state.cam.yaw + state.cam.spin*dt);   /* yaw is modulatable — a raw += is undone by restoreMatrix */
 
+  /* A preset with its own `step` integrates ITSELF — that is what a Motion Primer
+     behaviour is. Its bodies still go through the shared blend afterwards, but their
+     position comes from the behaviour, not from a spring to a target. */
+  for(const L of layers){
+    const P=PROGRAMS[L.prog]; if(!P||!P.step||!layerVisible(L)||L.w<=0.001) continue;
+    const mine=[]; for(let i=0;i<pool.length;i++) if(belongs(i,L)) mine.push(pool[i]);
+    if(!mine.length) continue;
+    let cx=0,cy=0; for(const b of mine){ cx+=b.mx||0; cy+=b.my||0; }
+    const ctx={ flock:mine, com:{x:cx/mine.length,y:cy/mine.length} };
+    const pr={...L.params};
+    if(pr.manner!=null) pr.manner=MANNER_LIST[clamp(Math.round(pr.manner),0,5)];
+    for(const b of mine){ if(b.mx==null){ P.init(b,0,mine.length,Math.random,L.params); }
+      P.step(b,Math.min(dt,0.05),t,pr,ctx); }
+  }
+
   /* forces first, then the targets integrate against the same velocity */
   stepPhysics(dt,t,f);
 
@@ -3299,7 +3484,7 @@ window.__bryk = { state, core:()=>core, pool:()=>pool, layers:()=>layers, scrubs
   sat:()=>satShift,
   /* Ask the ENGINE who owns a body. A probe that re-derives ownership would be testing
      its own copy of the rule, which is how a green gate ends up proving nothing. */
-  owner:i=>ownerOf(i,dealers()), dealers:()=>dealers(),
+  owner:i=>ownerOf(i,dealers()), dealers:()=>dealers(), manners:()=>MANNER_PRESET,
   setCount(n){ state.count=n; SCRUBS.count.set(n); rebuildPool(); },
   setFace(v){ state.face=v; SCRUBS.face.set(v); rebase('face',v); },
   setLayerW(i,w){ if(layers[i]){ layers[i].w=w; renderLayers(); } },

@@ -74,6 +74,38 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
     const rightIds=[...document.querySelectorAll('#rightcol fieldset')].map(f=>f.id);
     put('forces and space are on the right', rightIds.includes('gPhys')&&rightIds.includes('gSpace'),
         rightIds.join(','));
+    /* ── Motion Primer behaviours are presets, not slider positions ─────────── */
+    const beh = ids.filter(k => bank[k].group === 'behaviour');
+    put('the six Motion Primer behaviours are on the shelf', beh.length === 6, beh.join(','));
+    put('each behaviour brings its own seeding and its own integration',
+        beh.every(k => typeof bank[k].init === 'function' && typeof bank[k].step === 'function'),
+        beh.filter(k => !bank[k].step).join(',') || 'all six');
+    put('each behaviour shows only its own controls',
+        bank.pack.keys.length < bank.swarm.keys.length &&
+        bank.scatter.keys.length < bank.magnet.keys.length,
+        'pack ' + bank.pack.keys.length + ' · swarm ' + bank.swarm.keys.length +
+        ' · scatter ' + bank.scatter.keys.length + ' · magnet ' + bank.magnet.keys.length);
+
+    /* the seeding must actually put bodies somewhere different per behaviour — that is the
+       half of the character the invented number table could not carry */
+    const spread = {};
+    for (const id of ['fall', 'orbit', 'pack', 'scatter']) {
+      B.onlyProg(id); await s(700);
+      const pl = B.pool(), ys = pl.map(b => b.y), xs = pl.map(b => b.x);
+      spread[id] = { h: +(Math.max(...ys) - Math.min(...ys)).toFixed(2),
+                     w: +(Math.max(...xs) - Math.min(...xs)).toFixed(2) };
+    }
+    put('the six seed differently, they are not one preset in six coats',
+        new Set(Object.values(spread).map(v => v.h + 'x' + v.w)).size >= 3,
+        Object.entries(spread).map(([k, v]) => k + ' ' + v.w + '×' + v.h).join('  '));
+
+    /* MANNER_PRESET orderings, the two that were inverted */
+    const M = B.manners();
+    put('manner orderings match the source',
+        M.Free.cohesion > M.Flock.cohesion && M.Flow.flow > M.Vortex.flow,
+        'cohesion Free ' + M.Free.cohesion + ' > Flock ' + M.Flock.cohesion +
+        ' · flow Flow ' + M.Flow.flow + ' > Vortex ' + M.Vortex.flow);
+
     return out;
   });
   let bad=0; for(const [n,ok,e] of r){ if(!ok)bad++; console.log((ok?'  ok  ':'  FAIL')+'  '+n.padEnd(52)+e); }
