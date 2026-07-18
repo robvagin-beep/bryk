@@ -1408,17 +1408,30 @@ const BEHAVIOURS={
   fall:   { on:1, follow:0.4, collide:0.90, swirl:0,    attract:0,    gravity:0.55, flock:0,    damp:0.95 },
   scatter:{ on:1, follow:0.6, collide:0.50, swirl:0.14, attract:-0.5, gravity:0,    flock:0,    damp:0.975 }
 };
-const MANNERS={
-  Free:    { flock:0.10, collide:0.30, swirl:0.10 },
-  Cluster: { flock:0.50, collide:0.18, swirl:0.05 },
-  Disperse:{ flock:0.00, collide:1.00, swirl:0.05 },
-  Flock:   { flock:0.40, collide:0.70, swirl:0.07 },
-  Flow:    { flock:0.00, collide:0.12, swirl:0.28 },
-  Vortex:  { flock:0.02, collide:0.18, swirl:0.65 }
-};
+/* THE table the hand turns. It is derived from MANNER_PRESET (Motion Primer :155-158) by
+   mapping cohesion→flock, separation→collide, flow→swirl and rescaling into our world;
+   the ORDER along each axis is what carries the character, so the order is what must
+   survive the rescale. It did not: cohesion had Flock above Free where the source has
+   Free .12 > Flock .05, and swirl had Vortex above Flow where the source has Flow 60 >
+   Vortex 40. Both restored. A gate green on MANNER_PRESET while the UI applied this table
+   is exactly how an inverted mapping lived through a whole audit. */
+let _MANNERS=null;
+/* built on first use, not at definition: MANNER_PRESET is declared further down with the
+   ported Motion Primer block, and an eager IIFE here reads it inside its temporal dead
+   zone — the page threw on the very first line it evaluated. */
+function mannerTable(){
+  if(_MANNERS) return _MANNERS;
+  const SEP=1/560, COH=1/1.4, FLO=1/92;     /* one scale per axis, orders preserved */
+  const out={};
+  for(const k in MANNER_PRESET){ const m=MANNER_PRESET[k];
+    out[k]={ flock:+(m.cohesion*COH).toFixed(3),
+             collide:+(m.separation*SEP).toFixed(3),
+             swirl:+(m.flow*FLO).toFixed(3) }; }
+  return (_MANNERS=out);
+}
 function applyBehaviour(id){ const b=BEHAVIOURS[id]; if(!b)return;
   Object.assign(state.phys,b); syncAllScrubs(); setStatus('behaviour · '+id,'live'); }
-function applyManner(id){ const m=MANNERS[id]; if(!m)return;
+function applyManner(id){ const m=mannerTable()[id]; if(!m)return;
   state.phys.on=1; Object.assign(state.phys,m); syncAllScrubs(); setStatus('manner · '+id,'live'); }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1521,54 +1534,61 @@ const PAT_PARAMS=[
 /* Scene-level transport the shuffler layouts read as `S.speed` / `S.spin`. In the shuffler
    these live on `state.scene`; here they are per-preset so two layers can run at different
    rates, which is the whole point of a stack. */
+/* `sceneSpeed`, not `speed`: AXIS_PARAMS already declares a `speed`, and concatenating
+   the two put two identical rows in the card writing the same key. The author's lane
+   default (0.62) was unreachable and scene transport did not exist as its own quantity. */
 const SCENE_PARAMS=[
-  {key:'speed', label:'speed', min:-3, max:3,  step:0.01, def:1},
+  {key:'sceneSpeed', label:'transport speed', min:-3, max:3, step:0.01, def:1},
   {key:'spin',  label:'spin',  min:0,  max:2,  step:0.01, def:0.4}
 ];
-const AXIS_KEYS_ALL=['axes','angle','gap','scaleGrad','bend','bendFreq','tilt3d','speed'];
+const AXIS_KEYS_ALL=['axes','angle','gap','scaleGrad','bend','bendFreq','tilt3d','speed','sceneSpeed'];
 
 /* LAYOUTS — carried over identifier for identifier from image-shuffler:253-327.
    Signature adapted: the shuffler passes one `C` bag, we pass (i,N,t,P,ctx) where P is the
    layer's own params and ctx carries {vx,vy,rnd,seed,variant}. Nothing else is changed;
    the author's comments come with the code. */
+/* These read the SCENE transport, which is `sceneSpeed` since the axis family's own
+   `speed` collided with it. Reading a key the preset does not declare yields undefined,
+   and undefined in `t*0.14*P.speed*N1` is NaN for every body — the layout then draws
+   nothing at all, silently. */
 const LAYOUTS={
   'pulsing-circle':(i,N,t,P,C)=>{
-    const a=i/Math.max(1,N)*TAU + t*0.18*P.speed*(0.4+P.spin);
+    const a=i/Math.max(1,N)*TAU + t*0.18*P.sceneSpeed*(0.4+P.spin);
     const rad=0.7+0.18*Math.sin(t*1.2);
     return {x:Math.cos(a)*rad*1.1*C.vx/1.9, y:Math.sin(a)*rad*C.vy/1.09, z:0, scale:1};
   },
   'float':(i,N,t,P,C)=>{
     const r1=C.rnd(i), r2=C.rnd(i+911), r3=C.rnd(i+53);
-    const x=(r1*2-1)*C.vx*0.9 + Math.sin(t*0.3*P.speed + r1*10)*0.12;
-    const y=(r2*2-1)*C.vy*0.9 + Math.cos(t*0.27*P.speed + r2*10)*0.12;
+    const x=(r1*2-1)*C.vx*0.9 + Math.sin(t*0.3*P.sceneSpeed + r1*10)*0.12;
+    const y=(r2*2-1)*C.vy*0.9 + Math.cos(t*0.27*P.sceneSpeed + r2*10)*0.12;
     return {x:x,y:y,z:0,scale:lerp(0.85,1.1,r3)};
   },
   'radial':(i,N,t,P,C)=>{
-    const a=i/Math.max(1,N)*TAU + t*0.3*P.speed*(0.5+P.spin), R=1.0;
+    const a=i/Math.max(1,N)*TAU + t*0.3*P.sceneSpeed*(0.5+P.spin), R=1.0;
     return {x:Math.cos(a)*R*C.vx/1.9, y:0, z:Math.sin(a)*R, scale:1};
   },
   'grid':(i,N,t,P,C)=>{
     const cols=Math.ceil(Math.sqrt(N)), rows=Math.ceil(N/cols);
-    const cyc=Math.floor(t*0.25*P.speed), perm=(i+cyc*7)%Math.max(1,N);
+    const cyc=Math.floor(t*0.25*P.sceneSpeed), perm=(i+cyc*7)%Math.max(1,N);
     const gx=perm%cols, gy=Math.floor(perm/cols);
     const x=(gx-(cols-1)/2)*(C.vx*1.7/Math.max(1,cols));
     const y=(gy-(rows-1)/2)*(C.vy*1.7/Math.max(1,rows));
     return {x:x,y:-y,z:0,scale:0.92};
   },
   'vortex':(i,N,t,P,C)=>{
-    const u=i/Math.max(1,N), a=u*TAU*3 + t*0.5*P.speed, rad=(0.14+u*1.05)*C.vy/1.09;
+    const u=i/Math.max(1,N), a=u*TAU*3 + t*0.5*P.sceneSpeed, rad=(0.14+u*1.05)*C.vy/1.09;
     return {x:Math.cos(a)*rad, y:Math.sin(a)*rad, z:0, scale:lerp(1.12,0.5,u)};
   },
   'helix':(i,N,t,P,C)=>{
-    const u=i/Math.max(1,N), strand=i%2, a=u*TAU*2.2 + t*0.6*P.speed + strand*Math.PI;
+    const u=i/Math.max(1,N), strand=i%2, a=u*TAU*2.2 + t*0.6*P.sceneSpeed + strand*Math.PI;
     return {x:Math.sin(a)*0.55, y:(u*2-1)*1.05*C.vy/1.09, z:Math.cos(a)*0.55, scale:1};
   },
   'spring':(i,N,t,P,C)=>{
-    const u=i/Math.max(1,N), a=u*TAU*4 + t*0.5*P.speed;
+    const u=i/Math.max(1,N), a=u*TAU*4 + t*0.5*P.sceneSpeed;
     return {x:(u*2-1)*1.5*C.vx/1.9, y:Math.sin(a)*0.5, z:Math.cos(a)*0.5, scale:1};
   },
   'flip-book':(i,N,t,P,C)=>{
-    const u=i/Math.max(1,N), op=t*0.9*P.speed + i*0.45;
+    const u=i/Math.max(1,N), op=t*0.9*P.sceneSpeed + i*0.45;
     return {x:0, y:(u*2-1)*0.95*C.vy/1.09, z:0, scale:1.0, op:op};
   },
   'carousel':(i,N,t,P,C)=>{
@@ -1577,10 +1597,14 @@ const LAYOUTS={
     // away in Y and recede in Z, each inner card overlapping the outer one. A card entering from a side
     // starts far out (order very low = UNDER everything) and fades in fast, then rises as it nears the
     // centre and finally overtakes the previous centre card.
-    const N1=Math.max(1,N), front=t*0.14*P.speed*N1;
+    const N1=Math.max(1,N), front=t*0.14*P.sceneSpeed*N1;
     let d=i-front; d=((d%N1)+N1)%N1; if(d>N1/2) d-=N1;       // d in [-N/2, N/2]; 0 = centre
+    /* PARK, capped. The source ran this on a couple of dozen photo frames, so a linear
+       outer offset was harmless; at 220 bodies it threw the deck out to |x| 100 and left
+       thirteen cards on screen. Cards past the fade are parked at the edge instead of
+       marching to infinity — they are `skip`ped anyway, and now they come back on time. */
     const ax=Math.abs(d), sgn=d<0?-1:1, e=Math.min(ax,1);
-    const x  = sgn*( e*0.74 + Math.max(0,ax-1)*0.5 );        // centre wide gap, outer packs tighter
+    const x  = sgn*( e*0.74 + Math.min(Math.max(0,ax-1),5)*0.5 );  // centre wide gap, outer packs tighter
     const z  = -Math.min(ax,6)*0.7;                          // recede hard → sides shrink in perspective
     const sc = lerp(1.16,0.6, clamp(ax/6,0,1));              // centre noticeably bigger → protrudes
     const a  = clamp((4.2-ax)/0.7,0,1);                      // opaque within ~3.5 cards, quick fade past that
@@ -1589,7 +1613,7 @@ const LAYOUTS={
   'card-deck':(i,N,t,P,C)=>{
     // a flip-through stack: centre card on top & protruding, pile recedes with a small offset to one side;
     // entering card comes in behind the pile (low order = under), leaving card slides & fades — recycle unseen.
-    const N1=Math.max(1,N), front=t*0.4*P.speed;
+    const N1=Math.max(1,N), front=t*0.4*P.sceneSpeed;
     let d=i-front; d=((d%N1)+N1)%N1; if(d>N1/2) d-=N1;       // d in [-N/2, N/2]; 0 = current top
     const ax=Math.abs(d), sgn=d<0?-1:1;
     const x  = sgn*(0.05*Math.min(ax,5));
@@ -1614,9 +1638,9 @@ const STYLE_PRESETS={
    sliders while reading four was exactly the cost of not having this. */
 const STYLE_AXIS={
   'flow':      AXIS_KEYS_ALL,
-  'sine-wave': ['angle','gap','scaleGrad','bend','bendFreq','tilt3d','speed'],
-  'zigzag':    ['angle','gap','scaleGrad','bend','bendFreq','tilt3d','speed'],
-  'waterfall': ['axes','gap','scaleGrad','speed']
+  'sine-wave': ['angle','gap','scaleGrad','bend','bendFreq','tilt3d','speed','sceneSpeed'],
+  'zigzag':    ['angle','gap','scaleGrad','bend','bendFreq','tilt3d','speed','sceneSpeed'],
+  'waterfall': ['axes','gap','scaleGrad','speed','sceneSpeed']
 };
 
 const P_ = (id,src,group,label,desc,params,keys,seed,target,drive)=>
@@ -1651,7 +1675,11 @@ for(const [id,label,desc,keys] of [
   ['card-deck','Card Deck','A stacked deck fanning out; recycle hidden at the faded sides',['speed']],
   ['flip-book','Flip Book','A stack of frames flipping like a calendar',['speed']]
 ]) PRESETS.push(P_(id,'image-shuffler:LAYOUTS.'+id,'layout',label,desc,
-     SCENE_PARAMS, keys, {}, (i,N,t,P,ctx)=>LAYOUTS[id](i,N,t,P,ctx), 'speed'));
+     SCENE_PARAMS, keys,
+     /* a deck is a deck: these two read as cards you flip through, and at swarm counts
+        the overwhelming majority sit parked off-frame waiting their turn */
+     (id==='carousel'||id==='card-deck') ? {count:60} : {},
+     (i,N,t,P,ctx)=>LAYOUTS[id](i,N,t,P,ctx), 'sceneSpeed'));
 
 /* ══════════════════════════════════════════════════════════════════════════
    MOTION PRIMER — the six behaviours, carried over as REAL presets.
@@ -1995,6 +2023,9 @@ function makeLayer(prog,variant){
      This is what makes sine-wave and zigzag distinct presets of one engine rather than
      the same card with a note telling you what to type in. */
   Object.assign(params, P.seed||{});
+  /* a preset may also declare the crowd it was designed for */
+  if(P.seed && P.seed.count) { /* handled by makeLayer's caller via L.count */ }
+  const seedCount=(P.seed&&P.seed.count)||220;
   return { id:++uid, prog, shapes:DEF_SHAPES(), look:DEF_LOOK(),
     /* Rob, 2026-07-18: «сделай просто слои и прозрачность ему». The shared pool is gone.
        It was the reason a knob felt dead: with one pool every layer's target was averaged
@@ -2002,10 +2033,12 @@ function makeLayer(prog,variant){
        were also pulling, and your change arrived diluted. A layer now owns its bodies
        outright, so its controls do exactly what they say and two layers cannot contradict
        each other. Compositing moves to where EQJ always had it: opacity and blend. */
-    bodies:[], count:220, opacity:1, blend:'source-over',
+    bodies:[], count:seedCount, opacity:1, blend:'source-over',
     variant: variant ?? null,
     label: P.label + (variant ? ' · '+variant : ''),
-    w:1, muted:false, solo:false,
+    /* no `w`: one field per concept. Two fields for «how much of this layer» is how
+       a solo that solos nothing survived a whole session. */
+    muted:false, solo:false,
     seed:(Math.random()*1e6)|0,      /* two copies of one program diverge here */
     params, matrix:[], open:false };
 }
@@ -2071,10 +2104,15 @@ function removeLayer(id){
 function duplicateLayer(id){
   const i=layers.findIndex(L=>L.id===id); if(i<0)return;
   const L=layers[i];
-  const c={...L, id:++uid, seed:(Math.random()*1e6)|0,
-    label:L.label+' copy', params:{...L.params}, matrix:L.matrix.map(r=>({...r}))};
+  /* `bodies:[]` is not optional: the spread copies the ARRAY REFERENCE, so a duplicate
+     shared its original's bodies and both cards stepped the same objects every frame.
+     That breaks the one invariant this whole refactor exists for. */
+  const c={...L, id:++uid, seed:(Math.random()*1e6)|0, bodies:[],
+    label:L.label+' copy', params:{...L.params}, matrix:L.matrix.map(r=>({...r})),
+    look:{...L.look}, shapes:{...L.shapes}};
   /* the spread copies `open` too, so without this a duplicate of an open card gives TWO */
-  layers.splice(i,0,c); focusLayer(c.id); openOnly(c.id); renderLayers(); buildMatrix();
+  layers.splice(i,0,c); rebuildLayer(c);
+  focusLayer(c.id); openOnly(c.id); renderLayers(); buildMatrix();
 }
 function moveLayer(id,dir){
   const i=layers.findIndex(L=>L.id===id), j=i+dir;
@@ -2157,9 +2195,8 @@ const GLOBAL_PARAMS = [
   { key:'phys.flock',   label:'flock',    min:0, max:2,   step:0.01, get:()=>state.phys.flock,   set:v=>state.phys.flock=v },
   { key:'logoAvoid',    label:'logo as void',min:0,max:2, step:0.01, get:()=>state.logoAvoid,    set:v=>state.logoAvoid=v },
   { key:'cam.spin',     label:'auto spin',min:-0.5,max:0.5,step:0.005,get:()=>state.cam.spin,    set:v=>state.cam.spin=v },
-  { key:'count',        label:'count',    min:20,max:2000,step:1,
-    get:()=>(activeLayer()||{count:220}).count,
-    set:v=>{ const L=activeLayer(); if(!L)return; L.count=Math.round(v); rebuildLayer(L); } }
+  /* `count` lives on the layer (paramsOf) since bodies stopped being shared. Keeping a
+     global twin put the same key in a card twice and made the rack address the wrong one. */
 ];
 
 const CURVE = { lin:v=>v, exp:v=>v*v, sqrt:v=>Math.sqrt(v),
@@ -2237,7 +2274,7 @@ const SCRUB_FOR = { 'size':'size','cam.persp':'persp','cam.zoom':'zoom','cam.til
   'face':'face','satDrift':'satDrift',
   'phys.follow':'follow','phys.damp':'damp','phys.collide':'collide','phys.radius':'pradius',
   'phys.swirl':'swirl','phys.attract':'attract','phys.gravity':'gravity','phys.flock':'flock',
-  'logoAvoid':'logoAvoid','cam.spin':'spin','count':'count' };
+  'logoAvoid':'logoAvoid','cam.spin':'spin' };
 /* Any edit OUTSIDE the matrix must rewrite the base, or the drive overwrites the
    user's hand on the very next frame (the classic EQJ trap). */
 function rebase(key,v){ /* bases are keyed layer::path — clear every match for this path */
@@ -2420,7 +2457,8 @@ function stepPhysics(dt,t,f,bods){
      Named `bods`, not `arr`: the spatial hash below declares its own block-scoped `arr`,
      and a parameter of the same name puts every earlier read of it in the temporal dead
      zone — the page threw «Cannot access 'arr' before initialization» on the first frame. */
-  bods=bods||pool; const N=bods.length;
+  /* no fallback: a missing argument must fail loudly, not silently step a stranger */
+  const N=bods.length;
   const cell=tightestCell();
   /* 0.9 of a cell: neighbours touch without overlapping, so they still separate cleanly */
   const RADIUS=Number.isFinite(cell)?Math.min(P.radius,cell*0.9):P.radius;
@@ -3121,7 +3159,7 @@ const GROUPS=[['axis','axis · lanes'],['layout','layouts'],['particles','partic
 })();
 
 /* ── behaviours + manners (Motion Primer) ── */
-for(const [sel,table,fn] of [['#behSel',BEHAVIOURS,applyBehaviour],['#mannerSel',MANNERS,applyManner]]){
+for(const [sel,table,fn] of [['#behSel',BEHAVIOURS,applyBehaviour],['#mannerSel',mannerTable(),applyManner]]){
   const el=$(sel);
   for(const k of Object.keys(table)){ const o=document.createElement('option');
     o.value=k; o.textContent=k; el.appendChild(o); }
@@ -3744,7 +3782,7 @@ function frame(){
      behaviour is. Its bodies still go through the shared blend afterwards, but their
      position comes from the behaviour, not from a spring to a target. */
   for(const L of layers){
-    const P=PROGRAMS[L.prog]; if(!P||!P.step||!layerVisible(L)||L.w<=0.001) continue;
+    const P=PROGRAMS[L.prog]; if(!P||!P.step||!layerVisible(L)||L.opacity<=0.002) continue;
     const mine=L.bodies;
     if(!mine.length) continue;
     let cx=0,cy=0; for(const b of mine){ cx+=b.mx||0; cy+=b.my||0; }
@@ -3759,8 +3797,11 @@ function frame(){
       if(!Number.isFinite(b.mx)||!Number.isFinite(b.my)) mpSeedBody(b,k,mine.length,rr,P,L.params); }
   }
 
-  /* forces first, then the targets integrate against the same velocity */
-  stepPhysics(dt,t,f);
+  /* Forces used to run here, once, over the single shared pool. After the split each
+     layer steps its own inside the loop below; this call survived and re-applied collide,
+     swirl, gravity, attract and flock to whichever layer happened to be painted last —
+     that layer got every force at DOUBLE its set value, and which layer it was changed
+     with any reorder. */
 
   /* ── bodies: every layer draws ITS OWN, in its own alpha ──────────────────
      This replaced the weighted blend of one shared pool. The blend was the reason a
@@ -3873,7 +3914,7 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
   scene:{ capture:()=>captureScene(), apply:sc=>applyScene(sc) },
   move:id=>triggerMove(id), moving:()=>!!MOVE, pending:()=>PENDING.length,
   quant:v=>{ if(v!=null){ QUANT=v; const s2=document.getElementById('quantSel'); if(s2)s2.value=v; } return QUANT; },
-  matrix:()=>matrix, logo:()=>LOGO, insideLogo:(x,y)=>insideLogo(x,y), patterns:()=>PATTERNS, behaviours:()=>BEHAVIOURS, manners:()=>MANNERS,
+  matrix:()=>matrix, logo:()=>LOGO, insideLogo:(x,y)=>insideLogo(x,y), patterns:()=>PATTERNS, behaviours:()=>BEHAVIOURS, mannerForces:()=>mannerTable(),
   /* Drift is driven by the spectral centroid, and the synthetic fixture holds its
      centroid dead still at ~0.498 — so the shimmer cannot be exercised through the audio
      path in a probe. Same reason setCount/setFace exist: drive it directly, then measure. */
@@ -3881,20 +3922,30 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
   sat:()=>satShift,
   /* Ask the ENGINE who owns a body. A probe that re-derives ownership would be testing
      its own copy of the rule, which is how a green gate ends up proving nothing. */
-  manners:()=>MANNER_PRESET, bodiesOf:L=>L.bodies,
+  /* two different tables, two different names: the object the hand turns is MANNERS,
+     the ported reference set is MANNER_PRESET. One key for both let a gate go green on
+     the table the UI does not use. */
+  mannerPresets:()=>MANNER_PRESET, bodiesOf:L=>L.bodies,
   /* count is a LAYER property now — setting it on the stage means setting it on every
      layer, which is what a probe asking for N bodies actually wants */
   setCount(n){ layers.forEach(L=>{ L.count=n; rebuildLayer(L); });
     if(SCRUBS.count) SCRUBS.count.set(n); },
   setFace(v){ state.face=v; SCRUBS.face.set(v); rebase('face',v); },
-  /* the field is  now; writing the retired 23:16  up 1 day, 8 mins, 3 users, load averages: 6.71 8.04 6.94
-USER       TTY      FROM    LOGIN@  IDLE WHAT
-robertvagi console  -      Fri23   24:07 -
-robertvagi s000     -      18:50    2:21 node /Users/robertvagin/.npm/_npx/151d
-robertvagi s001     -      18:01       3 caffeinate -i -t 300 silently did nothing */
+  /* the field is opacity now; writing the retired weight did nothing.
+     (This comment once contained a back-quoted identifier inside a double-quoted shell
+     string, so the shell RAN it and pasted the output of `w` into the source. Never put
+     back-quotes in code that travels through a shell heredoc.) */
   setLayerW(i,w){ if(layers[i]){ layers[i].opacity=w; renderLayers(); } },
+  /* This wrote `L.w`, which stopped driving anything when presence became opacity — so
+     every probe that called it measured an ACCUMULATING stack instead of one preset.
+     Writes the field the frame loop actually reads. */
   onlyProg(p){ let f=layerOfProg(p); if(!f)f=addLayer(p);
-    layers.forEach(L=>L.w = L===f?1:0); renderLayers(); return f; } };
+    layers.forEach(L=>{ L.opacity = L===f?1:0; L.solo=false; L.muted=false; });
+    /* Law 1 of this file: opacity is addressed by the rack as `w`, so a plain assignment
+       is handed back by restoreMatrix at the end of the very same frame. The bases have to
+       go with it or the solo lasts exactly one frame and then quietly undoes itself. */
+    BASES.clear();
+    renderLayers(); return f; } };
 })();
 </script>
 </body>

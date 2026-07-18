@@ -110,11 +110,17 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
         Object.entries(spread).map(([k, v]) => k + ' ' + v.w + '×' + v.h).join('  '));
 
     /* MANNER_PRESET orderings, the two that were inverted */
-    const M = B.manners();
-    put('manner orderings match the source',
-        M.Free.cohesion > M.Flock.cohesion && M.Flow.flow > M.Vortex.flow,
-        'cohesion Free ' + M.Free.cohesion + ' > Flock ' + M.Flock.cohesion +
-        ' · flow Flow ' + M.Flow.flow + ' > Vortex ' + M.Vortex.flow);
+    /* the table the HAND turns, not the ported reference set. The gate used to read
+       MANNER_PRESET and go green while the UI applied a different, inverted table. */
+    const M = B.mannerForces(), SRC = B.mannerPresets();
+    put('the applied manner table keeps the source orderings',
+        M.Free.flock > M.Flock.flock && M.Flow.swirl > M.Vortex.swirl &&
+        M.Disperse.collide > M.Flock.collide && M.Cluster.flock > M.Free.flock,
+        'flock Free ' + M.Free.flock + ' > Flock ' + M.Flock.flock +
+        ' · swirl Flow ' + M.Flow.swirl + ' > Vortex ' + M.Vortex.swirl);
+    put('and it is derived from the source, not typed alongside it',
+        Object.keys(M).length === Object.keys(SRC).length &&
+        Object.keys(SRC).every(k => M[k]), Object.keys(M).join(','));
 
     /* ── the polyhedron bank: eight shapes, eight silhouettes ─────────────── */
     const F = B.onlyProg('pat-form'); B.setCount(240);
