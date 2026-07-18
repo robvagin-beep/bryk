@@ -311,6 +311,9 @@ button,.tinSelect{touch-action:manipulation}
   #tray{transition:opacity 120ms linear;transform:none}
   #corner:hover #tray,#corner:focus-within #tray{transform:none}
 }
+.lcap{font-size:var(--fz-s);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
+  margin:var(--sp-2) 0 var(--sp-1)}
+.lcap:first-child{margin-top:0}
 @media (prefers-contrast:more){ fieldset{box-shadow:inset 0 -1px var(--ink)} }
 </style>
 </head>
@@ -339,14 +342,10 @@ button,.tinSelect{touch-action:manipulation}
     </fieldset>
 
     <fieldset id="gPool"><legend>Pool</legend>
-      <p class="note" style="margin-top:0">One shared pool. Every layer above places
-        THESE bodies — count and calibre are the material, the stack decides where they go.
-        Weights, not a choice: every face above zero is in the mix. Drop PNG or SVG anywhere.</p>
+      <p class="note" style="margin-top:0">One shared pool. Every layer above places THESE
+        bodies — count and calibre are the material, the stack decides where they go and
+        which marks they wear. Drop PNG or SVG anywhere to add more.</p>
 
-      <div class="row"><label>triangle</label><span data-mnt="wTri"></span></div>
-      <div class="row"><label>wedge</label><span data-mnt="wWedge"></span></div>
-      <div class="row"><label>circle</label><span data-mnt="wCircle"></span></div>
-      <div class="row"><label>dropped assets</label><span data-mnt="wAsset"></span></div>
       <div class="row"><label title="0 keeps the asset colour, 1 paints it into the palette">Asset tint</label><span data-mnt="assetTint"></span></div>
       <div class="seg">
         <button class="btn" id="reroll" title="Re-deal which body wears which face">RANDOMISE</button>
@@ -1028,18 +1027,24 @@ function camTexFor(shape){
    A face is a primitive (tinted procedurally) or a dropped asset (drawn as-is, and
    optionally tinted so it joins the palette instead of fighting it). One bank rebuild
    per palette/shape/radius change; nothing per frame. */
+const MARKS=['tri','wedge','circle'];
+/* Any layer that can currently put bodies on stage. Used for the bank union AND for
+   deciding who owns a body — one predicate, so the two can never disagree. */
+const dealers = () => layers.filter(layerVisible).filter(L=>L.w>0.001);
+/* Does ANY dealer want this mark? The bank is the UNION, never the sum: a body must be
+   able to wear whatever its owning layer asks for without a rebuild when it changes
+   hands, but the bank must NOT grow with the layer count. It stays faces × palette. */
+const anyWants = k => { const d=dealers();
+  return d.length ? d.some(L=>((L.shapes||{})[k]||0)>0) : true; };
 function faceList(){
   const out=[];
-  for(const k of ['tri','wedge','circle']){
-    const w=state.shapes[k]||0;
-    if(w>0) for(let v=0;v<SHAPE_VARIANTS;v++) out.push({ kind:'prim', shape:k, vi:v, w:w/SHAPE_VARIANTS });
-  }
-  for(const a of ASSETS) out.push({ kind:'asset', img:a, w:state.assetW });
-  /* camera enters the mix as three more faces (one per primitive), so "a triangle full
-     of the crowd" is just another entry in the same draw */
+  for(const k of MARKS)
+    if(anyWants(k)) for(let v=0;v<SHAPE_VARIANTS;v++) out.push({ kind:'prim', shape:k, vi:v, w:1/SHAPE_VARIANTS });
+  for(const a of ASSETS) out.push({ kind:'asset', shape:'asset', img:a, w:1 });
+  /* camera enters the mix as more faces (one per primitive), so "a triangle full of the
+     crowd" is just another entry in the same draw */
   if(CAM.on && state.camW>0)
-    for(const k of ['tri','wedge','circle'])
-      if((state.shapes[k]||0)>0) out.push({ kind:'cam', shape:k, w:state.camW });
+    for(const k of MARKS) if(anyWants(k)) out.push({ kind:'cam', shape:k, w:1 });
   return out.length?out:[{kind:'prim',shape:'rect',w:1}];
 }
 function rebuildTextures(){
@@ -1051,7 +1056,7 @@ function rebuildTextures(){
     /* camera faces are LIVE — one shared canvas per shape, redrawn each frame in
        camTick's wake. They are not multiplied by the palette: the duotone already put
        the video in the palette, and re-tinting per stop would just muddy it. */
-    if(face.kind==='cam'){ const c=camTexFor(face.shape); c.w=face.w; textures.push(c); continue; }
+    if(face.kind==='cam'){ const c=camTexFor(face.shape); c.w=face.w; c.mark=face.shape; textures.push(c); continue; }
     for(let ci=0;ci<st.length;ci++){
       const c=document.createElement('canvas'); c.width=c.height=TEX_PX;
       const x=c.getContext('2d');
@@ -1080,6 +1085,7 @@ function rebuildTextures(){
         x.restore();
       }
       c.aspect=1; c.face=face.kind==='prim'?face.shape:'asset'; c.w=face.w;
+      c.mark=face.kind==='asset'?'asset':face.shape;   /* which weight in L.shapes picks it */
       textures.push(c);
     }
   }
@@ -1090,12 +1096,33 @@ function rebuildTextures(){
 /* Seeded, weighted assignment. Stable for a given mixSeed — the scene keeps its identity
    until you re-roll, which is what makes a randomiser useful live rather than noisy. */
 function hash01(n){ const s=Math.sin(n*127.1+state.mixSeed*311.7)*43758.5453; return s-Math.floor(s); }
+/* Which layer decides what a body looks like. `share` usually splits the pool into
+   disjoint slices and the question does not arise, but at share=1 on two layers the same
+   body belongs to both. The heaviest claim wins: deterministic, reads correctly on stage
+   (the layer you can see most of is the one dressing the bodies), and needs no new
+   control. Ties go to the upper card, which is also the one you reach for first. */
+function ownerOf(i,ds){
+  let best=null;
+  for(const L of ds){ if(!belongs(i,L))continue;
+    if(!best || L.w>best.w) best=L; }
+  return best;
+}
 function assignFaces(){
   if(!textures.length)return;
-  const tot=textures.reduce((a,t)=>a+(t.w||1),0);
+  const ds=dealers();
   for(let i=0;i<pool.length;i++){
+    const L=ownerOf(i,ds);
+    const sh=L?(L.shapes||{}):null;
+    /* weight each texture by ITS OWNER's appetite for that mark; a body claimed by nobody
+       falls back to the flat bank rather than vanishing */
+    let tot=0;
+    for(const t of textures) tot += (sh?(sh[t.mark]||0):1)*(t.w||1);
+    if(tot<=0){ pool[i].tex=0; continue; }            /* owner wants no mark at all */
     let r=hash01(i+1)*tot, k=0;
-    while(k<textures.length-1 && (r-=textures[k].w||1)>0) k++;
+    for(;k<textures.length-1;k++){
+      r -= (sh?(sh[textures[k].mark]||0):1)*(textures[k].w||1);
+      if(r<=0) break;
+    }
     pool[i].tex=k;
   }
 }
@@ -1603,10 +1630,16 @@ const anySolo = () => layers.some(L=>L.solo);
    made solo collapse the scene. */
 const layerVisible = L => L.solo || (!anySolo() && !L.muted);
 
+/* Which marks THIS layer's bodies wear. Rob, 2026-07-18: «почему эти bodies контролируют
+   все лейеры? отталкиваясь от того, какая панель присвоена, мы назначаем, к чему относятся
+   вот этот треугольник, кружочек». Before this the mix was one global object, so every
+   layer painted every body and a card could not speak about its own material. */
+const DEF_SHAPES=()=>({ tri:1, wedge:1, circle:1, asset:1 });
+
 function makeLayer(prog,variant){
   const P=PROGRAMS[prog]; const params={};
   for(const d of P.params) params[d.key]=d.def;
-  return { id:++uid, prog,
+  return { id:++uid, prog, shapes:DEF_SHAPES(),
     variant: variant ?? (P.variants ? P.variants[0][0] : null),
     label: P.label + (variant ? ' · '+variant : ''),
     w:1, muted:false, solo:false, share:1,
@@ -2222,7 +2255,8 @@ function captureScene(){
     stops:state.stops.map(s=>({...s})),
     formation:{...state.formation},
     layers:layers.map(L=>({prog:L.prog,variant:L.variant,label:L.label,w:L.w,muted:L.muted,
-      solo:L.solo,share:L.share,seed:L.seed,params:{...L.params},rows:L.matrix.map(r=>({...r}))})),
+      solo:L.solo,share:L.share,seed:L.seed,shapes:{...L.shapes},
+      params:{...L.params},rows:L.matrix.map(r=>({...r}))})),
     active:activeId,
 
     quant:QUANT };
@@ -2255,6 +2289,10 @@ function applyScene(sc){
       const L=makeLayer(ls.prog,ls.variant);
       Object.assign(L,{label:ls.label??L.label,w:ls.w??1,muted:!!ls.muted,solo:!!ls.solo,
         share:ls.share??1,seed:ls.seed??L.seed});
+      /* migration: before 2026-07-18 the mix was one global `shapes` object plus `assetW`.
+         An old scene hands every layer that same mix, which is exactly what it looked
+         like when it was saved. New scenes carry their own. */
+      Object.assign(L.shapes, ls.shapes || {...(sc.shapes||{}), asset: sc.assetW});
       Object.assign(L.params,ls.params||{});
       L.matrix=(ls.rows||[]).map(r=>({...r}));
       layers.unshift(L);
@@ -2347,8 +2385,10 @@ function syncAllScrubs(){
     face:state.face, persp:state.cam.persp, zoom:state.cam.zoom, tilt:state.cam.tilt,
     spin:state.cam.spin, bgL:state.bgL, satDrift:state.satDrift,
     chroma:state.post.chroma, chromaAng:state.post.chromaAng,
-    wRect:state.shapes.rect, wCircle:state.shapes.circle, wTri:state.shapes.tri,
-    wAsset:state.assetW, assetTint:state.assetTint, camW:state.camW,
+    /* marks are per-layer now — renderLayers() at the foot of this function rebuilds the
+       cards and their scrubs. `wRect` used to be mapped here and never existed in
+       state.shapes ({tri,wedge,circle}), so it was a permanent no-op. */
+    assetTint:state.assetTint, camW:state.camW,
     camLayer:state.cam2.layer, camOver:state.cam2.over, camMirror:state.cam2.mirror,
     camDuo:state.cam2.duotone, camContrast:state.cam2.contrast, camGain:state.cam2.gain,
     physOn:state.phys.on, follow:state.phys.follow, damp:state.phys.damp,
@@ -2406,12 +2446,10 @@ mount('chromaAng',{min:0,max:360,step:1,value:0,label:'Aberration angle',
   onInput:v=>state.post.chromaAng=v});
 
 /* ── shape mix ── */
-const mixRow=(slot,key,label)=>mount(slot,{min:0,max:3,step:0.05,value:state.shapes[key],
-  allowExtend:true,label:label,onInput:v=>{ state.shapes[key]=v; rebuildTextures(); }});
-mixRow('wTri','tri','triangle weight');
-mixRow('wWedge','wedge','wedge weight');
-mixRow('wCircle','circle','circle weight');
-mixRow('wTri','tri','triangle weight');
+/* The mark weights used to mount here as four global scrubs — and `wTri` was mounted
+   TWICE into the same slot (the second call silently overwrote SCRUBS.wTri and left an
+   unlabelled second slider in the panel). They are per-layer now and are built by
+   renderLayers inside the card, so both the duplicate and the global reach are gone. */
 mount('wAsset',{min:0,max:3,step:0.05,value:state.assetW,allowExtend:true,label:'asset weight',
   onInput:v=>{ state.assetW=v; rebuildTextures(); }});
 mount('assetTint',{min:0,max:1,step:0.01,value:state.assetTint,label:'asset tint',
@@ -2680,17 +2718,36 @@ function renderLayers(){
 
     if(L.open){
       const box=document.createElement('div'); box.className='lparams';
-      const rows=[{key:'share',label:'share',min:0,max:1,step:0.01,
-                   get:()=>L.share,set:v=>L.share=v}, ...P.params.map(x=>({...x,
-                   get:()=>L.params[x.key],set:v=>L.params[x.key]=v}))];
-      for(const p of rows){
+      /* One card, read top to bottom: how much of me → whose bodies → what they look
+         like → how I place them → my own extras. `share` first because it decides how
+         many bodies the rest of the card is even talking about. */
+      const cap=t=>{ const h=document.createElement('div'); h.className='lcap';
+        h.textContent=t; box.appendChild(h); };
+      const mkRows=(list,extend)=>{ for(const p of list){
         const row=document.createElement('div'); row.className='row';
         const lb=document.createElement('label'); lb.textContent=p.label; lb.title=p.label;
         const sl=document.createElement('span'); row.append(lb,sl); box.appendChild(row);
-        const s2=mkScrub({min:p.min,max:p.max,step:p.step,value:p.get(),
+        const s2=mkScrub({min:p.min,max:p.max,step:p.step,value:p.get(),allowExtend:!!extend,
           label:L.label+' '+p.label, onInput:v=>p.set(v)});
         sl.appendChild(s2.el);
-      }
+      } };
+
+      mkRows([{key:'share',label:'share',min:0,max:1,step:0.01,
+               get:()=>L.share,set:v=>L.share=v}]);
+
+      cap('bodies');
+      mkRows([['tri','triangle'],['wedge','wedge'],['circle','circle'],['asset','dropped assets']]
+        .map(([k,lbl])=>({ key:k, label:lbl, min:0, max:3, step:0.05,
+          get:()=>L.shapes[k]??0,
+          /* weights, not a choice: every mark above zero is in this layer's mix */
+          set:v=>{ L.shapes[k]=v; rebuildTextures(); } })), true);
+      const rr=document.createElement('button'); rr.className='btn wide'; rr.textContent='RANDOMISE';
+      rr.title='Re-deal which body wears which mark';
+      rr.addEventListener('click',e=>{ e.stopPropagation(); rerollMix(); });
+      box.appendChild(rr);
+
+      if(P.params.length){ cap('form');
+        mkRows(P.params.map(x=>({...x, get:()=>L.params[x.key], set:v=>L.params[x.key]=v}))); }
       /* the program's own non-scrub controls, moved in from the parking bay */
       const exId=PROG_EXTRAS[L.prog];
       if(exId){ const ex=document.getElementById(exId); if(ex) box.appendChild(ex); }
@@ -2845,7 +2902,9 @@ function frame(){
   /* ── camera: one decode, then every consumer reads the same snapshot ── */
   camTick();
   if(CAM.ready){
-    if(state.camW>0) for(const k of ['rect','circle','tri']) if((state.shapes[k]||0)>0) camTexFor(k);
+    /* was ['rect','circle','tri'] while faceList deals ['tri','wedge','circle'] — so the
+       wedge camera never warmed and froze on one frame, and 'rect' warmed nothing at all */
+    if(state.camW>0) for(const k of MARKS) if(anyWants(k)) camTexFor(k);
     const C=state.cam2, cc=$('#camcv');
     if(C.layer>0.002){
       if(cc.width!==cv.width||cc.height!==cv.height){ cc.width=cv.width; cc.height=cv.height; }
@@ -3032,6 +3091,9 @@ window.__bryk = { state, core:()=>core, pool:()=>pool, layers:()=>layers, scrubs
      path in a probe. Same reason setCount/setFace exist: drive it directly, then measure. */
   setSat(v){ satShift=v; buildRamp(); rebuildTextures(); return satShift; },
   sat:()=>satShift,
+  /* Ask the ENGINE who owns a body. A probe that re-derives ownership would be testing
+     its own copy of the rule, which is how a green gate ends up proving nothing. */
+  owner:i=>ownerOf(i,dealers()), dealers:()=>dealers(),
   setCount(n){ state.count=n; SCRUBS.count.set(n); rebuildPool(); },
   setFace(v){ state.face=v; SCRUBS.face.set(v); rebase('face',v); },
   setLayerW(i,w){ if(layers[i]){ layers[i].w=w; renderLayers(); } },

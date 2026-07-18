@@ -85,6 +85,35 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
     put('extras survive a scene load', alive('fText'));
     put('formation text survives a scene load', B.state.formation.text === 'BRYK', B.state.formation.text);
 
+    /* ── per-layer marks: the whole point of moving them off the pool ────────── */
+    B.layers().slice().forEach(L => B.removeLayer(L.id));
+    const A = B.addLayer('grid'), C = B.addLayer('ring');
+    A.share = 0.5; C.share = 0.5; A.w = 1; C.w = 1;
+    A.shapes = { tri:1, wedge:0, circle:0, asset:0 };
+    C.shapes = { tri:0, wedge:0, circle:1, asset:0 };
+    B.rebuildTex(); await sleep(700);
+    const tex = B.textures(), per = { A:{}, C:{} };
+    B.pool().forEach((bd, i) => {
+      const t = tex[bd.tex]; if (!t) return;
+      const own = B.owner(i); if (!own) return;          /* ask the engine, never re-derive */
+      const key = own.id === A.id ? 'A' : (own.id === C.id ? 'C' : null);
+      if (key) per[key][t.mark] = (per[key][t.mark] || 0) + 1;
+    });
+    put('a layer wears only the marks IT asked for',
+        Object.keys(per.A).length === 1 && per.A.tri > 20 &&
+        Object.keys(per.C).length === 1 && per.C.circle > 20,
+        'A ' + JSON.stringify(per.A) + '  C ' + JSON.stringify(per.C));
+    put('the texture bank is a UNION, it does not grow with the stack', tex.length < 60,
+        tex.length + ' textures for 2 layers');
+
+    /* an old scene has no per-layer marks — every layer must inherit the global mix */
+    B.scene.apply({ v:1, shapes:{ tri:0, wedge:2, circle:0 }, assetW:0,
+                    layers:[{prog:'grid'},{prog:'ring'}] });
+    await sleep(500);
+    put('a pre-2026-07-18 scene migrates its global mix onto every layer',
+        B.layers().length === 2 && B.layers().every(L => (L.shapes.wedge||0) === 2 && (L.shapes.tri||0) === 0),
+        JSON.stringify(B.layers().map(L => L.shapes)));
+
     return out;
   });
 
