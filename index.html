@@ -1786,7 +1786,14 @@ function applyMatrix(f){
       const a=clamp(featVal(f,r.feat),0,1);
       const cv=(CURVE[r.curve]||CURVE.lin)(a);
       const range=p.max-p.min;
-      const dev=r.mode==='bi' ? (cv-0.5)*2*r.depth*range : cv*r.depth*range;
+      let dev=r.mode==='bi' ? (cv-0.5)*2*r.depth*range : cv*r.depth*range;
+      /* PRESENCE is the one parameter where off must mean off. Every new layer is seeded
+         with a bipolar row on `w`, and bipolar around a base of 0 clamps to 0..+depth/2 —
+         so a layer you turned down to silence lifted itself back off the floor every beat
+         and kept pulling bodies. Turning a layer down is the user overruling the rack, not
+         a suggestion. Scaling by the base keeps the breathing at full presence, fades it
+         out as you fade the layer, and makes 0 mean 0. */
+      if(r.path==='w') dev*=base;
       const slot=acc.get(id)||{p,base,sum:0,key:r.path,layerId:(L?L.id:null)}; slot.sum+=dev; acc.set(id,slot);
     }
   };
@@ -1956,30 +1963,53 @@ function curlAt(x,y,t){
   const a=x*1.3+t*0.21, b=y*1.3-t*0.17;
   return { x: -Math.sin(a)*Math.sin(b)*1.3, y: -Math.cos(a)*Math.cos(b)*1.3 };
 }
+/* A body's personal space cannot be larger than the gap it is being asked to stand in.
+   `phys.radius` is a world constant, but a formation's cell spacing scales with the body
+   count: at 600 bodies the BRYK mask puts its points 0.067 apart while the default radius
+   is 0.13 — twice the gap. Every body then overlaps four neighbours, collision pressure
+   inflates the crowd, and the word cannot close. Measured at 600 bodies: 4.48 × 2.65
+   against a mask of 3.15 × 0.85, and 3.16 × 0.95 with collide off.
+   The formation already retunes body CALIBRE to the mask spacing (word.sizeScale · fit);
+   the collision radius has to follow the same spacing or the two fight each other.
+   Only ever tightens — a user who wants bodies further apart than the letters keeps it. */
+function tightestCell(){
+  let c=Infinity;
+  for(const L of layers){
+    if(!layerVisible(L) || L.w<=0.001) continue;
+    if(L.prog!=='word' && L.prog!=='logo') continue;
+    if((L.params.fit??1)<=0) continue;                 /* fit 0 = «leave my calibre alone» */
+    buildFormation(pool.length);
+    c=Math.min(c,formSpacing*(L.params.scale??1));
+  }
+  return c;
+}
 function stepPhysics(dt,t,f){
   const P=state.phys;
   if(!P.on) return;
   const N=pool.length;
+  const cell=tightestCell();
+  /* 0.9 of a cell: neighbours touch without overlapping, so they still separate cleanly */
+  const RADIUS=Number.isFinite(cell)?Math.min(P.radius,cell*0.9):P.radius;
 
   /* Avoidance works in the plane by default and in full depth when `dim3` is up.
      Both are wanted: a flat field of objects nudging each other reads completely
      differently from a volume of them, and the choice is the artistic one. */
   const D3=P.dim3>0.5;
   if(P.collide>0.001){
-    const c=Math.max(0.02,P.radius*2);
+    const c=Math.max(0.02,RADIUS*2);
     GRID.clear();
     for(let i=0;i<N;i++){
       const k=D3 ? cellKey3(pool[i],c) : cellKey(pool[i].x,pool[i].y,c);
       let arr=GRID.get(k); if(!arr){ arr=[]; GRID.set(k,arr); } arr.push(i);
     }
-    const r2=P.radius*P.radius;
+    const r2=RADIUS*RADIUS;
     for(const [,arr] of GRID){
       for(let a=0;a<arr.length;a++) for(let b=a+1;b<arr.length;b++){
         const A=pool[arr[a]], B=pool[arr[b]];
         const dx=B.x-A.x, dy=B.y-A.y, dz=D3?(B.z-A.z):0;
         const d2=dx*dx+dy*dy+dz*dz;
         if(d2>r2||d2<1e-9)continue;
-        const d=Math.sqrt(d2), ov=(P.radius-d)/P.radius;
+        const d=Math.sqrt(d2), ov=(RADIUS-d)/RADIUS;
         const nx=dx/d, ny=dy/d, nz=dz/d, push=ov*P.collide*dt*9;
         A.vx-=nx*push; A.vy-=ny*push; if(D3)A.vz-=nz*push;
         B.vx+=nx*push; B.vy+=ny*push; if(D3)B.vz+=nz*push;
@@ -2976,7 +3006,18 @@ function frame(){
       if(tg.order!=null) order=(order==null?0:order)+tg.order*w;
       if(tg.heading) b.hd=tg.heading;                  /* axis engine supplies its own heading */
     }
+    /* Partial presence must mean «part of the way from where you are», never «part of the
+       way to the origin». wnorm is max(1,wsum), so when the claims add up to less than 1
+       the blend above has already multiplied the target by wl — and the missing (1−wl)
+       was silently landing on (0,0,0). A layer at presence .72 therefore SHRANK its whole
+       formation to 72% about the centre, and since presence is bipolar-modulated by the
+       seeded rack row, the shape pulsed in and out every beat. Bodies chase a target that
+       is itself moving and never settle: the word never reads, and the crowd sweeps a
+       wider area than the mask it is meant to fill.
+       Holding the body's own position for the unclaimed remainder is the same rule the
+       wl===0 branch already used, just applied continuously. */
     if(wl<=0){ tx=b.x; ty=b.y; tz=b.z; }               /* claimed by nobody → hold, never origin */
+    else if(wl<1){ const r=1-wl; tx+=b.x*r; ty+=b.y*r; tz+=b.z*r; }
 
     b.px=b.x; b.py=b.y; b.pz=b.z;
     const k=1-Math.exp(-dt*state.phys.follow);
