@@ -693,12 +693,37 @@ const state = {
   bgL:0.13, satDrift:0.35,
   /* Physics is the third register (§8.2): target × transport × local interaction.
      Forces move the body in world space ON TOP of whatever the modes ask for, so a
-     режим stays a target provider and never has to know about collisions. */
-  phys:{ on:1, dim3:0, follow:3.4, collide:0.55, radius:0.13, swirl:0.16, gravity:0, attract:0, flock:0, damp:0.90 },
+     режим stays a target provider and never has to know about collisions.
+     NOTE: `state.phys` is no longer stored here — it is an accessor onto the FOCUSED
+     layer's own forces (see DEF_PHYS below). Rob A3.1: «поведение блока применяется
+     ТОЛЬКО к своим телам». One global force set meant giving one layer gravity made
+     the whole screen fall. */
   post:{ chroma:0, chromaAng:0 },
   stops:[ {c:'#2436a7',p:0}, {c:'#fdbe0c',p:0.5}, {c:'#ce1c22',p:1} ],
   formation:{ text:'BRYK', font:'', on:false }
 };
+
+/* ── forces belong to the layer (Rob A3.1, 2026-07-19) ───────────────────────────
+   Bodies were split per layer on 2026-07-18, but the FORCES that move them stayed in
+   one global object, so «своё поведение у каждого блока» was still not true: gravity
+   on one card pulled every body on screen, and two behaviour presets in the stack
+   silently overwrote each other's swirl. Each layer now owns a full set.
+
+   `state.phys` survives as an ACCESSOR onto the focused layer, because the right-hand
+   physics panel, the behaviour/manner presets and the moves all address it by that
+   name — they now speak to «the layer you are looking at» instead of to everybody.
+   The fallback object only serves the moment before the first layer exists. */
+const DEF_PHYS=()=>({ on:1, dim3:0, follow:3.4, collide:0.55, radius:0.13,
+                      swirl:0.16, gravity:0, attract:0, flock:0, damp:0.90 });
+const physFallback=DEF_PHYS();
+Object.defineProperty(state,'phys',{
+  enumerable:true, configurable:true,
+  /* try/catch, not a typeof guard: `activeLayer` is a const declared 1300 lines below,
+     and `typeof` on a binding still in its temporal dead zone throws too. Any read that
+     somehow lands during module init gets the fallback instead of a white page. */
+  get(){ try{ const L=activeLayer(); return (L&&L.phys)||physFallback; }catch(_){ return physFallback; } },
+  set(v){ Object.assign(this.phys, v||{}); }
+});
 
 /* ══════════════════════════════════════════════════════════════════════════
    3 · colour — OKLab ramp (the engine already blends perceptually; we keep that)
@@ -2060,6 +2085,8 @@ function makeLayer(prog,variant){
        outright, so its controls do exactly what they say and two layers cannot contradict
        each other. Compositing moves to where EQJ always had it: opacity and blend. */
     bodies:[], count:seedCount, opacity:1, blend:'source-over',
+    /* its own forces (A3.1) — a behaviour dropped on this card cannot reach a stranger */
+    phys:DEF_PHYS(),
     variant: variant ?? null,
     label: P.label + (variant ? ' · '+variant : ''),
     /* no `w`: one field per concept. Two fields for «how much of this layer» is how
@@ -2173,6 +2200,8 @@ function paramsOf(L){
        tilt turned and did nothing. `keys` is mandatory on every preset for that reason. */
     ...P.params.filter(d=>!P.keys || P.keys.includes(d.key))
               .map(d=>({ ...d, get:()=>L.params[d.key], set:v=>L.params[d.key]=v })),
+    /* forces, bound to THIS layer's set (A3.1) */
+    ...PHYS_PARAMS.map(d=>({ ...d, get:()=>L.phys[d.f], set:v=>L.phys[d.f]=v })),
     ...GLOBAL_PARAMS
   ];
 }
@@ -2222,18 +2251,28 @@ const GLOBAL_PARAMS = [
      move was cosmetic. Before this, physics sat in the left column AND could not be given
      a beat — both halves of Rob's ask failed at once: «чтобы мы могли к любому нашему
      варианту отображения присвоить какое-то взаимодействие с input звука». */
-  { key:'phys.follow',  label:'follow',   min:0, max:20,  step:0.1,  get:()=>state.phys.follow,  set:v=>state.phys.follow=v },
-  { key:'phys.damp',    label:'damping',  min:0.5,max:1,  step:0.005,get:()=>state.phys.damp,    set:v=>state.phys.damp=v },
-  { key:'phys.collide', label:'collide',  min:0, max:3,   step:0.01, get:()=>state.phys.collide, set:v=>state.phys.collide=v },
-  { key:'phys.radius',  label:'body radius',min:0.02,max:0.4,step:0.005,get:()=>state.phys.radius,set:v=>state.phys.radius=v },
-  { key:'phys.swirl',   label:'swirl',    min:0, max:3,   step:0.01, get:()=>state.phys.swirl,   set:v=>state.phys.swirl=v },
-  { key:'phys.attract', label:'attract',  min:-2,max:3,   step:0.01, get:()=>state.phys.attract, set:v=>state.phys.attract=v },
-  { key:'phys.gravity', label:'gravity',  min:-2,max:2,   step:0.01, get:()=>state.phys.gravity, set:v=>state.phys.gravity=v },
-  { key:'phys.flock',   label:'flock',    min:0, max:2,   step:0.01, get:()=>state.phys.flock,   set:v=>state.phys.flock=v },
+  /* the phys.* twins moved OUT of this list to PHYS_PARAMS (per layer). Same trap the
+     `size` and `count` comments above describe: a global twin of a per-layer field means
+     a rack row writes one object while the engine reads another, and the drive reaches
+     nothing. One concept, one field, one owner. */
   { key:'logoAvoid',    label:'logo as void',min:0,max:2, step:0.01, get:()=>state.logoAvoid,    set:v=>state.logoAvoid=v },
   { key:'cam.spin',     label:'auto spin',min:-0.5,max:0.5,step:0.005,get:()=>state.cam.spin,    set:v=>state.cam.spin=v },
   /* `count` lives on the layer (paramsOf) since bodies stopped being shared. Keeping a
      global twin put the same key in a card twice and made the rack address the wrong one. */
+];
+
+/* A layer's forces, addressable by the rack and by scenes under the same `phys.*` keys
+   the global set used to answer to — so every saved scene and every seeded row keeps
+   working, it just now reaches the layer that owns the row. */
+const PHYS_PARAMS = [
+  { key:'phys.follow',  f:'follow',  label:'follow',      min:0,   max:20,  step:0.1   },
+  { key:'phys.damp',    f:'damp',    label:'damping',     min:0.5, max:1,   step:0.005 },
+  { key:'phys.collide', f:'collide', label:'collide',     min:0,   max:3,   step:0.01  },
+  { key:'phys.radius',  f:'radius',  label:'body radius', min:0.02,max:0.4, step:0.005 },
+  { key:'phys.swirl',   f:'swirl',   label:'swirl',       min:0,   max:3,   step:0.01  },
+  { key:'phys.attract', f:'attract', label:'attract',     min:-2,  max:3,   step:0.01  },
+  { key:'phys.gravity', f:'gravity', label:'gravity',     min:-2,  max:2,   step:0.01  },
+  { key:'phys.flock',   f:'flock',   label:'flock',       min:0,   max:2,   step:0.01  }
 ];
 
 const CURVE = { lin:v=>v, exp:v=>v*v, sqrt:v=>Math.sqrt(v),
@@ -2369,18 +2408,24 @@ const MOVES={
   /* build-up sucks everything to the centre, the drop throws it out and peaks the
      perspective — sжатие→взрыв from §8.3 */
   magnet:{ name:'Magnet drop', dur:6.5, step(k,ctx){
-    const P=state.phys;
+    /* A drop is a move on the WHOLE mix, so it addresses every visible layer's forces
+       rather than the focused one. Since A3.1 forces are private per layer, «everything
+       to the centre» has to be said to everyone explicitly — and that is honest: a move
+       that only sucked in the card you happened to be looking at was never the intent. */
+    const act=layers.filter(layerVisible);
     if(k<0.72){ const a=k/0.72;
-      P.on=1; P.attract=lerp(0,2.6,a*a); P.collide=lerp(P.collide,0.3,0.02);
+      for(const L of act){ const P=L.phys;
+        P.on=1; P.attract=lerp(0,2.6,a*a); P.collide=lerp(P.collide,0.3,0.02); }
       setDriven('cam.persp',lerp(ctx.persp,ctx.persp+0.25,a));
     } else { const b=(k-0.72)/0.28;
-      P.attract=0;
+      for(const L of act) L.phys.attract=0;
       if(b<0.06&&!ctx.blew){ ctx.blew=1;
-        for(const p of pool){ const d=Math.hypot(p.x,p.y)+0.1;
+        /* every visible layer's bodies, not `pool` — `pool` is last frame's leftovers */
+        for(const L of act) for(const p of L.bodies){ const d=Math.hypot(p.x,p.y)+0.1;
           p.vx+=(p.x/d)*0.42; p.vy+=(p.y/d)*0.42; } }
       setDriven('cam.persp',lerp(ctx.persp+0.25,ctx.persp,easeOut(b)));
     }
-  }, done(ctx){ setDriven('cam.persp',ctx.persp); state.phys.attract=0; } },
+  }, done(ctx){ setDriven('cam.persp',ctx.persp); for(const L of layers) L.phys.attract=0; } },
 
   /* chaos → order: scatter takes over, then the grid snaps back. The guilloché move,
      carried onto geometry (§4 «Собраться») */
@@ -2389,13 +2434,16 @@ const MOVES={
        so pressing 2 on a fresh page used to throw and kill the whole rAF loop. A move
        that needs a layer summons it rather than assuming it; ensureProg leaves it silent
        (w:0) so nothing appears until the move actually raises it. */
+    /* `s.w` / `g.w`: the field is `opacity`. Writing `w` created a property nobody reads,
+       so Gather and Snap ran their whole arc and moved nothing on screen — two silent
+       moves for a day. Presence is opacity; there is one field for it. */
     const g=ensureProg('grid'), s=ensureProg('float');
-    if(k<0.62){ const a=k/0.62; s.w=lerp(ctx.sw,1,a); g.w=lerp(ctx.gw,0,a);
-      state.phys.on=1; state.phys.swirl=lerp(ctx.swirl,1.6,a); }
+    if(k<0.62){ const a=k/0.62; s.opacity=lerp(ctx.sw,1,a); g.opacity=lerp(ctx.gw,0,a);
+      s.phys.on=1; s.phys.swirl=lerp(ctx.swirl,1.6,a); }
     else { const b=easeOut((k-0.62)/0.38);
-      s.w=lerp(1,0,b); g.w=lerp(0,1,b); state.phys.swirl=lerp(1.6,ctx.swirl,b); }
+      s.opacity=lerp(1,0,b); g.opacity=lerp(0,1,b); s.phys.swirl=lerp(1.6,ctx.swirl,b); }
     renderLayers();
-  }, done(ctx){ state.phys.swirl=ctx.swirl; renderLayers(); } },
+  }, done(ctx){ ensureProg('float').phys.swirl=ctx.swirl; renderLayers(); } },
 
   /* the crowd, full frame, two bars, then gone */
   crowd:{ name:'Crowd', dur:2.8, step(k,ctx){
@@ -2408,10 +2456,11 @@ const MOVES={
   /* everything freezes into a hard grid on the beat and releases */
   snap:{ name:'Snap', dur:2.4, step(k,ctx){
     const g=ensureProg('grid');
-    g.w = k<0.5 ? 1 : lerp(1,ctx.gw,easeOut((k-0.5)/0.5));
-    state.phys.follow = k<0.5 ? 18 : lerp(18,ctx.follow,(k-0.5)/0.5);
+    g.opacity = k<0.5 ? 1 : lerp(1,ctx.gw,easeOut((k-0.5)/0.5));
+    /* the snap is the GRID layer's transport hardening, not the whole scene's */
+    g.phys.follow = k<0.5 ? 18 : lerp(18,ctx.follow,(k-0.5)/0.5);
     renderLayers();
-  }, done(ctx){ state.phys.follow=ctx.follow; renderLayers(); } }
+  }, done(ctx){ ensureProg('grid').phys.follow=ctx.follow; renderLayers(); } }
 };
 function runMove(dt){
   if(!MOVE)return;
@@ -2423,8 +2472,11 @@ function runMove(dt){
 function triggerMove(id){
   const m=MOVES[id]; if(!m)return;
   fire(()=>{
-    const ctx={ persp:state.cam.persp, swirl:state.phys.swirl, follow:state.phys.follow,
-                layer:state.cam2.layer, gw:(layerOfProg('grid')||{}).w||0, sw:(layerOfProg('float')||{}).w||0 };
+    /* capture from the layers the move will actually disturb, by the field they use */
+    const gL=layerOfProg('grid'), sL=layerOfProg('float');
+    const ctx={ persp:state.cam.persp,
+                swirl:(sL||{phys:physFallback}).phys.swirl, follow:(gL||{phys:physFallback}).phys.follow,
+                layer:state.cam2.layer, gw:(gL||{}).opacity||0, sw:(sL||{}).opacity||0 };
     startMove({...m,ctx});
     setStatus(m.name,'live');
   }, m.name);
@@ -2475,58 +2527,86 @@ function curlAt(x,y,t){
    The formation already retunes body CALIBRE to the mask spacing (word.sizeScale · fit);
    the collision radius has to follow the same spacing or the two fight each other.
    Only ever tightens — a user who wants bodies further apart than the letters keeps it. */
-function tightestCell(){
-  let c=Infinity;
-  for(const L of layers){
-    if(!layerVisible(L) || L.opacity<=0.002) continue;
-    if(L.prog!=='word') continue;
-    if((L.params.fit??1)<=0) continue;                 /* fit 0 = «leave my calibre alone» */
-    buildFormation(pool.length);
-    c=Math.min(c,formSpacing*(L.params.scale??1));
-  }
-  return c;
+function tightestCell(L){
+  /* was: scanned every word layer and called buildFormation(pool.length) — `pool` is
+     whichever layer was stepped LAST, so the spacing was computed from a stranger's body
+     count. Now it answers for one layer, from that layer's own crowd. */
+  if(!L || !layerVisible(L) || L.opacity<=0.002) return Infinity;
+  if(L.prog!=='word') return Infinity;
+  if((L.params.fit??1)<=0) return Infinity;            /* fit 0 = «leave my calibre alone» */
+  buildFormation(L.bodies.length);
+  return formSpacing*(L.params.scale??1);
 }
-function stepPhysics(dt,t,f,bods){
-  const P=state.phys;
-  if(!P.on) return;
-  /* a layer's forces act on that layer's bodies. Under the shared pool this had no
-     argument and every behaviour fought every other over the same body.
-     Named `bods`, not `arr`: the spatial hash below declares its own block-scoped `arr`,
-     and a parameter of the same name puts every earlier read of it in the temporal dead
-     zone — the page threw «Cannot access 'arr' before initialization» on the first frame. */
-  /* no fallback: a missing argument must fail loudly, not silently step a stranger */
-  const N=bods.length;
-  const cell=tightestCell();
+/* the collision radius a layer's bodies actually stand at, after the formation clamp */
+function contactRadius(L){
+  const cell=tightestCell(L);
   /* 0.9 of a cell: neighbours touch without overlapping, so they still separate cleanly */
-  const RADIUS=Number.isFinite(cell)?Math.min(P.radius,cell*0.9):P.radius;
+  return Number.isFinite(cell)?Math.min(L.phys.radius,cell*0.9):L.phys.radius;
+}
 
+/* ── contacts, ACROSS the stack (Rob A3.1) ────────────────────────────────────
+   «Межслойное взаимодействие остаётся одно: avoid/collide через общий spatial grid».
+   Forces stay private to a layer; bodies do not. This is the one place where a triangle
+   from S1 is allowed to notice a circle from S3, and it is what stops four independent
+   layers from reading as four transparencies stacked on each other: they share a floor.
+   Runs once per frame over every visible layer, on last frame's positions — the layer
+   loop below both integrates and paints in one pass, so a separate pre-pass costs one
+   frame of lag on a push and saves walking the whole stack twice. */
+function resolveContacts(act,dt){
+  const parts=[];
+  for(const L of act){
+    if(!L.phys.on || L.phys.collide<=0.001) continue;
+    parts.push({ L, r:contactRadius(L), push:L.phys.collide, d3:L.phys.dim3>0.5 });
+  }
+  if(!parts.length) return;
+  /* one cell size for the shared grid, or bodies of different layers would be bucketed
+     on different lattices and never meet */
+  let rMax=0; for(const p of parts) rMax=Math.max(rMax,p.r);
+  const c=Math.max(0.02,rMax*2);
+  const D3=parts.some(p=>p.d3);
+  GRID.clear();
+  const B=[];
+  for(const p of parts) for(const b of p.L.bodies){ b.__r=p.r; b.__push=p.push; B.push(b); }
+  for(let i=0;i<B.length;i++){
+    const k=D3 ? cellKey3(B[i],c) : cellKey(B[i].x,B[i].y,c);
+    let arr=GRID.get(k); if(!arr){ arr=[]; GRID.set(k,arr); } arr.push(i);
+  }
+  /* a GRID bucket holds INDICES, never bodies — reading it twice (`arr[arr[a]]`) is the
+     bug that handed a number where a body was expected, twice in this file's history */
+  for(const [,cell] of GRID){
+    for(let a=0;a<cell.length;a++) for(let b=a+1;b<cell.length;b++){
+      const A=B[cell[a]], C=B[cell[b]];
+      /* pair radius is the MEAN of the two: identical to the old single-radius maths when
+         both layers agree, and it keeps a fine-grained swarm from being shoved around by
+         a coarse one's personal space */
+      const R=(A.__r+C.__r)*0.5, r2=R*R;
+      const dx=C.x-A.x, dy=C.y-A.y, dz=D3?(C.z-A.z):0;
+      const d2=dx*dx+dy*dy+dz*dz;
+      if(d2>r2||d2<1e-9)continue;
+      const d=Math.sqrt(d2), ov=(R-d)/R;
+      const nx=dx/d, ny=dy/d, nz=dz/d;
+      /* each body is pushed by ITS OWN layer's collide strength — a soft layer stays soft
+         even when a hard one walks through it */
+      const pA=ov*A.__push*dt*9, pC=ov*C.__push*dt*9;
+      A.vx-=nx*pA; A.vy-=ny*pA; if(D3)A.vz-=nz*pA;
+      C.vx+=nx*pC; C.vy+=ny*pC; if(D3)C.vz+=nz*pC;
+    }
+  }
+}
+
+function stepPhysics(dt,t,f,L){
+  const P=L.phys;
+  if(!P.on) return;
+  /* a layer's forces act on that layer's bodies — swirl, gravity, attract and flock are
+     private. Collide left this function for resolveContacts() above, because avoidance is
+     the one force that is meant to cross the stack. */
+  const bods=L.bodies;
+  const N=bods.length;
+  const RADIUS=contactRadius(L);
   /* Avoidance works in the plane by default and in full depth when `dim3` is up.
      Both are wanted: a flat field of objects nudging each other reads completely
      differently from a volume of them, and the choice is the artistic one. */
   const D3=P.dim3>0.5;
-  if(P.collide>0.001){
-    const c=Math.max(0.02,RADIUS*2);
-    GRID.clear();
-    for(let i=0;i<N;i++){
-      const k=D3 ? cellKey3(bods[i],c) : cellKey(bods[i].x,bods[i].y,c);
-      let arr=GRID.get(k); if(!arr){ arr=[]; GRID.set(k,arr); } arr.push(i);
-    }
-    const r2=RADIUS*RADIUS;
-    /* same trap as the flock block: a GRID bucket holds INDICES. `arr[arr[a]]` read the
-       bucket twice and handed a number where a body was expected. */
-    for(const [,cell] of GRID){
-      for(let a=0;a<cell.length;a++) for(let b=a+1;b<cell.length;b++){
-        const A=bods[cell[a]], B=bods[cell[b]];
-        const dx=B.x-A.x, dy=B.y-A.y, dz=D3?(B.z-A.z):0;
-        const d2=dx*dx+dy*dy+dz*dz;
-        if(d2>r2||d2<1e-9)continue;
-        const d=Math.sqrt(d2), ov=(RADIUS-d)/RADIUS;
-        const nx=dx/d, ny=dy/d, nz=dz/d, push=ov*P.collide*dt*9;
-        A.vx-=nx*push; A.vy-=ny*push; if(D3)A.vz-=nz*push;
-        B.vx+=nx*push; B.vy+=ny*push; if(D3)B.vz+=nz*push;
-      }
-    }
-  }
 
   for(let i=0;i<N;i++){
     const b=bods[i];
@@ -2544,11 +2624,14 @@ function stepPhysics(dt,t,f,bods){
   }
 
   if(P.flock>0.001){
-    /* cohesion toward the local mean, reusing the collide grid when it exists */
+    /* cohesion toward the local mean. It builds its own grid unconditionally now: the
+       collide pass moved out of this function and across the stack, so the bucket it used
+       to inherit would hold indices into a DIFFERENT array — a silent mis-read, not a
+       crash. A flock is also a private force: bodies school with their own layer. */
     const c=Math.max(0.06,P.radius*4);
-    if(!P.collide) { GRID.clear();
-      for(let i=0;i<N;i++){ const k=cellKey(bods[i].x,bods[i].y,c);
-        let arr=GRID.get(k); if(!arr){ arr=[]; GRID.set(k,arr); } arr.push(i); } }
+    GRID.clear();
+    for(let i=0;i<N;i++){ const k=cellKey(bods[i].x,bods[i].y,c);
+      let arr=GRID.get(k); if(!arr){ arr=[]; GRID.set(k,arr); } arr.push(i); }
     /* `cell` is a bucket of body INDICES, not a body array — the two were briefly confused
        when the parameter was renamed, and the loop then walked bodies as if they were
        indices. Named `cell` so it can never be mistaken for the layer's bodies again. */
@@ -2802,7 +2885,12 @@ function runPost(){
    The version field is READ here — EQJ wrote `v:4` into a store keyed `_v2` and never
    looked at it again (§10.4), which is a migration that does not exist.
    ══════════════════════════════════════════════════════════════════════════ */
-const SCENE_V=1, LS='bryk_scenes_v1';
+/* v2 (2026-07-19): forces moved onto the layer (A3.1), so a scene carries a `phys` block
+   per layer. The old global `phys` is still READ — a v1 scene hands its one force set to
+   every layer it restores, which is exactly how that scene looked when it was saved.
+   The storage key is deliberately NOT bumped: banks the DJ already saved must still be
+   there after the update, and the migration below is what makes that safe. */
+const SCENE_V=2, LS='bryk_scenes_v1';
 function captureScene(){
   return { v:SCENE_V,
     shapes:{...state.shapes}, assetW:state.assetW, assetTint:state.assetTint,
@@ -2814,7 +2902,7 @@ function captureScene(){
     formation:{...state.formation},
     layers:layers.map(L=>({prog:L.prog,variant:L.variant,label:L.label,w:L.opacity,muted:L.muted,
       solo:L.solo,seed:L.seed,shapes:{...L.shapes},look:{...L.look},
-      count:L.count,opacity:L.opacity,blend:L.blend,
+      count:L.count,opacity:L.opacity,blend:L.blend,phys:{...L.phys},
       params:{...L.params},rows:L.matrix.map(r=>({...r}))})),
     active:activeId,
 
@@ -2831,7 +2919,9 @@ function applyScene(sc){
   state.cam2=m(def.cam2,sc.cam2);
   state.cam=m(def.cam,sc.cam);
   state.post=m(def.post,sc.post);
-  state.phys=m(def.phys,sc.phys);
+  /* `state.phys` is the focused layer's forces now, and the stack below is about to be
+     rebuilt from scratch — writing here would set forces on a layer that is one line from
+     being discarded. The scene's forces are restored per layer in the loop below. */
   state.formation=m(def.formation,sc.formation);
   for(const k of ['assetW','assetTint','camW','mixSeed','count','size','radius','stroke','face','bgL','satDrift'])
     if(sc[k]!=null) state[k]=sc[k];
@@ -2857,6 +2947,9 @@ function applyScene(sc){
          how the scene looked when it was saved */
       Object.assign(L.look, ls.look || { size:sc.size, radius:sc.radius, stroke:sc.stroke,
         face:sc.face, varSize:sc.varSize, varTilt:sc.varTilt, tint:sc.assetTint });
+      /* migration v1→v2: before 2026-07-19 forces were one global set. An old scene hands
+         that same set to every layer — the picture it saved. A v2 scene carries its own. */
+      Object.assign(L.phys, ls.phys || sc.phys || {});
       Object.assign(L.params,ls.params||{});
       L.matrix=(ls.rows||[]).map(r=>({...r}));
       layers.unshift(L);
@@ -3064,7 +3157,10 @@ addEventListener('drop',e=>{ e.preventDefault(); dragDepth=0; document.body.clas
    No captured reference: applyScene REPLACES state.phys, and a captured object would
    leave every slider writing into an orphan after the first scene recall. */
 mount('physOn',{min:0,max:1,step:1,value:state.phys.on,label:'Physics on',
-  onInput:v=>{ state.phys.on=v; if(!v) for(const b of pool){ b.vx=b.vy=b.vz=0; } }});
+  /* the FOCUSED layer's bodies, not `pool` — `pool` is whichever layer the frame loop
+     stepped last, so switching physics off used to freeze a stranger */
+  onInput:v=>{ state.phys.on=v;
+    if(!v){ const L=activeLayer(); if(L) for(const b of L.bodies){ b.vx=b.vy=b.vz=0; } } }});
 mount('dim3',{min:0,max:1,step:1,value:state.phys.dim3,label:'Interact in 3D',onInput:v=>state.phys.dim3=v});
 mount('follow',{min:0.5,max:20,step:0.1,value:state.phys.follow,allowExtend:true,label:'Follow',onInput:v=>state.phys.follow=v});
 mount('damp',{min:0.5,max:0.99,step:0.005,value:state.phys.damp,label:'Damping',onInput:v=>state.phys.damp=v});
@@ -3579,6 +3675,18 @@ function renderLayers(){
     host.appendChild(d);
   });
   const rl=$('#rackLayer'); if(rl) rl.textContent=activeLayer()?('▸ '+activeLayer().label):'— no layer';
+  /* the physics column now shows the FOCUSED layer's forces, so it has to follow the
+     focus — otherwise the risers keep showing the previous card's numbers while every
+     drag writes to the new one, which is the worst possible lie a panel can tell */
+  syncPhysScrubs();
+}
+/* the force scrubs alone. Cannot call syncAllScrubs() from here: that one ends by calling
+   renderLayers(), and the two would chase each other forever. */
+function syncPhysScrubs(){
+  const P=state.phys;
+  const map={ physOn:P.on, dim3:P.dim3, follow:P.follow, damp:P.damp, collide:P.collide,
+              pradius:P.radius, swirl:P.swirl, attract:P.attract, gravity:P.gravity, flock:P.flock };
+  for(const k in map){ const s=SCRUBS[k]; if(s)s.set(map[k]); }
 }
 
 /* formation */
@@ -3873,6 +3981,10 @@ function frame(){
   const vxw=(W/Math.min(W,H))*1.6, vyw=(H/Math.min(W,H))*1.6;   /* viewport half-extent in world */
   let drawnTotal=0;
 
+  /* the one force that crosses the stack: bodies from different layers make room for
+     each other (A3.1). Everything else a layer does stays inside its own bodies. */
+  resolveContacts(act,dt);
+
   /* layers[0] is the TOP of the stack (addLayer unshifts, EQJ :670), so paint bottom-up */
   for(let li=act.length-1; li>=0; li--){
     const L=act[li], P=PROGRAMS[L.prog];
@@ -3881,8 +3993,10 @@ function frame(){
     pool=arr;                                  /* the ported banks read `pool` by name */
 
     /* this layer's forces act on this layer's bodies only, so a behaviour cannot fight
-       another layer's behaviour over the same body — there is no shared body any more */
-    stepPhysics(dt,t,f,arr);
+       another layer's behaviour over the same body — there is no shared body any more,
+       and since A3.1 there is no shared force set either */
+    stepPhysics(dt,t,f,L);
+    const LP=L.phys;
 
     const sizeMul = P.sizeScale ? P.sizeScale(N,L.params) : 1;
     const draws=[];
@@ -3893,10 +4007,12 @@ function frame(){
       let tx=tg.x, ty=tg.y, tz=tg.z;
 
       b.px=b.x; b.py=b.y; b.pz=b.z;
-      const k=1-Math.exp(-dt*state.phys.follow);
-      if(state.phys.on && !P.step){
+      /* the transport to the target is the layer's own too (A3.2 register «транспорт к
+         цели»): a snappy grid and a floating swarm can now live in the same frame */
+      const k=1-Math.exp(-dt*LP.follow);
+      if(LP.on && !P.step){
         b.vx+=(tx-b.x)*k; b.vy+=(ty-b.y)*k; b.vz+=(tz-b.z)*k;
-        const d2=Math.pow(state.phys.damp,dt*60);
+        const d2=Math.pow(LP.damp,dt*60);
         b.vx*=d2; b.vy*=d2; b.vz*=d2;
         b.x+=b.vx; b.y+=b.vy; b.z+=b.vz;
       } else {

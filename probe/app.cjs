@@ -382,6 +382,52 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      budget[2].peak <= budget[0].peak + 2,
      budget.map(r => r.n + ':' + r.peak).join(' → '));
 
+  /* ── A3.1 · a layer's behaviour belongs to a layer ────────────────────────────
+     Rob, live: «слои не работают, всё полупрозрачное». Half of that was compositing
+     (fixed 2026-07-18) and half was this: forces lived in ONE global object, so giving
+     one card gravity dropped every body on screen. The contract now is:
+       · a force set on layer A moves A's bodies and NOT B's
+       · the single exception is contact — bodies of different layers make room for
+         each other through the shared grid (§A3.1 «межслойно только avoid/collide»)
+     Both halves are gated, because a gate that only proves the first would stay green
+     if contacts were quietly dropped. Verified to FAIL on the pre-refactor build. */
+  const iso = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const B = window.__bryk;
+    B.layers().slice().forEach(L => B.removeLayer(L.id));
+    const A = B.addLayer('grid'), C = B.addLayer('grid');
+    /* both quiet: no forces, no drift, so anything that moves has a named cause */
+    for (const L of [A, C]) { Object.assign(L.phys, { on: 1, follow: 0, damp: 0.9, collide: 0,
+      swirl: 0, gravity: 0, attract: 0, flock: 0 }); L.opacity = 1; }
+    B.setCount(120); await sleep(700);
+    const snap = L => B.bodiesOf(L).map(b => ({ x: b.x, y: b.y }));
+    const drift = (L, was) => { const now = snap(L);
+      return Math.max(...now.map((p, i) => Math.hypot(p.x - was[i].x, p.y - was[i].y))); };
+
+    /* 1 · gravity on A only */
+    const a0 = snap(A), c0 = snap(C);
+    A.phys.gravity = 1.6;
+    await sleep(900);
+    const movedA = drift(A, a0), movedC = drift(C, c0);
+    A.phys.gravity = 0;
+
+    /* 2 · contact still crosses the stack: park both layers' bodies on the same spot
+       and turn collide up — they must push apart even though they are different layers */
+    B.bodiesOf(A).forEach(b => { b.x = 0.02; b.y = 0; b.vx = b.vy = b.vz = 0; });
+    B.bodiesOf(C).forEach(b => { b.x = -0.02; b.y = 0; b.vx = b.vy = b.vz = 0; });
+    const gap0 = 0.04;
+    for (const L of [A, C]) { L.phys.collide = 2; L.phys.radius = 0.3; }
+    await sleep(900);
+    const mean = L => { const b = B.bodiesOf(L); return b.reduce((s, p) => s + p.x, 0) / b.length; };
+    const gap1 = Math.abs(mean(A) - mean(C));
+    return { movedA, movedC, gap0, gap1 };
+  });
+  ok("a layer's own force moves its own bodies", iso.movedA > 0.05, 'drift ' + iso.movedA.toFixed(3));
+  ok("...and leaves the other layer's bodies alone", iso.movedC < 0.01,
+     'stranger drift ' + iso.movedC.toFixed(4));
+  ok('contact still crosses the stack', iso.gap1 > iso.gap0 * 1.5,
+     'gap ' + iso.gap0.toFixed(3) + ' → ' + iso.gap1.toFixed(3));
+
   /* the engine section runs for minutes after the boot snapshot; an exception thrown in
      it used to be printed by nobody and counted by nobody */
   ok('console clean through the whole run', errors.length === bootErrs,
