@@ -2311,6 +2311,17 @@ const LOOK_PARAMS=[
   {key:'stroke',  label:'outline only',   min:0,  max:1,   step:1,    def:0},
   {key:'face',    label:'face heading',   min:0,  max:1,   step:0.01, def:0},
   {key:'varTilt', label:'tilt variation', min:0,  max:1,   step:0.01, def:1},
+  /* 0 = free rotation. 2..24 snaps every body to that many angles around the circle —
+     the switch between «debris drifting» and «a composition that agrees with itself». */
+  {key:'angles',  label:'angle snap',     min:0,  max:24,  step:1,    def:0},
+  /* ── draw the relationships, not the objects (Reas, Process Compendium) ───────
+     A line between two bodies that are close enough. The visible work becomes the
+     structure BETWEEN things rather than the things, and a field of a few hundred bodies
+     grows fronts and membranes that read like reaction-diffusion — which was the whole
+     question about what makes the Karl Sims class of image hypnotic. Costs one pass over
+     the spatial hash we already build for collisions. */
+  {key:'links',   label:'link · web',     min:0,  max:1,   step:0.01, def:0},
+  {key:'linkDist',label:'link reach',     min:0.05,max:1.2,step:0.01, def:0.34},
   {key:'tint',    label:'asset tint',     min:0,  max:1,   step:0.01, def:0.55}
 ];
 const DEF_LOOK=()=>{ const o={}; for(const d of LOOK_PARAMS) o[d.key]=d.def; return o; };
@@ -4147,7 +4158,7 @@ function renderFocus(){
     seg.append(rr,ad); host.appendChild(seg); }
 
   const all=paramsOf(L), byKey=k=>all.find(x=>x.key===k);
-  rows(['size','varSize','radius','stroke'].map(byKey).filter(Boolean));
+  rows(['size','varSize','angles','links','linkDist','radius','stroke'].map(byKey).filter(Boolean));
 
   cap('field');
   rows([{key:'count',label:'density · bodies',min:20,max:900,step:1,
@@ -4262,6 +4273,40 @@ const lamp=$("#lamp"); let lampV=0, fpsAcc=0, fpsN=0, fpsShown=0, lastQuads=0;
    blend, so the body-level code below did not have to change at all. */
 let lastQuadsAcc=0;
 let DRIVEN_WATCH=false; const DRIVEN_LOG={};
+/* Neighbour lines, under the bodies so a body always sits on top of its own web.
+   Reuses the uniform grid: only pairs inside one cell are ever compared, so the cost
+   tracks density rather than population — the same reason resolveContacts can afford to
+   run over the whole stack. Alpha falls off with distance, so the web thins out toward
+   the reach instead of ending on a hard circle. */
+function paintLinks(L,draws,life){
+  const R=L.look.linkDist==null?0.34:L.look.linkDist, amt=L.look.links||0;
+  if(!(R>0)||draws.length<2)return;
+  const c=Math.max(0.02,R), r2=R*R;
+  const G=new Map();
+  for(let i=0;i<draws.length;i++){ const b=draws[i].b;
+    const k=cellKey(b.x,b.y,c); let a=G.get(k); if(!a){ a=[]; G.set(k,a); } a.push(i); }
+  ctx.save();
+  ctx.lineWidth=1;
+  ctx.strokeStyle=RAMP[(RAMP.length*0.62)|0]||'#888';
+  /* one path for the whole web: a stroke() per line would be hundreds of state changes */
+  const seen=new Set();
+  for(const [key,cell] of G){
+    const [cx,cy]=key.split(',').map(Number);
+    for(let dx=0;dx<=1;dx++) for(let dy=(dx?-1:0);dy<=1;dy++){
+      const other=G.get((cx+dx)+','+(cy+dy)); if(!other)continue;
+      for(const ia of cell) for(const ib of other){
+        if(ia>=ib)continue;
+        const pair=ia*draws.length+ib; if(seen.has(pair))continue; seen.add(pair);
+        const A=draws[ia], B2=draws[ib];
+        const ddx=B2.b.x-A.b.x, ddy=B2.b.y-A.b.y, d2=ddx*ddx+ddy*ddy;
+        if(d2>r2)continue;
+        ctx.globalAlpha=amt*(1-Math.sqrt(d2)/R)*life*0.75;
+        ctx.beginPath(); ctx.moveTo(A.P.x,A.P.y); ctx.lineTo(B2.P.x,B2.P.y); ctx.stroke();
+      }
+    }
+  }
+  ctx.restore();
+}
 function paintDraws(draws,t,sizeMul){
 
   /* Size, tilt spread and heading are per-layer: a body wears the look of the layer
@@ -4325,7 +4370,16 @@ function paintDraws(draws,t,sizeMul){
       const hx=b.x-b.px, hy=b.y-b.py;
       /* own tilt, drifting slowly, plus a lean into travel when Face heading is up */
       const own=(pv.roll + t*pv.spin*0.12)*LK.varTilt;
-      const rot = own + (LK.face>0.03 ? Math.atan2(hy,hx)*LK.face : 0);
+      let rot = own + (LK.face>0.03 ? Math.atan2(hy,hx)*LK.face : 0);
+      /* ── the suprematist toggle ─────────────────────────────────────────────
+         Snap every body's angle to a fixed division of the circle and the same field
+         stops reading as a drift of debris and starts reading as a composition: shapes
+         agree with each other instead of each pointing its own way. Hobbs names this as
+         the one switch that moves a flow field from organic to constructed, and it is a
+         single rounding. `angles` 0 = free, 4 = the right angles Malevich works in, 12 =
+         a clock face. Per layer, because one layer may be the strict one. */
+      const AQ=LK.angles|0;
+      if(AQ>1){ const q=TAU/AQ; rot=Math.round(rot/q)*q; }
       drawBillboard(img,P,Math.max(2,px),rot,alpha);
     } else {
       /* heading = direction of travel; the quad banks into it */
@@ -4603,6 +4657,7 @@ function frame(){
     ctx.save();
     ctx.globalAlpha=L.opacity;
     ctx.globalCompositeOperation=L.blend||'source-over';
+    if((LKL.links||0)>0.004) paintLinks(L,draws,LLIFE);
     paintDraws(draws,t,sizeMul);
     ctx.restore();
     drawnTotal+=draws.length;

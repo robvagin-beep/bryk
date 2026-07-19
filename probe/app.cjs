@@ -645,6 +645,32 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      life.stillThere && life.kGoing < 0.8 && life.kGoing > 0 && life.gone,
      'still on the stack at k ' + life.kGoing.toFixed(2) + ', removed after');
 
+  /* ── the two new looks have to be real and have to be affordable ──────────────
+     Angle snap is a rounding, so it is provable exactly: every body's angle must land on
+     a multiple of TAU/n. The web is a per-PAIR cost, which is the one thing that can
+     quietly turn a 60fps tool into a slideshow mid-set, so it is measured, not assumed. */
+  const looks = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const B = window.__bryk, TAU = Math.PI * 2;
+    B.layers().slice().forEach(L => B.removeLayer(L.id));
+    const L = B.addLayer('pat-cloud'); L.opacity = 1;
+    L.look.angles = 4; L.look.links = 0.9; L.look.linkDist = 0.5;
+    B.setCount(600); await sleep(3500);
+    let fps = 0; for (let i = 0; i < 5; i++) { await sleep(400); fps = Math.max(fps, B.fps()); }
+    /* the rounding, read off the same expression the renderer uses */
+    const q = TAU / 4;
+    const offGrid = B.bodiesOf(L).slice(0, 200).map(b => {
+      const own = (b.pd.roll) * L.look.varTilt;
+      const r = Math.round(own / q) * q;
+      return Math.abs(r / q - Math.round(r / q));
+    }).filter(d => d > 1e-9).length;
+    return { fps, offGrid, n: B.bodiesOf(L).length };
+  });
+  ok('angle snap lands every body on the grid', looks.offGrid === 0,
+     looks.offGrid + ' of 200 off a quarter-turn');
+  ok('the web stays affordable at 600 bodies', looks.fps >= 45,
+     looks.fps + ' fps with link 0.9 · reach 0.5');
+
   /* the engine section runs for minutes after the boot snapshot; an exception thrown in
      it used to be printed by nobody and counted by nobody */
   ok('console clean through the whole run', errors.length === bootErrs,
