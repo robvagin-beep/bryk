@@ -652,6 +652,15 @@ function mount(slot,cfg){
   /* CANON row() :3777 — the (0,1,1) signature IS a toggle and must render as a switch,
      not as a number field showing 0/1. Route it automatically so the call sites stay
      declarative and nobody has to remember. */
+  /* A control with no slot in the markup is a GHOST: it is built, it lands in SCRUBS, it
+     gets synced by syncAllScrubs and lit up by applyMatrix — and it is nowhere on screen.
+     Eight of them accumulated that way (size · radius · stroke · face · varSize · varTilt
+     · assetTint · assetW) when their rows moved into the layer card and the old markup was
+     deleted without deleting the mount. From the outside this reads exactly as Rob's
+     «уйма настроек не работают»: the panel looks whole, the knob you remember is gone, and
+     nothing anywhere says why. Silence is what let it happen eight times, so it ends here:
+     a missing slot is now an error in the console and a red mark in the app gate. */
+  if(!host) console.error('mount: no [data-mnt="'+slot+'"] slot in the markup — control built but never shown');
   if(cfg.min===0 && cfg.max===1 && cfg.step===1) return mountToggle(slot,cfg,host);
   const sc=mkScrub(cfg); if(host)host.appendChild(sc.el); SCRUBS[slot]=sc; return sc; }
 
@@ -1186,6 +1195,22 @@ function assignFacesFor(L){
   }
 }
 function rerollMix(){ state.mixSeed=Math.floor(Math.random()*1e6)+1; assignFaces(); }
+/* Re-deal ONE layer, properly. The card's RANDOMISE used to call rerollMix(), which rolls
+   the GLOBAL mix seed and re-deals every layer on the stack — press it on layer 3 and
+   layers 1, 2 and 4 change while 3 stays put. The button lied in the exact direction that
+   makes a tool feel broken (Rob: «рандомайзеры не работают»).
+   A layer's identity is `L.seed`, and until now nothing in the UI could roll it: it was
+   written once at birth and never again. Three things read it and all three have to be
+   re-run, or the roll only reaches part of the picture:
+     · b.pd     — the particle cloud (rebuildLayer)
+     · arr.tex  — which body wears which mark (assignFacesFor)
+     · P.init   — where a behaviour preset starts its bodies (mpSeed, inside rebuildLayer) */
+function rerollLayer(L){
+  if(!L)return;
+  L.seed=(Math.random()*1e6)|0;
+  rebuildLayer(L);                 /* pd · faces · behaviour seeding, all from the new seed */
+  setStatus('re-dealt · '+L.label,'ok');
+}
 
 /* Formation — text (or any string) rasterised to a mask, then sampled to points.
    Bodies fly to those points; this is the "Слово" move. */
@@ -1713,18 +1738,26 @@ const PRESETS=[
      AXIS_PARAMS.concat(SCENE_PARAMS), STYLE_AXIS['zigzag'], STYLE_PRESETS['zigzag'], axisTarget, 'bendFreq')
 ];
 
-/* the ten standalone layouts, each with the keys it actually reads */
+/* the ten standalone layouts, each with the keys it actually reads.
+   These said `'speed'` while their only parameter dictionary (SCENE_PARAMS) calls it
+   `'sceneSpeed'`. The filter in paramsOf keeps a key only if `P.keys.includes(d.key)`, so
+   the mismatch deleted the parameter from the card: EIGHT of these ten presets showed an
+   empty card, and Pulsing Circle and Radial showed spin alone. The same mismatch killed
+   their seeded drive row — `drive:'sceneSpeed'` resolves through paramsOf too, so the
+   beat reached nothing on all ten.
+   This is the exact failure the `keys` contract was introduced to prevent (see the
+   Waterfall note above), reappearing because the key was renamed on one side only. */
 for(const [id,label,desc,keys] of [
-  ['pulsing-circle','Pulsing Circle','A ring whose radius breathes in and out',['speed','spin']],
-  ['radial','Rotating Radial','A ring rotating in depth — the orbit ticker',['speed','spin']],
-  ['vortex','Vortex','A spiral winding out from the centre',['speed']],
-  ['helix','DNA Helix','Two strands winding through 3-D space',['speed']],
-  ['spring','Spring','A coil travelling through depth',['speed']],
-  ['grid','Grid Layout','Frames on a grid, reshuffling cells',['speed']],
-  ['float','Random Float','Loose drift, no rigid path',['speed']],
-  ['carousel','Perspective Carousel','Cover-flow arc — centre faces you, sides turn away',['speed']],
-  ['card-deck','Card Deck','A stacked deck fanning out; recycle hidden at the faded sides',['speed']],
-  ['flip-book','Flip Book','A stack of frames flipping like a calendar',['speed']]
+  ['pulsing-circle','Pulsing Circle','A ring whose radius breathes in and out',['sceneSpeed','spin']],
+  ['radial','Rotating Radial','A ring rotating in depth — the orbit ticker',['sceneSpeed','spin']],
+  ['vortex','Vortex','A spiral winding out from the centre',['sceneSpeed']],
+  ['helix','DNA Helix','Two strands winding through 3-D space',['sceneSpeed']],
+  ['spring','Spring','A coil travelling through depth',['sceneSpeed']],
+  ['grid','Grid Layout','Frames on a grid, reshuffling cells',['sceneSpeed']],
+  ['float','Random Float','Loose drift, no rigid path',['sceneSpeed']],
+  ['carousel','Perspective Carousel','Cover-flow arc — centre faces you, sides turn away',['sceneSpeed']],
+  ['card-deck','Card Deck','A stacked deck fanning out; recycle hidden at the faded sides',['sceneSpeed']],
+  ['flip-book','Flip Book','A stack of frames flipping like a calendar',['sceneSpeed']]
 ]) PRESETS.push(P_(id,'image-shuffler:LAYOUTS.'+id,'layout',label,desc,
      SCENE_PARAMS, keys,
      /* a deck is a deck: these two read as cards you flip through, and at swarm counts
@@ -2264,15 +2297,40 @@ const GLOBAL_PARAMS = [
 /* A layer's forces, addressable by the rack and by scenes under the same `phys.*` keys
    the global set used to answer to — so every saved scene and every seeded row keeps
    working, it just now reaches the layer that owns the row. */
+/* Ranges are the WORKING zone, not the survivable one (Rob A3.5: «диапазон до 500, а мне
+   нужно 0.5»). Every number below is derived from the engine's own arithmetic rather than
+   guessed, so it can be argued with:
+
+     terminal speed ≈ force · dt / (1 − damp) per frame  =  force · 10 u/s at damp 0.90
+     the viewport is 3.2 world units WIDE
+
+   So a force of 0.32 already walks a body across the whole screen in a second, and the
+   old maxima (gravity 2, swirl 3, attract 3) asked for 20–30× that — the entire useful
+   travel of the slider was crushed into its first two percent, which is exactly what
+   «дёргается» feels like under the hand. Extremes stay reachable by typing a number
+   (allowExtend is on for all of them), which is where extremes belong.
+   Defaults are the neutral pose of A3.3: a calm suprematist dance, no twitch. */
 const PHYS_PARAMS = [
-  { key:'phys.follow',  f:'follow',  label:'follow',      min:0,   max:20,  step:0.1   },
-  { key:'phys.damp',    f:'damp',    label:'damping',     min:0.5, max:1,   step:0.005 },
-  { key:'phys.collide', f:'collide', label:'collide',     min:0,   max:3,   step:0.01  },
-  { key:'phys.radius',  f:'radius',  label:'body radius', min:0.02,max:0.4, step:0.005 },
-  { key:'phys.swirl',   f:'swirl',   label:'swirl',       min:0,   max:3,   step:0.01  },
-  { key:'phys.attract', f:'attract', label:'attract',     min:-2,  max:3,   step:0.01  },
-  { key:'phys.gravity', f:'gravity', label:'gravity',     min:-2,  max:2,   step:0.01  },
-  { key:'phys.flock',   f:'flock',   label:'flock',       min:0,   max:2,   step:0.01  }
+  /* spring to the layout target. k = 1−exp(−dt·follow); at 10 that is 0.15/frame, already
+     a hard snap. 20 was indistinguishable from 10 by eye. */
+  { key:'phys.follow',  f:'follow',  label:'follow',      min:0,   max:10,   step:0.05  },
+  /* below ~0.8 motion is dead on arrival; at 1.0 nothing ever stops. The interesting
+     third of the old range was 0.85…0.98. */
+  { key:'phys.damp',    f:'damp',    label:'damping',     min:0.7, max:0.99, step:0.005 },
+  /* push = overlap · collide · dt · 9. At 1.5 a contact resolves in two frames. */
+  { key:'phys.collide', f:'collide', label:'collide',     min:0,   max:1.5,  step:0.01  },
+  { key:'phys.radius',  f:'radius',  label:'body radius', min:0.02,max:0.4,  step:0.005 },
+  /* curl amplitude is ~1.3, so swirl 0.25 ≈ 3 u/s — a body drifting across the frame in
+     about a second. That is the top of «drift», and drift is what this force is for. */
+  { key:'phys.swirl',   f:'swirl',   label:'swirl',       min:0,   max:0.6,  step:0.005 },
+  /* attract is hyperbolic (6/d), so it runs hot near the centre: 0.5 already out-pulls a
+     follow of 3. Negative side is the scatter half of the same knob. */
+  { key:'phys.attract', f:'attract', label:'attract',     min:-1,  max:1,    step:0.01  },
+  /* gravity · 10 = u/s at the default damping. Measured against the gate: at 0.5 an
+     unopposed body falls 4.75 units in 0.9s — one and a half screens, faster than the eye
+     tracks. At 0.25 it crosses the frame in about 1.3s, which reads as falling. */
+  { key:'phys.gravity', f:'gravity', label:'gravity',     min:-0.15,max:0.15, step:0.005 },
+  { key:'phys.flock',   f:'flock',   label:'flock',       min:0,   max:1,    step:0.01  }
 ];
 
 const CURVE = { lin:v=>v, exp:v=>v*v, sqrt:v=>Math.sqrt(v),
@@ -2497,7 +2555,13 @@ function rebuildLayer(L){
   a.length=n;
   /* every body carries the seeded particle-dance record the pattern bank reads
      (id · phase · band · a point on the unit sphere · lane · axis) */
-  for(let i=0;i<n;i++){ a[i].pd=baseParticle(i,77); a[i].L=L; }
+  /* `77` was a hardcoded seed, so every layer — and every DUPLICATE of a layer — got a
+     byte-identical particle cloud: same calibre, same tilt, same phase, same band, same
+     lane. The comment two hundred lines up promising that «two copies of one program
+     diverge here» was true of L.seed and false of everything the 17 pattern presets
+     actually read, because they read b.pd. Rob, 2026-07-19: «рандомайзеры не работают».
+     This is the seed that makes a layer an individual. */
+  for(let i=0;i<n;i++){ a[i].pd=baseParticle(i,L.seed); a[i].L=L; }
   assignFacesFor(L);
   mpSeed(L);
 }
@@ -2509,6 +2573,25 @@ function rebuildPool(){ layers.forEach(rebuildLayer); }
    cell are ever compared, so the cost tracks density, not population.
    Simplex-free curl: two cheap sine fields whose curl is taken analytically — enough
    for a drifting vortex without dragging a noise implementation in. */
+/* ── terminal speed ─────────────────────────────────────────────────────────────
+   Rob, 2026-07-19: «всё слишком чувствительное, дёргается». Measured cause: the engine
+   had no speed limit anywhere. Damping does not bound anything on its own — it sets a
+   TERMINAL velocity proportional to the force, and the forces are ranged in the same
+   units as the world. gravity 1.6 with damp 0.90 settles at 1.6·dt/0.1 ≈ 16 world units
+   per second in a viewport 3.2 units WIDE: the body crosses the screen in a fifth of a
+   second and is gone. Contact pushed just as hard — a probe measured two layers parked
+   0.04 apart ending up 573 units apart.
+   A ceiling is not a taste knob, it is the difference between a force and a launch. The
+   value is deliberately generous: at 6 u/s a body still crosses the frame in half a
+   second, so nothing that reads as motion is clipped — only what reads as an explosion.
+   Applied at the foot of stepPhysics, after every force has had its say.
+
+   UNITS, the trap: `b.vx` is a per-FRAME displacement, not a per-second velocity — the
+   integrator does `b.x += b.vx` with no dt. The first attempt at this ceiling was written
+   as if it were u/s and came out 80× too loose, so it clamped nothing and the gate stayed
+   red with a drift of 22. Stated per second here and converted with dt at the clamp, so
+   the limit means the same thing at 30fps and at 144. */
+const VMAX_PER_SEC=6;
 const GRID=new Map();
 function cellKey(x,y,c){ return ((x/c)|0)+','+((y/c)|0); }
 function cellKey3(b,c){ return ((b.x/c)|0)+','+((b.y/c)|0)+','+((b.z/c)|0); }
@@ -2623,6 +2706,20 @@ function stepPhysics(dt,t,f,L){
     }
   }
 
+  /* ── terminal speed ───────────────────────────────────────────────────────────
+     Rob, 2026-07-19: «всё слишком чувствительное, дёргается». Measured cause: there was
+     no speed limit anywhere in the engine. Damping alone does not bound anything — it
+     sets a TERMINAL velocity proportional to the force, and the forces are ranged in the
+     same units as the world. gravity 1.6 with damp 0.90 settles at 1.6·dt/0.1 ≈ 16 world
+     units per second in a viewport that is 3.2 units WIDE: a body crosses the screen in
+     a fifth of a second and is gone. Contact pushed as hard (a probe measured two layers
+     parked 0.04 apart flying 573 units apart).
+     A ceiling is not a taste knob, it is the difference between a force and a launch. The
+     value is generous — 8 u/s still crosses the frame in under half a second, so nothing
+     that reads as motion is clipped; only what reads as an explosion is. */
+  /* applied at the FOOT of this function, after every force has had its say — clamping
+     mid-way would just let the next block push past the ceiling again */
+
   if(P.flock>0.001){
     /* cohesion toward the local mean. It builds its own grid unconditionally now: the
        collide pass moved out of this function and across the stack, so the bucket it used
@@ -2645,6 +2742,12 @@ function stepPhysics(dt,t,f,L){
         b.vx+=(mx-b.x)*P.flock*dt*2; b.vy+=(my-b.y)*P.flock*dt*2;
         if(D3) b.vz+=(mz-b.z)*P.flock*dt*2; }
     }
+  }
+
+  const VM=VMAX_PER_SEC*dt, VM2=VM*VM;
+  for(let i=0;i<N;i++){ const b=bods[i];
+    const s2=b.vx*b.vx+b.vy*b.vy+b.vz*b.vz;
+    if(s2>VM2){ const k=VM/Math.sqrt(s2); b.vx*=k; b.vy*=k; b.vz*=k; }
   }
 }
 
@@ -2945,8 +3048,17 @@ function applyScene(sc){
       Object.assign(L.shapes, ls.shapes || {...(sc.shapes||{}), asset: sc.assetW});
       /* an older scene had one global look; every layer inherits it, which is exactly
          how the scene looked when it was saved */
-      Object.assign(L.look, ls.look || { size:sc.size, radius:sc.radius, stroke:sc.stroke,
-        face:sc.face, varSize:sc.varSize, varTilt:sc.varTilt, tint:sc.assetTint });
+      /* `Object.assign` copies `undefined` like any other value, and captureScene never
+         wrote varSize/varTilt at the scene root — so every scene saved before the look
+         moved per-layer handed the layer `varSize: undefined`, and the renderer's
+         `lerp(1, pv.size, LK.varSize)` turned every body's calibre into NaN. A body with
+         a NaN calibre is not a small body, it is an absent one: the layer loaded and drew
+         nothing, with no error anywhere. Only keys that actually carry a value get copied;
+         the rest keep the defaults DEF_LOOK() already put there. */
+      if(ls.look){ for(const k in ls.look) if(ls.look[k]!=null) L.look[k]=ls.look[k]; }
+      else for(const [k,v] of Object.entries({ size:sc.size, radius:sc.radius,
+             stroke:sc.stroke, face:sc.face, varSize:sc.varSize, varTilt:sc.varTilt,
+             tint:sc.assetTint })) if(v!=null) L.look[k]=v;
       /* migration v1→v2: before 2026-07-19 forces were one global set. An old scene hands
          that same set to every layer — the picture it saved. A v2 scene carries its own. */
       Object.assign(L.phys, ls.phys || sc.phys || {});
@@ -3044,14 +3156,17 @@ function buildMatrix(){
 }
 
 function syncAllScrubs(){
-  const map={ count:state.count, size:state.size, radius:state.radius, stroke:state.stroke,
-    face:state.face, persp:state.cam.persp, zoom:state.cam.zoom, tilt:state.cam.tilt,
+  const map={ count:state.count,
+    persp:state.cam.persp, zoom:state.cam.zoom, tilt:state.cam.tilt,
     spin:state.cam.spin, bgL:state.bgL, satDrift:state.satDrift,
     chroma:state.post.chroma, chromaAng:state.post.chromaAng,
-    /* marks are per-layer now — renderLayers() at the foot of this function rebuilds the
-       cards and their scrubs. `wRect` used to be mapped here and never existed in
-       state.shapes ({tri,wedge,circle}), so it was a permanent no-op. */
-    assetTint:state.assetTint, camW:state.camW,
+    /* marks and the whole look are per-layer now — renderLayers() at the foot of this
+       function rebuilds the cards and their scrubs. The eight look entries that used to
+       be listed here (size · radius · stroke · face · varSize · varTilt · assetTint ·
+       assetW) were syncing controls that had no slot in the markup: `SCRUBS.size.set()`
+       moved a slider nobody could see. `wRect` was mapped here too and never existed in
+       state.shapes ({tri,wedge,circle}) — a permanent no-op. */
+    camW:state.camW,
     camLayer:state.cam2.layer, camOver:state.cam2.over, camMirror:state.cam2.mirror,
     camDuo:state.cam2.duotone, camContrast:state.cam2.contrast, camGain:state.cam2.gain,
     physOn:state.phys.on, follow:state.phys.follow, damp:state.phys.damp,
@@ -3077,20 +3192,27 @@ $('#tap').addEventListener('click',()=>core.tap(nowT()));
 $('#auto').addEventListener('click',()=>{ core.auto(); SCRUBS.trim.set(0); setStatus('clock handed back to the detector','ok'); });
 $('#sync').addEventListener('click',()=>{ core.resync(); setStatus('downbeat reset to now','ok'); });
 
-mount('count',{min:8,max:600,step:1,value:state.count,allowExtend:true,label:'Count',
-  onInput:v=>{ state.count=v; rebuildPool(); }});
-mount('size',{min:8,max:120,step:1,value:state.size,allowExtend:true,label:'Size',
-  onInput:v=>{ state.size=v; rebase('size',v); }});
-mount('radius',{min:0,max:50,step:1,value:state.radius,label:'Corner radius',
-  onInput:v=>{ state.radius=v; rebuildTextures(); }});
-mount('stroke',{min:0,max:1,step:1,value:state.stroke,label:'Outline only',
-  onInput:v=>{ state.stroke=v; rebuildTextures(); }});
-mount('varSize',{min:0,max:1,step:0.01,value:state.varSize,label:'Size variation',
-  onInput:v=>state.varSize=v});
-mount('varTilt',{min:0,max:1,step:0.01,value:state.varTilt,label:'Tilt variation',
-  onInput:v=>state.varTilt=v});
-mount('face',{min:0,max:1,step:0.01,value:state.face,label:'Face heading',
-  onInput:v=>{ state.face=v; rebase('face',v); }});
+/* ── COUNT is a MASTER, and it was the loudest lie in the panel ──────────────────
+   Rob, 2026-07-19: «уйма настроек не работают». This one was the worst of them, because
+   it is the single most visible slider in the Pool section and it did NOTHING. It wrote
+   `state.count` and called rebuildPool() — but rebuildPool rebuilds every layer FROM
+   `L.count`, so the number was written, the pool was rebuilt, and the rebuild ignored the
+   number it had just been given. Dragging it even had a side effect (re-seeding behaviour
+   layers) which made it feel like something happened.
+   Bodies belong to layers now, so a scene-wide count can only mean «set it on all of
+   them» — which is exactly what the debug API has been doing all along. */
+mount('count',{min:20,max:600,step:1,value:state.count,allowExtend:true,label:'Count · all layers',
+  onInput:v=>{ state.count=v; layers.forEach(L=>{ L.count=v; rebuildLayer(L); });
+    renderLayers(); }});
+/* The eight look controls that used to mount here — size · radius · stroke · varSize ·
+   varTilt · face · asset weight · asset tint — are GONE, not moved: their rows left the
+   markup when the look became per-layer, but the mount() calls stayed behind. mount()
+   skipped the missing slot in silence, so each one kept living in SCRUBS, kept being
+   synced, kept being lit up by the mod rack, and was nowhere on screen. Eight controls
+   that could not be touched is most of what «уйма настроек не работают» was.
+   The real knobs are in the layer card (LOOK_PARAMS via paramsOf), where they belong —
+   a look is something a layer has, not something the scene has. mount() now shouts if a
+   slot is missing, so this cannot silently happen a ninth time. */
 mount('persp',{min:0,max:1.2,step:0.01,value:state.cam.persp,allowExtend:true,label:'Perspective',
   onInput:v=>{ state.cam.persp=v; rebase('cam.persp',v); }});
 mount('zoom',{min:0.4,max:2.4,step:0.01,value:state.cam.zoom,allowExtend:true,label:'Zoom',
@@ -3113,10 +3235,8 @@ mount('chromaAng',{min:0,max:360,step:1,value:0,label:'Aberration angle',
    TWICE into the same slot (the second call silently overwrote SCRUBS.wTri and left an
    unlabelled second slider in the panel). They are per-layer now and are built by
    renderLayers inside the card, so both the duplicate and the global reach are gone. */
-mount('wAsset',{min:0,max:3,step:0.05,value:state.assetW,allowExtend:true,label:'asset weight',
-  onInput:v=>{ state.assetW=v; rebuildTextures(); }});
-mount('assetTint',{min:0,max:1,step:0.01,value:state.assetTint,label:'asset tint',
-  onInput:v=>{ state.assetTint=v; rebuildTextures(); }});
+/* `wAsset` and `assetTint` were two more of the same ghosts — the asset weight lives on
+   the layer as `L.shapes.asset` and the tint as `L.look.tint`. */
 $('#reroll').addEventListener('click',rerollMix);
 
 /* ── assets: drop anywhere, or the button ── */
@@ -3162,14 +3282,21 @@ mount('physOn',{min:0,max:1,step:1,value:state.phys.on,label:'Physics on',
   onInput:v=>{ state.phys.on=v;
     if(!v){ const L=activeLayer(); if(L) for(const b of L.bodies){ b.vx=b.vy=b.vz=0; } } }});
 mount('dim3',{min:0,max:1,step:1,value:state.phys.dim3,label:'Interact in 3D',onInput:v=>state.phys.dim3=v});
-mount('follow',{min:0.5,max:20,step:0.1,value:state.phys.follow,allowExtend:true,label:'Follow',onInput:v=>state.phys.follow=v});
-mount('damp',{min:0.5,max:0.99,step:0.005,value:state.phys.damp,label:'Damping',onInput:v=>state.phys.damp=v});
-mount('collide',{min:0,max:2,step:0.01,value:state.phys.collide,allowExtend:true,label:'Collide',onInput:v=>state.phys.collide=v});
-mount('pradius',{min:0.02,max:0.4,step:0.005,value:state.phys.radius,allowExtend:true,label:'Body radius',onInput:v=>state.phys.radius=v});
-mount('swirl',{min:0,max:3,step:0.01,value:state.phys.swirl,allowExtend:true,label:'Swirl',onInput:v=>state.phys.swirl=v});
-mount('attract',{min:0,max:3,step:0.01,value:state.phys.attract,allowExtend:true,label:'Attract',onInput:v=>state.phys.attract=v});
-mount('gravity',{min:-3,max:3,step:0.01,value:state.phys.gravity,allowExtend:true,label:'Gravity',onInput:v=>state.phys.gravity=v});
-mount('flock',{min:0,max:2,step:0.01,value:state.phys.flock,allowExtend:true,label:'Flock',onInput:v=>state.phys.flock=v});
+/* ── one declaration per knob ────────────────────────────────────────────────────
+   Rob, 2026-07-19: «противоречий до жопы». This was one of them, and a nasty one because
+   nothing looked wrong: every force was declared TWICE — once here as a hand control and
+   once in PHYS_PARAMS as a rack target — with DIFFERENT ranges. gravity was −3…3 under
+   the hand and −2…2 under the beat; attract 0…3 by hand and −2…3 driven; collide 0…2 and
+   0…3; follow 0.5…20 and 0…20; damping 0.5…0.99 and 0.5…1. So the same slider meant two
+   different things depending on which of the two things moved it, and a modulation depth
+   — which is a FRACTION OF THE FULL RANGE — silently changed size when the rack read the
+   wider twin. The panel is generated from the rack's declaration now: one range, one step,
+   one name, both hands on the same rope. */
+for(const d of PHYS_PARAMS){
+  mount(SCRUB_FOR[d.key],{ min:d.min, max:d.max, step:d.step, value:state.phys[d.f],
+    allowExtend:true, label:d.label.replace(/^./,c=>c.toUpperCase()),
+    onInput:v=>state.phys[d.f]=v });
+}
 
 /* ── viewport: drag to orbit, wheel to zoom (image-shuffler bindUi:867–871) ──────
    The stage is a control, not a picture. Ported from the shuffler, with one required
@@ -3653,8 +3780,8 @@ function renderLayers(){
           /* weights, not a choice: every mark above zero is in this layer's mix */
           set:v=>{ L.shapes[k]=v; rebuildTextures(); } })), true);
       const rr=document.createElement('button'); rr.className='btn wide'; rr.textContent='RANDOMISE';
-      rr.title='Re-deal which body wears which mark';
-      rr.addEventListener('click',e=>{ e.stopPropagation(); rerollMix(); });
+      rr.title='Re-deal THIS layer: its marks, its particle cloud, its start positions';
+      rr.addEventListener('click',e=>{ e.stopPropagation(); rerollLayer(L); });
       box.appendChild(rr);
 
       cap('look');
@@ -4107,7 +4234,10 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
      layer, which is what a probe asking for N bodies actually wants */
   setCount(n){ layers.forEach(L=>{ L.count=n; rebuildLayer(L); });
     if(SCRUBS.count) SCRUBS.count.set(n); },
-  setFace(v){ state.face=v; SCRUBS.face.set(v); rebase('face',v); },
+  /* `face` has no global scrub any more — the knob lives in the layer card, where the
+     renderer reads it from. The unconditional SCRUBS.face.set() here was reaching for one
+     of the eight ghosts and now throws honestly instead of moving an invisible slider. */
+  setFace(v){ state.face=v; layers.forEach(L=>L.look.face=v); rebase('face',v); renderLayers(); },
   /* the field is opacity now; writing the retired weight did nothing.
      (This comment once contained a back-quoted identifier inside a double-quoted shell
      string, so the shell RAN it and pasted the output of `w` into the source. Never put

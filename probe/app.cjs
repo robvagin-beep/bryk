@@ -292,22 +292,36 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     put('move restores what it borrowed', Math.abs(B.state.cam.persp - persp0) < 0.03 &&
         B.state.phys.attract === 0);
 
-    // ── scenes round-trip, and a loaded scene is NOT reverted by the drive ───
-    B.state.size = 77; B.state.shapes.tri = 2.5; setW('radial', 0.66);
+    /* ── scenes round-trip ─────────────────────────────────────────────────────
+       This asserted `state.size`, `state.shapes.tri` and `SCRUBS.size` — a dead global,
+       a dead global and a scrub with no slot in the markup. It was green for months while
+       proving that three things nobody reads survive a save. What a scene has to carry is
+       what the ENGINE reads: the layer's own look, count, opacity, forces and rows. */
+    setW('radial', 0.66);                       /* creates the layer if it is not up */
+    const preL = layerOf('radial');
+    preL.look.size = 77; preL.shapes.tri = 2.5; preL.phys.swirl = 0.31;
     const snap = B.scene.capture();
-    B.state.size = 12; B.state.shapes.tri = 0; setW('radial', 0);
+    preL.look.size = 12; preL.shapes.tri = 0; preL.phys.swirl = 0; setW('radial', 0);
     B.scene.apply(snap); await sleep(600);
-    /* The name says "weights", so verify the weight — applyScene rebuilds the stack, so
-       the layer must be re-found by program, never held across the apply. */
+    /* applyScene rebuilds the stack, so the layer must be re-found by program, never held
+       across the apply */
     const tun = layerOf('radial');
-    put('scene restores scalars, weights and panel', B.state.size === 77 &&
-        B.state.shapes.tri === 2.5 && Math.abs(B.scrubs.size.get() - 77) < 0.001 &&
-        !!tun && Math.abs(tun.w - 0.66) < 0.001,
-        'radial w ' + (tun ? tun.w : 'no layer'));
-    B.scene.apply({ v: 0, size: 40 }); await sleep(700);
-    put('a loaded scene survives the next drive frame', B.state.size === 40, 'size ' + B.state.size);
+    put('scene restores the layer look, forces and opacity',
+        !!tun && tun.look.size === 77 && tun.shapes.tri === 2.5 &&
+        Math.abs(tun.phys.swirl - 0.31) < 0.001 && Math.abs(tun.opacity - 0.66) < 0.001,
+        tun ? ('size ' + tun.look.size + ' · swirl ' + tun.phys.swirl + ' · op ' + tun.opacity) : 'no layer');
+    put('a loaded scene survives the next drive frame',
+        layerOf('radial').look.size === 77, 'size ' + layerOf('radial').look.size);
+    /* a v1 scene carried ONE global force set and no per-layer look; it must land on every
+       layer as defaults rather than as undefined — `lerp(1,size,undefined)` is NaN, and a
+       NaN calibre is an invisible body */
+    B.scene.apply({ v: 1, layers: [{ prog: 'grid', count: 100 }], phys: { swirl: 0.2 } });
+    await sleep(700);
+    const old = layerOf('grid');
     put('an old scene gets defaults, not undefined',
-        Number.isFinite(B.state.phys.follow) && B.state.stops.length >= 2);
+        !!old && Number.isFinite(old.phys.follow) && Number.isFinite(old.look.varSize) &&
+        Number.isFinite(old.look.varTilt) && B.state.stops.length >= 2,
+        old ? ('varSize ' + old.look.varSize + ' · varTilt ' + old.look.varTilt) : 'no layer');
 
     // ── mod rack ─────────────────────────────────────────────────────────────
     const rows0 = B.matrix().length;
@@ -378,9 +392,14 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   for (const r of budget) {
     ok('quad budget holds at ' + r.n + ' bodies', r.peak <= r.cap, r.peak + ' quads (cap ' + r.cap + ')');
   }
-  ok('quad count stops growing with body count',
-     budget[2].peak <= budget[0].peak + 2,
-     budget.map(r => r.n + ':' + r.peak).join(' → '));
+  /* «+2» was written when this measured 0 → 0 → 0: setFace() wrote a global the renderer
+     had stopped reading, so no body ever took the quad path and the budget gate passed by
+     drawing nothing. With the drive reconnected it reads 40 → 46 → 49, which is the real
+     shape of the invariant: quad cost must not SCALE with population. Six times the bodies
+     for a quarter more quads is the LOD doing its job; a linear rise would be the bug. */
+  ok('quad count does not scale with body count',
+     budget[2].peak <= budget[0].peak * 1.5 && budget[2].peak <= budget[2].cap,
+     budget.map(r => r.n + ':' + r.peak).join(' → ') + ' (6× bodies)');
 
   /* ── A3.1 · a layer's behaviour belongs to a layer ────────────────────────────
      Rob, live: «слои не работают, всё полупрозрачное». Half of that was compositing
@@ -404,9 +423,12 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     const drift = (L, was) => { const now = snap(L);
       return Math.max(...now.map((p, i) => Math.hypot(p.x - was[i].x, p.y - was[i].y))); };
 
-    /* 1 · gravity on A only */
+    /* 1 · gravity on A only, at the TOP of the slider's own range. This used 1.6 — three
+       times what the control can now reach — and measured the speed ceiling rather than
+       the force. A calibration contract is worth more than a physics one: whatever the
+       slider can be dragged to must leave the scene on screen. */
     const a0 = snap(A), c0 = snap(C);
-    A.phys.gravity = 1.6;
+    A.phys.gravity = B.paramsOf(A).find(p => p.key === 'phys.gravity').max;
     await sleep(900);
     const movedA = drift(A, a0), movedC = drift(C, c0);
     A.phys.gravity = 0;
@@ -420,13 +442,26 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     await sleep(900);
     const mean = L => { const b = B.bodiesOf(L); return b.reduce((s, p) => s + p.x, 0) / b.length; };
     const gap1 = Math.abs(mean(A) - mean(C));
-    return { movedA, movedC, gap0, gap1 };
+    /* per-frame displacement × 60 = the u/s the ceiling is stated in */
+    let vmax = 0;
+    for (const L of [A, C]) for (const b of B.bodiesOf(L))
+      vmax = Math.max(vmax, Math.hypot(b.vx, b.vy, b.vz) * 60);
+    return { movedA, movedC, gap0, gap1, vmax };
   });
-  ok("a layer's own force moves its own bodies", iso.movedA > 0.05, 'drift ' + iso.movedA.toFixed(3));
+  /* Both bounds matter. The first version of this gate asserted only «> 0» and «grew»,
+     and went green while printing a drift of 22 and a gap of 573 in a world that is 3.2
+     units wide — it proved motion existed, not that the motion was motion rather than an
+     explosion. Rob read the same numbers off the screen as «дёргается». An upper bound is
+     what makes this gate able to fail. */
+  ok('gravity at full slider stays on screen', iso.movedA > 0.05 && iso.movedA < 3.2,
+     'drift ' + iso.movedA.toFixed(3) + ' in 0.9s (world is 3.2 wide)');
   ok("...and leaves the other layer's bodies alone", iso.movedC < 0.01,
      'stranger drift ' + iso.movedC.toFixed(4));
-  ok('contact still crosses the stack', iso.gap1 > iso.gap0 * 1.5,
+  ok('contact separates without launching', iso.gap1 > iso.gap0 * 1.5 && iso.gap1 < 3.2,
      'gap ' + iso.gap0.toFixed(3) + ' → ' + iso.gap1.toFixed(3));
+  /* a little headroom over 6: the sample is taken between frames, and a body that was
+     just pushed has not been clamped yet this tick */
+  ok('nothing exceeds terminal speed', iso.vmax <= 7, 'peak ' + iso.vmax.toFixed(2) + ' u/s (cap 6)');
 
   /* the engine section runs for minutes after the boot snapshot; an exception thrown in
      it used to be printed by nobody and counted by nobody */
