@@ -126,6 +126,50 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
     put('extras survive a scene load', alive('fText'));
     put('formation text survives a scene load', B.state.formation.text === 'BRYK', B.state.formation.text);
 
+    /* ── the seam: a hand edit on a DRIVEN path must not be undone next frame ───
+       The rack stores the base of every path it drives and restores it at the foot of
+       each frame. A card scrub that only wrote the parameter was therefore overruled a
+       sixtieth of a second later — and only on paths that happened to be mapped, so the
+       same slider worked or did not depending on the rack, with nothing on screen to say
+       which. The hand rebases: it moves the point the modulation swings around. */
+    B.layers().slice().forEach(L => B.removeLayer(L.id));
+    const S = B.addLayer('pat-cloud'); await sleep(250);
+    S.matrix.length = 0;
+    S.matrix.push({ feat:'env.bassSlow', path:'spacing', mode:'up', depth:0.4, curve:'lin' });
+    await sleep(400);
+    /* the REAL control, typed into the way a hand types into it — the keyboard path of
+       mkScrub, not a re-implementation of what the card does. A gate that calls the
+       engine directly would pass on a card whose scrub was never wired at all. */
+    let row = null;
+    for (const r of document.querySelectorAll('#focusBody .row')) {
+      const lb = r.querySelector('label');
+      if (lb && /spacing/.test(lb.textContent)) { row = r; break; }
+    }
+    put('the driven parameter is on the card at all', !!row);
+    if (row) {
+      const scrub = row.querySelector('.scrub'), edit = row.querySelector('.sedit');
+      scrub.focus();
+      scrub.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      edit.value = '1.9';
+      edit.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await sleep(600);
+      const base = B.bases().get(S.id + '::spacing');
+      put('a hand edit on a driven path survives the frame loop',
+          base != null && Math.abs(base - 1.9) < 0.02, 'base is ' + base);
+      /* And the modulation still swings — around the NEW base, not the old one.
+         Sampling `S.look.spacing` cannot answer this: the value is restored to its base at
+         the foot of every frame, so anything reading it between frames sees the base and
+         concludes the drive is dead. That reading is exactly what made the camera look
+         deleted (app.cjs, the view check). `watchDriven` records the value while it is
+         driven, which is the only moment it exists. */
+      B.watchDriven(true); await sleep(900); B.watchDriven(false);
+      const log = (B.driven()[S.id + '::spacing'] || B.driven()['spacing'] || []);
+      const lo = Math.min(...log), hi = Math.max(...log);
+      put('and the rack still modulates around it', log.length > 5 && hi - lo > 1e-4,
+          log.length + ' driven samples, swing ' + (log.length ? (hi - lo).toFixed(4) : '—') +
+          ', around base ' + base);
+    }
+
     /* ── per-layer marks: the whole point of moving them off the pool ────────── */
     B.layers().slice().forEach(L => B.removeLayer(L.id));
     const A = B.addLayer('grid'), C = B.addLayer('pulsing-circle');

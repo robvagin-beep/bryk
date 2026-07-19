@@ -4373,8 +4373,20 @@ function renderFocus(){
        maxima because allowExtend was on everything, and the picture stopped making sense.
        Extending belongs where a bigger number still means something (size, crowd), not
        everywhere. */
+    /* THE SEAM between the two columns, and the only place they touch (§18 §2.6).
+       A card scrub used to call `p.set(v)` and nothing else. If any rack row on the right
+       drives that same path, the frame loop reads the base it stored, writes the driven
+       value, and puts the base back at the foot of the frame — so a hand edit lived for
+       one sixtieth of a second and vanished. Not «the slider is laggy»: the slider is
+       overruled, silently, and only on the paths that happen to be mapped, which is the
+       worst possible way for it to fail.
+       The hierarchy is written in the canon (§17.1): hand > move > rack. The hand
+       REBASES — it moves the point the modulation swings around — and this is the call
+       that says so. Per layer, never `rebase`: that one rewrites the base for every layer
+       sharing the path and would drag the whole stack with one card's slider. */
     const s2=mkScrub({min:p.min,max:p.max,step:p.step,value:p.get(),allowExtend:!p.hard,
-      k:p.descKey||p.key, label:L.label+' '+p.label, onInput:v=>p.set(v)});
+      k:p.descKey||p.key, label:L.label+' '+p.label,
+      onInput:v=>{ p.set(v); if(BASES.has(L.id+'::'+p.key)) BASES.set(L.id+'::'+p.key,v); }});
     sl.appendChild(s2.el);
   } };
 
@@ -4462,7 +4474,9 @@ function renderFocus(){
       const sl=document.createElement('span'); row.append(lb,sl); box.appendChild(row);
       const s3=mkScrub({min:item.min,max:item.max,step:item.step,value:item.get(),
         allowExtend:!item.hard, k:item.descKey||item.key,
-        label:L.label+' '+item.label, onInput:v=>item.set(v)});
+        label:L.label+' '+item.label,
+        /* the folded rows are the same seam — see the note on `rows` above */
+        onInput:v=>{ item.set(v); if(BASES.has(L.id+'::'+item.key)) BASES.set(L.id+'::'+item.key,v); }});
       sl.appendChild(s3.el);
     }
     det.appendChild(box); host.appendChild(det);
@@ -5116,6 +5130,9 @@ frame();
    the one array. Probes that ask «what is on screen» want the union; probes that ask about
    a layer use bodiesOf(L). */
 window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), layers:()=>layers, scrubs:SCRUBS,
+  /* the stored bases of every driven path — the gate asks whether a hand edit reached
+     them, because reaching the parameter alone lasts exactly one frame */
+  bases:()=>BASES,
   programs:()=>PROGRAMS, addLayer, duplicateLayer, focusLayer,
   /* the debug path removes NOW. A probe asking «take this layer off the stack» is asking
      about state, not about choreography — leaving it fading for 0.6s would silently
