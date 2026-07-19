@@ -261,8 +261,13 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
    row does not reflow under the caret. No `height`: WCAG 1.4.12 lets the reader widen
    spacing and a fixed height would clip the text they just typed. */
 .lrow .lrename{flex:1;min-width:0;padding:0;background:var(--bg);
-  border:1px solid var(--accent-live);border-radius:var(--r-ctl);
+  /* an INSET ring, not a border: a 1px border would take a pixel of width the name did
+     not have and shift the text under the caret at the moment it appears */
+  border:0;box-shadow:inset 0 0 0 1px var(--accent-live);border-radius:var(--r-ctl);
   font:var(--fz-m) ui-monospace,monospace;color:var(--ink)}
+.lrow .lrename:focus-visible{outline:2px solid var(--accent-live);outline-offset:1px}
+/* the badge became a real button, so it owes the same focus ring every other control uses */
+.rlayer:focus-visible{outline:2px solid var(--accent-live);outline-offset:2px;border-radius:var(--r-ctl)}
 .lrow .lctl{display:flex;gap:var(--sp-0);flex:none}
 .ltiny{width:20px;height:20px;padding:0;line-height:1;font-size:var(--fz-s);
   background:var(--tint);border:1px solid transparent;border-radius:var(--r-ctl);
@@ -609,10 +614,14 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
       <div class="row"><label title="Degrees of hue the echo drifts each frame — this is the part that reads as psychedelia rather than as a trail">Echo hue drift</label><span data-mnt="echoHue"></span></div>
       <!-- The kaleidoscope reads one wedge of the finished frame and mirrors it around the
            centre. It belongs here for the same reason the echo does: it is a decision about
-           the OUTPUT, not about any one layer. -->
-      <div class="row" style="margin-top:var(--sp-2)"><label title="0 or 1 is off. 6 is the classic; even numbers read as ornament, odd as a spin">Kaleidoscope</label><span data-mnt="kSectors"></span></div>
-      <div class="row"><label title="Turns the mirror itself, so the ornament does not sit still">Kaleido turn</label><span data-mnt="kRoll"></span></div>
-      <div class="row"><label title="Degrees per second the mirror rolls">Kaleido speed</label><span data-mnt="kRate"></span></div>
+           the OUTPUT, not about any one layer.
+           A CAP, not a margin: three rows about a different effect were separated from the
+           echo block by an inline margin-top copied off the chroma row — the section header
+           already exists for this and inline sizing spreads by copy. -->
+      <div class="lcap">kaleidoscope</div>
+      <div class="row"><label title="How many wedges the frame is mirrored into. 0 or 1 is off; 6 is the classic, even counts read as ornament and odd as a spin">mirrors</label><span data-mnt="kSectors"></span></div>
+      <div class="row"><label title="Where the mirror is pointed, in radians. Turning it is what stops the ornament reading as a frozen doily">mirror turn</label><span data-mnt="kRoll"></span></div>
+      <div class="row"><label title="How fast the mirror rolls, in radians per second — 1 is a little under a sixth of a turn each second. Negative runs it the other way">mirror spin</label><span data-mnt="kRate"></span></div>
       <div class="row" style="margin-top:var(--sp-2)"><label>Chromatic</label><span data-mnt="chroma"></span></div>
       <div class="row"><label>Aberration angle</label><span data-mnt="chromaAng"></span></div>
     </fieldset>
@@ -774,7 +783,11 @@ function mountToggle(slot,cfg,host){
     isEditing(){ return false; },
     setDisabled(on){ el.disabled=!!on; const r=el.closest('.row'); if(r)r.classList.toggle('is-disabled',!!on); },
     setLive(){} };                       /* a switch has no live riser — nothing to show */
-  SCRUBS[slot]=api; return api;
+  /* the card builds its switches with no slot name: those live and die with the card and
+     must not enter the global registry under the key `null`, which `syncAllScrubs` would
+     then walk into */
+  if(slot) SCRUBS[slot]=api;
+  return api;
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -2488,9 +2501,9 @@ const LOOK_PARAMS=[
   {key:'linkDist',label:'link reach',     min:0.05,max:1.2,step:0.01, def:0.34, hard:1, mod:'no'}, /* re-wires WHICH pairs are neighbours: the web jumps rather than breathes. Drive `links` instead */
   /* the mesh warp, R10.3 — see drawQuadWorld. Amplitude is in world units, so it reads
      the same at any zoom; 0.35 already folds a body over on itself. */
-  {key:'wave',    label:'wave · amount',  min:0,  max:0.5, step:0.005,def:0},
-  {key:'waveFreq',label:'wave · ripples', min:0.5,max:6,   step:0.1,  def:2,  hard:1},
-  {key:'waveRate',label:'wave · speed',   min:0,  max:4,   step:0.05, def:1.4},
+  {key:'wave',    label:'fold · amount',  min:0,  max:0.5, step:0.005,def:0},
+  {key:'waveFreq',label:'fold · count',   min:0.5,max:6,   step:0.1,  def:2,  hard:1},   /* the 8×8 mesh cannot carry more than about three cycles — 6 is the honest ceiling, not a taste choice */
+  {key:'waveRate',label:'fold · travel',  min:0,  max:4,   step:0.05, def:1.4},
   {key:'waveMode',label:'wave · cloth',   min:0,  max:1,   step:1,    def:0,  hard:1, mod:'no'},
   {key:'tint',    label:'asset tint',     min:0,  max:1,   step:0.01, def:0.55, hard:1, mod:'no'}  /* rebuilds the texture bank on every change — a rebuild on an envelope */
 ];
@@ -2632,8 +2645,15 @@ function paramsOf(L){
     /* `count` rebuilds the whole crowd, so on a continuous envelope it is a stutter, not a
        motion — but it IS musical at structural points («the field doubles on the drop»).
        Offered, and offered honestly: the picker says it needs a gate. */
+    /* Guarded, because `applyMatrix` writes every driven target once per frame and
+       `restoreMatrix` writes it back at the foot of the same frame. With `count` mapped,
+       that is TWO full re-deals per frame — `baseParticle` for every body, `assignFacesFor`,
+       and `mpSeed` resetting every Motion Primer body to its init pose — 120 times a
+       second, even at depth 0 where the value never actually changes. The gate curve
+       shapes the deviation; it cannot stop a setter that rebuilds unconditionally. */
     { key:'count', label:'count', min:20, max:2000, step:1, mod:'gate',
-      get:()=>L.count, set:v=>{ L.count=Math.round(v); rebuildLayer(L); } },
+      get:()=>L.count, set:v=>{ const n=Math.round(v);
+        if(n===L.count) return; L.count=n; rebuildLayer(L); } },
     /* the LOOK belongs here too. It was rendered into the card by a parallel path and
        never entered paramsOf, so `applyMatrix` could not find `size` at all — the row was
        skipped and the drive reached nothing. paramsOf is the single point of contact
@@ -2935,8 +2955,41 @@ const MACRO_MAP={
    field for the whole length of the gesture. It lands once, when the fader is released —
    the same verdict `mod:'gate'` makes for the rack, applied to the hand. */
 const MACRO_ON_RELEASE=new Set(['count']);
+/* ── RELATIVE, not absolute ───────────────────────────────────────────────────────
+   The first version read the fader's position as an ABSOLUTE point in each parameter's
+   range and parked all three at 0.5, with a comment claiming 0.5 was «where the standby
+   was built». It was not, and could not be: MACRO_MAP is a table derived on its own, the
+   standby is a scene Rob tuned by hand, and nothing reconciles the two. Measured on the
+   boot picture, committing a fader AT ITS PARKED POSITION — a gesture of zero magnitude,
+   which is exactly what typing a number does — moved count 140→297, follow 1→4.4, swirl
+   0.85→0.225 and took 47% of the lit pixels off the screen. One touch, no drag, no undo,
+   on the scene he asked the app to open into.
+
+   So a macro TRIMS FROM WHERE YOU ARE: it snapshots the values it owns when the gesture
+   starts and moves them by the fader's DISPLACEMENT since then, scaled by the span the
+   map declares. At the parked position it does nothing at all, which is the only honest
+   meaning of a control nobody has touched. It also fixes the unreachable value: standby
+   `swirl` is 0.85, above the 0.6 its own range tops out at, and no absolute fader position
+   could ever have restored it. */
+let MACRO_GRAB=null;
+function macroGrab(name){
+  const snap={};
+  for(const L of layers){ const ps=paramsOf(L), per={};
+    for(const t of (MACRO_MAP[name]||[])){ const p=ps.find(x=>x.key===t.k); if(p) per[t.k]=p.get(); }
+    snap[L.id]=per; }
+  MACRO_GRAB={ name, from:state.macro[name], snap };
+}
 function applyMacro(name,m,released){
   const list=MACRO_MAP[name]; if(!list)return;
+  /* one grab per gesture; a different fader starts its own */
+  if(!MACRO_GRAB||MACRO_GRAB.name!==name) macroGrab(name);
+  const G=MACRO_GRAB, d=clamp(m,0,1)-G.from;
+  /* A gesture of zero magnitude writes NOTHING. Not «writes the same value back»: the
+     write itself was destructive, because clamping to the declared range drags in any
+     value that sits outside it, and Rob's standby swirl (0.85) sits above the working
+     maximum of 0.6 on purpose. Touching a fader without moving it took it to 0.6. */
+  if(d===0 && !released) return;
+  if(d===0){ state.macro[name]=clamp(m,0,1); syncAllScrubs(); MACRO_GRAB=null; return; }
   /* the fader's own position is set HERE, not by the caller. `syncAllScrubs` paints the
      panel from `state.macro`, so a caller that wrote the pose after calling this left the
      panel showing the previous value — the picture was one move ahead of its own fader.
@@ -2944,6 +2997,7 @@ function applyMacro(name,m,released){
   state.macro[name]=clamp(m,0,1);
   for(const L of layers){
     const ps=paramsOf(L);
+    const held=(G.snap&&G.snap[L.id])||{};
     for(const t of list){
       /* `released` means «also land the rebuild targets», not «land ONLY them»: a fader
          let go of has to leave every parameter it owns where the fader now points. The
@@ -2952,8 +3006,14 @@ function applyMacro(name,m,released){
          (which commits without ever dragging) moved nothing at all. */
       if(MACRO_ON_RELEASE.has(t.k) && !released) continue;
       const p=ps.find(x=>x.key===t.k); if(!p)continue;
-      const f=t.a+(t.b-t.a)*clamp(m,0,1);
-      const v=p.min+(p.max-p.min)*f;
+      /* the span the map declares, walked from where this parameter stood when you
+         grabbed the fader — see the note above the function */
+      const base=held[t.k]!=null?held[t.k]:p.get();
+      /* the range, WIDENED to admit where the value already stood. A hand that put swirl
+         above its working maximum meant it; a macro may move that value, and may not
+         quietly confiscate it. Same principle as extendParamRange on the scrubs. */
+      const lo=Math.min(p.min,base), hi=Math.max(p.max,base);
+      const v=clamp(base+(t.b-t.a)*d*(p.max-p.min), lo, hi);
       p.set(p.step>=1?Math.round(v):v);
       /* rebase only what the rack is actually driving — writing a base for an unmapped
          path would leave a stale entry that outlives the row that never existed */
@@ -2965,7 +3025,7 @@ function applyMacro(name,m,released){
      of the drag — sixty DOM rebuilds a second, over a canvas that wants the frame. The
      picture follows the fader live because the engine reads the parameters directly; the
      card sliders catch up when the hand lets go. */
-  if(released) syncAllScrubs();
+  if(released){ MACRO_GRAB=null; syncAllScrubs(); }
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -3781,10 +3841,16 @@ function mapOptions(L){
   const have=new Set(paramsOf(L).map(p=>p.key));
   const out=[]; let n=0;
   const barred=new Set(paramsOf(L).filter(p=>p.mod==='no').map(p=>p.key));
+  /* A path that a row ALREADY drives stays on the menu even if it is barred from new rows.
+     `mkSel` marks `selected` by exact match, so an option that is not there makes the
+     browser render the FIRST one — the row would silently read «body size» while driving
+     asset tint, and touching that select would rewrite the row to the label it was wrongly
+     showing. Barring is about what you may PICK, never about what a saved scene may say. */
+  const inUse=new Set((L&&L.matrix||[]).map(r=>r.path));
   for(const [title,items] of MAP_GROUPS){
     /* a group may not re-admit what a declaration barred — otherwise the verdict and the
        menu are two sources of truth again, and the menu is the one people read */
-    const live=items.filter(([k])=>have.has(k)&&!barred.has(k));
+    const live=items.filter(([k])=>have.has(k)&&(!barred.has(k)||inUse.has(k)));
     if(!live.length)continue;
     out.push(['--g'+(n++), title]);
     for(const [k,label] of live) out.push([k,label]);
@@ -3796,7 +3862,7 @@ function mapOptions(L){
      place here by passing the four tests written at LOOK_PARAMS; the ones that fail say so
      on their own declaration. */
   const claimed=new Set(MAP_GROUPS.flatMap(([,it])=>it.map(([k])=>k)));
-  const rest=paramsOf(L).filter(p=>!claimed.has(p.key) && p.mod!=='no');
+  const rest=paramsOf(L).filter(p=>!claimed.has(p.key) && (p.mod!=='no' || inUse.has(p.key)));
   if(rest.length){ out.push(['--gz','this preset']);
     for(const p of rest) out.push([p.key,p.label]); }
   return out;
@@ -3920,11 +3986,16 @@ mount('echoRot',{min:-0.06,max:0.06,step:0.001,value:state.echo.rot,label:'Echo 
   onInput:v=>state.echo.rot=v});
 mount('echoDecay',{min:0.85,max:0.995,step:0.001,value:state.echo.decay,label:'Echo decay',
   onInput:v=>state.echo.decay=v});
-mount('kSectors',{min:0,max:16,step:1,value:state.kaleido.sectors,label:'Kaleidoscope',
+/* allowExtend off, and the reason belongs HERE rather than in the master plan: each wedge
+   is a full-frame fill, so the count is a cost multiplier, not a taste knob — measured
+   109 → 74 fps going from none to six. Sixteen is already past where the eye reads
+   individual wedges. This is the one place §18 §8 permits hand-setting the flag: a bigger
+   number does not mean more of the same thing, it means a dropped frame. */
+mount('kSectors',{min:0,max:16,step:1,value:state.kaleido.sectors,label:'mirrors',
   allowExtend:false, onInput:v=>state.kaleido.sectors=v});
-mount('kRoll',{min:-3.15,max:3.15,step:0.01,value:state.kaleido.roll,label:'Kaleido turn',
+mount('kRoll',{min:-3.15,max:3.15,step:0.01,value:state.kaleido.roll,label:'mirror turn',
   onInput:v=>state.kaleido.roll=v});
-mount('kRate',{min:-1,max:1,step:0.005,value:state.kaleido.rate,label:'Kaleido speed',
+mount('kRate',{min:-1,max:1,step:0.005,value:state.kaleido.rate,label:'mirror spin',
   onInput:v=>state.kaleido.rate=v});
 mount('echoHue',{min:0,max:12,step:0.1,value:state.echo.hue,label:'Echo hue drift',
   onInput:v=>state.echo.hue=v});
@@ -4250,6 +4321,24 @@ const DESC={
   'scatter.spread':'How far the throw reaches: 1 fills the frame',
   'scatter.drift':'Slow wander on top of the fixed scatter; 0 leaves it frozen',
 
+  /* ── added 2026-07-19 with the controls themselves. A control shipped without a line
+     here used to answer its own number back; the dock now falls through to the label, but
+     the label says WHAT it is and this says what it DOES. */
+  'mEnergy':'How hard the set hits: calibre, dance rate, impact and the depth of the room',
+  'mDensity':'How much there is: the crowd, its scale, the air between bodies and the web',
+  'mChaos':'How far from order: drift, lag spread, tilt, and how loosely they hold formation',
+  'kSectors':'How many wedges the frame is mirrored into; 0 or 1 is off, 6 is the classic',
+  'kRoll':'Where the mirror is pointed. Turning it is what stops the ornament sitting still',
+  'kRate':'How fast the mirror rolls, in radians per second; negative runs it the other way',
+  'wave':'Folds each body as cloth — a wave over its own face, on whatever it is wearing. 0 is flat',
+  'waveFreq':'How many folds cross the body at once; the mesh carries about three before it reads as noise',
+  'waveRate':'How fast the fold travels; 0 freezes it mid-flap',
+  'waveMode':'Off is a flag, held at one edge. On is cloth, with waves crossing both ways',
+  'echoAmt':'How much of the last frame survives under this one; the tunnel opens as it rises',
+  'echoZoom':'Below 1 the echo falls inward, above 1 it grows outward',
+  'echoRot':'Turns the echo as it recedes',
+  'echoDecay':'How long a trail survives; lower fades faster',
+  'echoHue':'Degrees of hue the echo drifts each frame — this is the part that reads as psychedelia',
   'logo.scale':'Size of the mark the bodies settle into',
   'logo.jitter':'Bodies wobble around their place in the mark; 0 is a clean silhouette',
   'logo.fit':'Retunes body calibre to the mark’s cell spacing so it reads; 0 keeps the global size',
@@ -4350,8 +4439,19 @@ const footDefault=()=>setFoot('Info');
        a key that did not exist and fell through to «repeat your own number». A family
        fallback is also simply right — `bend` means the same thing on every axis preset. */
     const bare=k&&k.indexOf('.')>0 ? k.slice(k.indexOf('.')+1) : null;
+    /* THE LAST RESORT MAY NOT BE THE CONTROL'S OWN TEXT. A scrub's text IS its value, so a
+       control with no entry answered its own number back — «0.50» — and the dock looked
+       like it was working while saying nothing at all. Worse than an empty dock, because
+       nothing on screen says the description is missing; found by hovering, never by a
+       gate, which is why this needed an eye. The comment above already named the failure
+       («repeat your own number») and the chain still ended in it.
+       A row's LABEL is the honest floor: it is what §18 §6 specifies, it is never empty,
+       and it degrades to «Wave · amount» rather than to «0.34». */
+    const row=el.closest?el.closest('.row'):null;
+    const lb=row&&row.querySelector('label');
+    const own=el.classList&&el.classList.contains('scrub') ? '' : (el.textContent||'').trim();
     setFoot(lit || (k&&DESC[k]) || (bare&&DESC[bare]) || (bare&&DESC['axis.'+bare])
-            || el.title || (el.textContent||'').trim() || 'Info');
+            || el.title || (lb&&lb.title) || (lb&&(lb.textContent||'').trim()) || own || 'Info');
   };
   for(const sel of ['#panel .pbody','#rightcol .pbody']){
     const host=document.querySelector(sel); if(!host)continue;
@@ -4365,6 +4465,10 @@ const footDefault=()=>setFoot('Info');
 /* legend icons — Synthex Engine :5853-5888, mechanism 1:1 */
 (function(){
   const P={
+    /* the icon map is keyed by the FIRST WORD of the legend, lowercased. A legend added
+       without an entry here simply gets no icon — silent, and the row still looks fine,
+       which is how `Macro` shipped bare (§18 §6 names `sliders-horizontal` for it). */
+    macro:'<path d="M10 5H3"/><path d="M12 19H3"/><path d="M14 3v4"/><path d="M16 17v4"/><path d="M21 12h-9"/><path d="M21 19h-5"/><path d="M21 5h-7"/><path d="M8 10v4"/><path d="M8 12H3"/>',   /* lucide sliders-horizontal */
     layers:'<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/>',   /* lucide layers */
     pool:'<path d="M8.3 10a.7.7 0 0 1-.626-1.079L11.4 3a.7.7 0 0 1 1.198-.043L16.3 8.9a.7.7 0 0 1-.572 1.1Z"/><rect x="3" y="14" width="7" height="7" rx="1"/><circle cx="17.5" cy="17.5" r="3.5"/>',   /* lucide shapes */
     forces:'<circle cx="12" cy="12" r="1"/><path d="M20.2 20.2c2.04-2.03.02-7.36-4.5-11.9-4.54-4.52-9.87-6.54-11.9-4.5-2.04 2.03-.02 7.36 4.5 11.9 4.54 4.52 9.87 6.54 11.9 4.5Z"/><path d="M15.7 15.7c4.52-4.54 6.54-9.87 4.5-11.9-2.03-2.04-7.36-.02-11.9 4.5-4.52 4.54-6.54 9.87-4.5 11.9 2.03 2.04 7.36.02 11.9-4.5Z"/>',   /* lucide atom */
@@ -4496,7 +4600,18 @@ function renderLayers(){
     d.appendChild(r2);
 
     const sc=mkScrub({min:0,max:1,step:0.01,value:L.opacity,label:L.label+' opacity',
-      onInput:v=>{ L.opacity=v; }});
+      /* THE SAME SEAM, and this one was missed. Every layer is born with a seeded row on
+         `w` (seedRows), so BASES always holds `<id>::w` — which means the presence fader,
+         the control a DJ touches more than any other, was the one place where the hand did
+         NOT rebase and the drive loop snapped it back inside 16ms. The card's scrubs got
+         the write-through; the row's did not, and the comment there claiming to be «the
+         only place they touch» was what hid it. */
+      onInput:v=>{ L.opacity=v; if(BASES.has(L.id+'::w')) BASES.set(L.id+'::w',v); }});
+    /* the most-used fader in a set had no line in the dock: its key is `w_<id>`, minted
+       per layer, so no static DESC entry can ever name it, and it lives in the layer row
+       rather than in a `.row`, so there is no label to fall back to either. A literal on
+       the node is the only address that survives both. */
+    sc.el.dataset.desc='How much of this layer you see. 0 is silent, and the rack cannot lift it back off the floor';
     lop.appendChild(sc.el); SCRUBS['w_'+L.id]=sc;
     /* how this layer meets the ones under it — the second half of «видно / не видно».
        It sat inside the unfolded card, three screens down from the opacity it belongs
@@ -4550,8 +4665,13 @@ const shapeSetOf=L=>{
     if(['tri','wedge','circle','asset'].every(m=>Math.abs((L.shapes[m]??0)-s[m])<0.001)) return k; }
   return 'custom';
 };
+/* The card's scrubs, by parameter key, for as long as this card exists. They are rebuilt
+   on every render, so this is cleared with them — it is a live index, not a cache. Needed
+   because a macro moves values the card is showing without rebuilding the card. */
+let CARD_SCRUBS={};
 function renderFocus(){
   const host=$('#focusBody'), nameEl=$('#focusName'); if(!host)return;
+  CARD_SCRUBS={};
   /* park the program extras before the wipe — moving a node keeps its listeners, and
      innerHTML='' would take the text field and the font picker down with everything else */
   const park=$('#progExtras');
@@ -4587,10 +4707,18 @@ function renderFocus(){
        REBASES — it moves the point the modulation swings around — and this is the call
        that says so. Per layer, never `rebase`: that one rewrites the base for every layer
        sharing the path and would drag the whole stack with one card's slider. */
-    const s2=mkScrub({min:p.min,max:p.max,step:p.step,value:p.get(),allowExtend:!p.hard,
-      k:p.descKey||p.key, label:L.label+' '+p.label,
-      onInput:v=>{ p.set(v); if(BASES.has(L.id+'::'+p.key)) BASES.set(L.id+'::'+p.key,v); }});
-    sl.appendChild(s2.el);
+    /* (0,1,1) IS THE SWITCH SIGNATURE and it must reach a switch. `mount()` routes it to
+       `mountToggle`; this builder called `mkScrub` directly, so a two-state control came
+       out as a drag-resistant number field reading 0.00 / 1.00 — a strobe you operate by
+       dragging. §18 §8 grants the signature its single exemption from allowExtend *because
+       it is a switch*, so rendering it as a number breaks the exemption's own premise.
+       Pre-existing on `outline only`; `wave · cloth` arrived and made it two. */
+    const write=v=>{ p.set(v); if(BASES.has(L.id+'::'+p.key)) BASES.set(L.id+'::'+p.key,v); };
+    const cfg={min:p.min,max:p.max,step:p.step,value:p.get(),allowExtend:!p.hard,
+      k:p.descKey||p.key, label:L.label+' '+p.label, onInput:write};
+    const s2=(p.min===0&&p.max===1&&p.step===1) ? mountToggle(null,cfg,sl) : mkScrub(cfg);
+    if(s2.el.parentNode!==sl) sl.appendChild(s2.el);
+    CARD_SCRUBS[p.key]=s2;
   } };
 
   /* ── what stays in sight, and what folds away ────────────────────────────────
@@ -4648,6 +4776,13 @@ function renderFocus(){
   rows(MOTION_ROWS.filter(m=>PRIMARY_MOTION.includes(m.key))
     .map(m=>{ const p=byKey(m.key); return p&&{...p,label:m.label}; }).filter(Boolean));
 
+  /* IN SIGHT, not in the fold. A7.4 names the mesh warp one of the two headline «плав»
+     mechanisms the app was missing; shipping it collapsed under `more` means it is never
+     found. It is also the only control here that acts on the body's own surface rather
+     than on where the body goes, which is worth a cap of its own. */
+  cap('cloth');
+  rows(['wave','waveFreq','waveRate','waveMode'].map(byKey).filter(Boolean));
+
   if(P.params.length){ cap('pattern');
     rows(P.params.filter(d=>!P.keys||P.keys.includes(d.key))
       .map(x=>({...x, descKey:L.prog+'.'+x.key,
@@ -4658,10 +4793,6 @@ function renderFocus(){
   restRows(['angles','radius','stroke','varTilt','tint'].map(byKey));
   restCap('web · flow');
   restRows(['links','linkDist','linkMax','streak','smear'].map(byKey));
-  /* the cloth family (R10.3): one wave over the body's own surface, on whatever the body
-     is wearing — a mark, a dropped SVG, a letter, or the live camera */
-  restCap('wave · cloth');
-  restRows(['wave','waveFreq','waveRate','waveMode'].map(byKey));
   restCap('lava · detail');
   restRows(MOTION_ROWS.filter(m=>!PRIMARY_MOTION.includes(m.key))
     .map(m=>{ const p=byKey(m.key); return p&&{...p,label:m.label}; }));
@@ -4679,12 +4810,14 @@ function renderFocus(){
       const row=document.createElement('div'); row.className='row';
       const lb=document.createElement('label'); lb.textContent=item.label; lb.title=item.label;
       const sl=document.createElement('span'); row.append(lb,sl); box.appendChild(row);
-      const s3=mkScrub({min:item.min,max:item.max,step:item.step,value:item.get(),
+      const cfg3={min:item.min,max:item.max,step:item.step,value:item.get(),
         allowExtend:!item.hard, k:item.descKey||item.key,
         label:L.label+' '+item.label,
-        /* the folded rows are the same seam — see the note on `rows` above */
-        onInput:v=>{ item.set(v); if(BASES.has(L.id+'::'+item.key)) BASES.set(L.id+'::'+item.key,v); }});
-      sl.appendChild(s3.el);
+        /* the folded rows are the same seam, and the same switch rule — see `rows` above */
+        onInput:v=>{ item.set(v); if(BASES.has(L.id+'::'+item.key)) BASES.set(L.id+'::'+item.key,v); }};
+      const s3=(item.min===0&&item.max===1&&item.step===1) ? mountToggle(null,cfg3,sl) : mkScrub(cfg3);
+      if(s3.el.parentNode!==sl) sl.appendChild(s3.el);
+      CARD_SCRUBS[item.key]=s3;
     }
     det.appendChild(box); host.appendChild(det);
   }
@@ -4714,9 +4847,27 @@ seedFonts(FALLBACK_FONTS.filter(f=>document.fonts.check('12px "'+f+'"')));
 /* the three. `onCommit` carries the rebuild targets so the crowd is re-dealt once, on
    release, instead of on every pixel of the drag. */
 for(const [slot,name] of [['mEnergy','energy'],['mDensity','density'],['mChaos','chaos']])
-  mount(slot,{min:0,max:1,step:0.01,value:state.macro[name],label:name,allowExtend:false,
-    onInput:v=>{ state.macro[name]=v; applyMacro(name,v,false); },
-    onCommit:v=>{ state.macro[name]=v; applyMacro(name,v,true); }});
+  mount(slot,{min:0,max:1,step:0.01,value:state.macro[name],
+    label:name[0].toUpperCase()+name.slice(1), allowExtend:false,
+    onInput:v=>{ applyMacro(name,v,false); macroLive(name); },
+    onCommit:v=>{ applyMacro(name,v,true); macroLive(null); }});
+/* While a macro drags, every card slider it covers is stale — `syncAllScrubs` runs only on
+   release, because it rebuilds the card subtree and doing that per pointermove would cost
+   the frame. Stale sliders are exactly the «why does this knob do nothing» confusion the
+   macro's own note warns about, so the answer is the live riser the panel already has:
+   `setLive` paints where a value currently IS without touching the DOM around it. Same
+   mechanism the rack uses to show a driven parameter. */
+function macroLive(name){
+  const L=activeLayer(); if(!L) return;
+  const touched=name ? new Set((MACRO_MAP[name]||[]).map(t=>t.k)) : null;
+  const ps=paramsOf(L);
+  for(const key in CARD_SCRUBS){
+    const sc=CARD_SCRUBS[key]; if(!sc||!sc.setLive) continue;
+    if(!touched || !touched.has(key)){ sc.setLive(null); continue; }
+    const p=ps.find(x=>x.key===key);
+    sc.setLive(p?p.get():null);
+  }
+}
 mount('logoAvoid',{min:0,max:2,step:0.01,value:state.logoAvoid,label:'Logo as void',
   onInput:v=>state.logoAvoid=v});
 mount('logoScale',{min:0.5,max:8,step:0.05,value:state.logoScale,label:'Logo size',
@@ -5020,11 +5171,17 @@ function paintDraws(draws,t,sizeMul){
      copy the copy — that compounds into mush within a few frames;
    · the roll accumulates (A5.2) instead of being read off the clock, so driving the rate
      changes the speed of the turn rather than jumping its angle. */
-let kScratch=null, kRoll=0;
+let kScratch=null;
 function paintKaleido(dt){
   const K=state.kaleido; const N=Math.round(K.sectors||0);
   if(!(N>1)) return;
-  kRoll+=dt*(K.rate||0);
+  /* ONE angle, and a scene owns it. The roll used to accumulate into a module-level
+     variable that was added to `K.roll` only at draw time: the rendered orientation was
+     the sum of a saved number and a hidden one, so recalling the same bank at minute 2 and
+     at minute 18 gave different pictures, and nothing in the file could say why.
+     Accumulating into the state field makes the saved angle the real angle.
+     Wrapped, because it is an angle and not a stopwatch. */
+  if(K.rate) K.roll=((K.roll||0)+dt*K.rate+Math.PI)%TAU-Math.PI;
   if(!kScratch) kScratch=document.createElement('canvas');
   /* The copy the wedges are read from is kept at 60% of the frame. N sectors means N
      full-frame fills, and at DPR 2 that was the most expensive thing in the app —
@@ -5044,7 +5201,7 @@ function paintKaleido(dt){
   for(let i=0;i<N;i++){
     ctx.save();
     ctx.translate(cx,cy);
-    ctx.rotate((K.roll||0)+kRoll+i*step);
+    ctx.rotate((K.roll||0)+i*step);
     /* CLIP FIRST, MIRROR SECOND. The flip used to be applied before the wedge was
        described, so the wedge itself was mirrored too — every odd sector landed on the
        far side of the circle, on top of an even one, and half the frame stayed black.
@@ -5055,8 +5212,17 @@ function paintKaleido(dt){
        the seam disappears into the symmetry instead of showing as a spoke. */
     ctx.beginPath(); ctx.moveTo(0,0);
     ctx.arc(0,0,R,-step/2,step/2); ctx.closePath(); ctx.clip();
-    if(i&1) ctx.scale(-1,1);
-    ctx.rotate(-(K.roll||0)-kRoll);
+    /* Mirror about the wedge's BISECTOR, which is the local x axis: scale(1,-1).
+       `scale(-1,1)` reflects about the perpendicular instead, which does not mirror the
+       wedge into its neighbour — it fetches the diametrically OPPOSITE part of the frame.
+       Measured by composing the transform and inverting it: at N=6 the six sectors sampled
+       source angles 0 −180 0 180 0 180 instead of 0 0 0 0 0 0. Every seam was a hard cut
+       between two unrelated pieces of the picture, not a mirror join.
+       It survived a screenshot twice, because N evenly-spaced wedges still LOOK like a
+       kaleidoscope. It also survived my own gate, which compared sectors TWO apart — both
+       of them unmirrored, so the mirror was the one thing never tested. */
+    if(i&1) ctx.scale(1,-1);
+    ctx.rotate(-(K.roll||0));
     ctx.translate(-cx,-cy);
     ctx.drawImage(kScratch,0,0,kScratch.width,kScratch.height,0,0,W,H);
     ctx.restore();

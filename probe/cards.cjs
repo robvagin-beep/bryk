@@ -181,6 +181,9 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
        frame, so «did the macro write» and «did the drive put it back» would be the same
        measurement. The seam between hand and rack has its own check above. */
     M1.matrix.length = 0; B.bases().clear();
+    /* the auto spin advances `cam.yaw` on its own between the two reads, and every macro
+       was being credited with it — all three counts were one higher than the map declares */
+    B.state.cam.spin = 0;
     const snapAll = () => { const o = {}; for (const p of B.paramsOf(M1)) o[p.key] = p.get(); return o; };
     for (const macro of ['energy', 'density', 'chaos']) {
       const lo = (B.applyMacro(macro, 0.05, true), await sleep(250), snapAll());
@@ -189,6 +192,30 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
       put(macro + ' moves at least five things', moved.length >= 5,
           moved.length + ': ' + moved.join(' '));
     }
+    /* ── a macro nobody moved changes nothing ────────────────────────────────
+       The absolute version destroyed the boot standby on FIRST TOUCH: committing a fader
+       at its parked position — which is what typing a number does, no drag required —
+       re-dealt the crowd, quadrupled `follow`, pulled `swirl` down out of the range Rob
+       had deliberately set it above, and took 47% of the lit pixels off the screen. There
+       is no undo, and the scene it wrecked is the one the app opens into. */
+    B.scene.apply(B.scene.capture());   /* a known picture to touch */
+    await sleep(600);
+    const L0 = B.layers()[0];
+    L0.phys.swirl = 0.85;               /* above the working maximum, exactly as he tuned it */
+    const shot = () => ({ count: L0.count, follow: +L0.phys.follow.toFixed(4),
+                          swirl: +L0.phys.swirl.toFixed(4), size: +L0.look.size.toFixed(3) });
+    const untouched = shot();
+    for (const mk of ['energy', 'density', 'chaos']) B.applyMacro(mk, B.state.macro[mk], true);
+    await sleep(500);
+    const touched = shot();
+    put('a macro committed where it sits changes nothing',
+        JSON.stringify(untouched) === JSON.stringify(touched),
+        JSON.stringify(untouched) + ' → ' + JSON.stringify(touched));
+    /* and a value the hand put outside the working range is not confiscated */
+    B.applyMacro('chaos', B.state.macro.chaos + 0.1, true); await sleep(400);
+    put('a hand-set value above the working range survives a macro move',
+        L0.phys.swirl > 0.6, 'swirl ' + L0.phys.swirl.toFixed(3));
+
     /* it writes when moved, and then it is quiet */
     B.applyMacro('energy', 0.5, true); await sleep(200);
     const held = B.paramsOf(M1).find(p => p.key === 'size');

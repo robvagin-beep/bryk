@@ -742,6 +742,31 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      'same 60 bodies: ' + wave.meshFps + ' fps turned → ' + wave.warpFps + ' fps folded' +
      ' (headless software renderer; judge the absolute number headed)');
 
+  /* ── the info dock answers with words, never with the number it is standing on ──
+     Found by hovering, not by a gate: a control with no DESC entry fell through to the
+     element's own text, and a scrub's own text is its VALUE. The dock printed «0.50» and
+     looked like it was working. That is worse than an empty dock — nothing on screen says
+     the description is missing. Every control in both columns is hovered here and the
+     answer must not be a number. */
+  const dock = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const foot = document.getElementById('footText');
+    const bad = [];
+    const scrubs = [...document.querySelectorAll('#panel .scrub, #rightcol .scrub')];
+    for (const s of scrubs) {
+      s.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      await sleep(12);
+      const t = (foot.textContent || '').trim();
+      /* a bare number, a number with a unit, or the literal fallback = no description */
+      if (!t || t === 'Info' || /^[-+]?[0-9]*\.?[0-9]+\s*\w{0,3}$/.test(t))
+        bad.push((s.getAttribute('aria-label') || '?') + ' → "' + t + '"');
+    }
+    return { bad, n: scrubs.length };
+  });
+  ok('every control tells the dock what it does, not what it reads',
+     dock.bad.length === 0, dock.bad.slice(0, 4).join(' | ') || dock.n + ' controls hovered');
+
+
   /* ── the kaleidoscope ─────────────────────────────────────────────────────────
      «Looks symmetrical» is not a claim a gate can hold, so it is measured: with N wedges
      the frame must repeat every TWO steps (neighbouring wedges are mirrored, so the same
@@ -769,6 +794,11 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
        units; two patches showing different shapes differ by tens. The threshold is between
        those, and it is the difference between measuring the effect and measuring the
        sampler. */
+    const ringAt = (radFrac, a) => { const R = Math.min(cv.width, cv.height) * radFrac;
+      const x = Math.round(cv.width / 2 + Math.cos(a) * R) - 3, y = Math.round(cv.height / 2 + Math.sin(a) * R) - 3;
+      const d = g.getImageData(x, y, 7, 7).data;
+      let r = 0, gr = 0, b2 = 0; for (let k = 0; k < d.length; k += 4) { r += d[k]; gr += d[k+1]; b2 += d[k+2]; }
+      const px = d.length / 4; return [r / px, gr / px, b2 / px]; };
     const alike = (a, b3) => Math.abs(a[0]-b3[0]) + Math.abs(a[1]-b3[1]) + Math.abs(a[2]-b3[2]) < 48;
     /* a field dense enough to have something to mirror at the sampling radius */
     const L = B.onlyProg('pat-cloud'); L.matrix.length = 0; L.opacity = 1;
@@ -789,7 +819,24 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
        edge on the other side of a rounded coordinate, and demanding all of them equal
        measured the sampler's precision rather than the effect's symmetry. */
     const step = TAU / N;
-    const s1 = ring(16, 0.3), s2 = ring(16, 0.3 + step * 2);
+    /* ADJACENT sectors, mirrored. The first version compared sectors TWO apart — both
+       unmirrored copies — so it proved the wedges tile and never touched the mirror
+       itself, and a build that reflected about the wrong axis (fetching the diametrically
+       opposite part of the frame at every odd wedge) went green twice.
+       Neighbours are mirror images, so sampling at +θ from one wedge's bisector must match
+       sampling at −θ from the next one's. */
+    /* The seam between wedge 0 and wedge 1 sits at roll + step/2, and wedge 1 is wedge 0
+       reflected in it. So a sample at +off from wedge 0's bisector must equal the sample
+       at −off from wedge 1's. `roll` is now the ONE angle the engine turns (there is no
+       hidden accumulator any more), so the probe can put it at a known place and know
+       where the seam is. */
+    B.state.kaleido.roll = 0; B.state.kaleido.rate = 0; await sleep(400);
+    /* several radii, not one: at a single radius most samples land on empty stage and the
+       comparison runs out of lit pairs to judge */
+    const s1 = [], s2 = [];
+    for (const rad of [0.12, 0.18, 0.24, 0.30])
+      for (let k = 1; k <= 6; k++) { const off = (k / 7) * (step / 2);
+        s1.push(ringAt(rad, off)); s2.push(ringAt(rad, step - off)); }
     const dark = v => v[0] + v[1] + v[2] < 24;
     let same = 0, lit = 0;
     for (let i = 0; i < s1.length; i++) { if (dark(s1[i]) && dark(s2[i])) continue;
@@ -799,8 +846,9 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   });
   ok('with the kaleidoscope off the frame is untouched', kal.offMoved,
      kal.offMoved ? 'the scene is live and unmirrored' : 'the scene froze — the effect is not identity at zero');
-  ok('six wedges repeat every second wedge', kal.lit >= 4 && kal.same >= kal.lit - 1,
-     kal.same + ' of ' + kal.lit + ' lit samples match across two sectors');
+  ok('neighbouring wedges are mirror images of each other',
+     kal.lit >= 4 && kal.same >= kal.lit - 1,
+     kal.same + ' of ' + kal.lit + ' lit samples match across the seam');
   /* N sectors is N full-frame fills, so the honest question is what it costs against the
      scene it mirrors — not an absolute frame rate on a software renderer. The wedges are
      read from a 60% copy for exactly this reason; ornament made of repeated copies is the
