@@ -318,23 +318,47 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
        next, and the gate flickered red on a build nobody had touched. A flaky gate is
        worse than no gate — it teaches you to re-run instead of to look. */
     F.matrix.length = 0;
-    Object.assign(F.phys, { swirl:0, flock:0, attract:0, gravity:0, collide:0, follow:12, vary:0 });
-    const spans = [];
+    await s(300);
+    /* Measure the FORM, not the flight toward it. Three fixes in a row treated the
+       flicker as noise to be suppressed — silence the forces, then silence the dance —
+       and it kept coming back (0.46 · 0.33 · 0.14 · 0.02 on a build nobody touched),
+       because the quantity was wrong, not the conditions. `follow` is a spring, so a body
+       is somewhere between the shape it left and the shape it was asked for, and where it
+       has got to depends on which shape came before and how long the clock happened to
+       run. There is nothing to wait for that makes that deterministic.
+       The claim — eight polyhedra, eight silhouettes — is about where the preset SENDS
+       the bodies. That is `target`, it is exact, and it needs no settling at all. */
+    /* PIN THE SEED. Every layer is born with a random one, so the cloud sampled onto the
+       polyhedron differed on every run and so did any number measured from it. That was
+       the rest of the flicker, and no amount of settling would have removed it. */
+    F.seed = 20260719; B.setCount(240); await s(500);
+    const sigs = [];
+    const N = F.bodies.length, ctxF = { variant:0, seed:F.seed, vx:2.84, vy:1.78,
+                                        rnd:k=>((k*0.618)%1), clock:{ dance:0 } };
     for (let k = 0; k < 8; k++) {
-      /* the pool was just rebuilt by setCount and the previous preset was still pulling —
-         measure the FORM, not the transit toward it */
-      F.params.formShape = k; await s(1100);
-      const pl = F.bodies, xs = pl.map(q => q.x), ys = pl.map(q => q.y);
-      if (!pl.every(q => [q.x,q.y,q.z].every(Number.isFinite))) { spans.push('NaN'); continue; }
-      spans.push((Math.max(...xs)-Math.min(...xs)).toFixed(2)+'x'+(Math.max(...ys)-Math.min(...ys)).toFixed(2));
+      const pr = { ...F.params, formShape:k, dance:0, sceneSpeed:0 };
+      const xs=[], ys=[], zs=[], rs=[];
+      for (let i = 0; i < N; i++) { const q = bank['pat-form'].target(i, N, 0, pr, ctxF);
+        if (![q.x,q.y,q.z].every(Number.isFinite)) { xs.length = 0; break; }
+        xs.push(q.x); ys.push(q.y); zs.push(q.z); rs.push(Math.hypot(q.x,q.y,q.z)); }
+      if (!xs.length) { sigs.push(null); continue; }
+      const sp = a => Math.max(...a) - Math.min(...a);
+      const mean = rs.reduce((a,b)=>a+b,0)/rs.length;
+      const sd = Math.sqrt(rs.reduce((a,b)=>a+(b-mean)*(b-mean),0)/rs.length);
+      /* A bounding box is a weak signature: a cube and an octahedron of the same reach
+         fill the same box, and the gate would have called two different solids the same
+         shape (or, run to run, the same solid two different shapes). How the points are
+         distributed WITHIN the box is what makes a silhouette — so the radius mean and
+         spread go into the fingerprint alongside the three spans. */
+      sigs.push([sp(xs), sp(ys), sp(zs), mean, sd]);
     }
-    const nums = spans.map(t => t === 'NaN' ? null : t.split('x').map(Number));
     let gap = Infinity;
-    for (let a = 0; a < nums.length; a++) for (let b2 = a + 1; b2 < nums.length; b2++)
-      if (nums[a] && nums[b2]) gap = Math.min(gap, Math.hypot(nums[a][0]-nums[b2][0], nums[a][1]-nums[b2][1]));
+    for (let a = 0; a < sigs.length; a++) for (let b2 = a + 1; b2 < sigs.length; b2++)
+      if (sigs[a] && sigs[b2]) gap = Math.min(gap,
+        Math.hypot(...sigs[a].map((v,i)=>v - sigs[b2][i])));
     put('all eight polyhedra are reachable and distinct',
-        !spans.includes('NaN') && gap > 0.15,
-        'closest pair differs by ' + (gap===Infinity?'n/a':gap.toFixed(2)));
+        sigs.every(Boolean) && gap > 0.15,
+        'closest pair differs by ' + (gap===Infinity?'n/a':gap.toFixed(3)));
     put('shapes only appear on the preset that reads them',
         !bank['pat-cloud'].keys.includes('formShape') && bank['pat-form'].keys.includes('formShape'));
 
