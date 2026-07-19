@@ -1758,9 +1758,9 @@ const PAT_PARAMS=[
      world; here it is scaled by the live viewport, so a scene reaches the corners
      instead of huddling in the middle. This is a party screen, not a thumbnail. */
   {key:'spread',    label:'spread',    min:0, max:3,  step:0.01, def:1.85},
-  {key:'dance',     label:'dance',     min:0, max:4,  step:0.01, def:0.72},
+  {key:'dance',     label:'dance',     min:0, max:2,  step:0.01, def:0.72},
   {key:'amplitude', label:'amplitude', min:0, max:3,  step:0.01, def:1},
-  {key:'frequency', label:'frequency', min:0, max:6,  step:0.01, def:1},
+  {key:'frequency', label:'frequency', min:0, max:2.5,step:0.01, def:1},
   {key:'twist',     label:'twist',     min:-3,max:3,  step:0.01, def:1},
   {key:'lanes',     label:'lanes',     min:2, max:24, step:1,    def:7}
 ];
@@ -1788,8 +1788,8 @@ const PAT_PARAMS=[
    the two put two identical rows in the card writing the same key. The author's lane
    default (0.62) was unreachable and scene transport did not exist as its own quantity. */
 const SCENE_PARAMS=[
-  {key:'sceneSpeed', label:'transport speed', min:-3, max:3, step:0.01, def:1},
-  {key:'spin',  label:'spin',  min:0,  max:2,  step:0.01, def:0.4}
+  {key:'sceneSpeed', label:'transport speed', min:-1.5, max:1.5, step:0.01, def:1},
+  {key:'spin',  label:'spin',  min:0,  max:0.8, step:0.01, def:0.4}
 ];
 const AXIS_KEYS_ALL=['axes','spread','angle','gap','stagger','scaleGrad','bend','bendFreq','tilt3d','speed','sceneSpeed'];
 
@@ -2075,16 +2075,16 @@ const MP_STEP={
 const MP_SPEED={key:'speed',label:'speed',min:0,max:3,step:0.01,def:1};
 const MP_PARAMS={
   swarm:[MP_SPEED,{key:'manner',label:'manner',min:0,max:5,step:1,def:0},
-         {key:'reach',label:'reach',min:20,max:300,step:1,def:120},
+         {key:'reach',label:'reach',min:20,max:180,step:1,def:120},
          {key:'swirl',label:'swirl',min:0,max:3,step:0.01,def:1},
          {key:'smooth',label:'smoothing',min:0.5,max:0.99,step:0.01,def:0.9}],
   pack:[MP_SPEED,{key:'spread',label:'spread',min:0.3,max:3,step:0.01,def:1}],
-  magnet:[MP_SPEED,{key:'urge',label:'urge',min:10,max:400,step:1,def:120},
+  magnet:[MP_SPEED,{key:'urge',label:'urge',min:10,max:220,step:1,def:120},
           {key:'floatTime',label:'float time',min:0,max:3,step:0.01,def:1},
           {key:'swirl',label:'swirl',min:0,max:3,step:0.01,def:1}],
   orbit:[MP_SPEED,{key:'spread',label:'spread',min:0.2,max:2,step:0.01,def:1},
          {key:'centerPull',label:'center pull',min:0,max:3,step:0.01,def:1}],
-  fall:[MP_SPEED,{key:'gravity',label:'gravity',min:0,max:1200,step:5,def:420}],
+  fall:[MP_SPEED,{key:'gravity',label:'gravity',min:0,max:700,step:5,def:420}],
   scatter:[MP_SPEED]
 };
 for(const [id,label,desc,drive] of [
@@ -2137,7 +2137,10 @@ for(const [id,label] of PATTERNS)
    пустота, намёк негативным пространством на сам логотип». */
 PRESETS.push(P_('mark','bryk LOGO · Motion Primer:195-230','formation','Mark · logo',
   'Тела собираются В марку, а в режиме frame обходят её и марка читается пустотой',
-  [{key:'scale',label:'scale',min:0.1,max:4,step:0.01,def:1.6},
+  /* 1.6 put the mark at 108% of the frame height — measured, and visible as a crop top
+     and bottom. 1.15 leaves it reading whole with air around it, which is what a mark
+     wants; the slider still goes to 4 for anyone who wants it bleeding. */
+  [{key:'scale',label:'scale',min:0.1,max:4,step:0.01,def:1.15},
    {key:'jitter',label:'jitter',min:0,max:0.12,step:0.002,def:0.02},
    {key:'fit',label:'fit to grid',min:0,max:1,step:0.01,def:1},
    {key:'mode',label:'fill / frame',min:0,max:1,step:1,def:0}],
