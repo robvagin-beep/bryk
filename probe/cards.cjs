@@ -170,6 +170,43 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
           ', around base ' + base);
     }
 
+    /* ── MACRO: three knobs that each move a handful of things ─────────────────
+       The bar is «at least five parameters», because a macro that moves one is a slider
+       with a grander name. It is also the one control allowed to overrule a card by hand,
+       so what it must NOT do is keep overruling: it writes while it is moved and then
+       stops, or every card slider it covers becomes mysteriously dead. */
+    B.layers().slice().forEach(L => B.removeLayer(L.id));
+    const M1 = B.addLayer('pat-cloud'); await sleep(300);
+    /* no rack rows for this one: a seeded row restores its base at the foot of every
+       frame, so «did the macro write» and «did the drive put it back» would be the same
+       measurement. The seam between hand and rack has its own check above. */
+    M1.matrix.length = 0; B.bases().clear();
+    const snapAll = () => { const o = {}; for (const p of B.paramsOf(M1)) o[p.key] = p.get(); return o; };
+    for (const macro of ['energy', 'density', 'chaos']) {
+      const lo = (B.applyMacro(macro, 0.05, true), await sleep(250), snapAll());
+      const hi = (B.applyMacro(macro, 0.95, true), await sleep(250), snapAll());
+      const moved = Object.keys(lo).filter(k => Math.abs((lo[k] || 0) - (hi[k] || 0)) > 1e-6);
+      put(macro + ' moves at least five things', moved.length >= 5,
+          moved.length + ': ' + moved.join(' '));
+    }
+    /* it writes when moved, and then it is quiet */
+    B.applyMacro('energy', 0.5, true); await sleep(200);
+    const held = B.paramsOf(M1).find(p => p.key === 'size');
+    held.set(77); await sleep(600);
+    put('a macro does not keep re-asserting itself over the hand',
+        Math.abs(held.get() - 77) < 1e-6, 'size held at ' + held.get());
+    /* the pose travels with the scene, the picture is not re-derived from it */
+    B.state.macro.energy = 0.23; B.state.macro.chaos = 0.81;
+    const msnap = B.scene.capture();
+    B.state.macro.energy = 0.5; B.state.macro.chaos = 0.5;
+    B.scene.apply(msnap); await sleep(600);
+    put('a scene recalls where the macro faders sat',
+        Math.abs(B.state.macro.energy - 0.23) < 1e-6 && Math.abs(B.state.macro.chaos - 0.81) < 1e-6,
+        'energy ' + B.state.macro.energy + ' · chaos ' + B.state.macro.chaos);
+    put('a scene from before the macros existed loads at neutral',
+        (B.scene.apply({ v:1, layers:[{prog:'grid'}] }), await sleep(400),
+         B.state.macro.energy === 0.5), 'energy ' + B.state.macro.energy);
+
     /* ── per-layer marks: the whole point of moving them off the pool ────────── */
     B.layers().slice().forEach(L => B.removeLayer(L.id));
     const A = B.addLayer('grid'), C = B.addLayer('pulsing-circle');
