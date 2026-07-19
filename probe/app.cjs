@@ -669,12 +669,58 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
       const r = Math.round(own / q) * q;
       return Math.abs(r / q - Math.round(r / q));
     }).filter(d => d > 1e-9).length;
-    return { fps, offGrid, n: B.bodiesOf(L).length };
+    /* longest link the settings can produce, measured on screen through the projector */
+    L.look.linkMax = 5; L.look.linkDist = 0.45; await sleep(600);
+    const cs = B.canvasSize(), R = L.look.linkDist;
+    const bs = B.bodiesOf(L);
+    let longest = 0;
+    for (let i = 0; i < bs.length; i++) for (let j = i + 1; j < bs.length; j++) {
+      const a = bs[i], b2 = bs[j];
+      const d = Math.hypot(b2.x - a.x, b2.y - a.y, b2.z - a.z);
+      if (d > R) continue;                                  /* the engine would not link it */
+      const pa = B.project(a), pb = B.project(b2);
+      longest = Math.max(longest, Math.hypot(pb.x - pa.x, pb.y - pa.y));
+    }
+    return { fps, offGrid, n: bs.length, longest, cap: cs.w * 0.2 };
   });
   ok('angle snap lands every body on the grid', looks.offGrid === 0,
      looks.offGrid + ' of 200 off a quarter-turn');
   ok('the web stays affordable at 600 bodies', looks.fps >= 45,
      looks.fps + ' fps with link 0.9 · reach 0.5');
+  /* The web turned the frame into a mat of orange once, and twice over: no cap on how
+     many neighbours a body links to, and a reach test done in the PLANE while the camera
+     rotates depth into the screen — so two bodies touching in x/y but four units apart in
+     z drew as a line across the whole canvas. Both are bounded now, and this asserts the
+     visible consequence rather than the two causes: at the most the sliders allow, no
+     link may cross more than a fifth of the frame. */
+  ok('no link crosses the frame', looks.longest <= looks.cap,
+     'longest ' + Math.round(looks.longest) + 'px, cap ' + Math.round(looks.cap));
+
+  /* ── the view is reachable by hand AND by the beat ────────────────────────────
+     Rob, 2026-07-19: «ты удалил панель ракурсов камеры, даже когда присваиваю в мэппинге
+     его нет». The panel had only moved out of sight, and the drive was working the whole
+     time — a driven parameter is restored to its base at the foot of every frame, so the
+     slider reads 0 while the scene turns, which is indistinguishable from broken. The
+     symptom is what gets gated: with the base at zero and a rack row on `cam.spin`, the
+     scene must turn; with no row, it must not. */
+  const view = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const B = window.__bryk;
+    const onLeft = !!document.querySelector('#panel [data-mnt="spin"]');
+    const offered = B.paramsOf().map(x => x.key).filter(k => k.startsWith('cam.'));
+    B.state.cam.spin = 0; await sleep(600);
+    const a = B.state.cam.yaw; await sleep(1500);
+    const idle = Math.abs(B.state.cam.yaw - a);
+    B.layers()[0].matrix.push(
+      { feat: 'env.bassSlow', path: 'cam.spin', mode: 'up', depth: 0.6, curve: 'lin' });
+    const c = B.state.cam.yaw; await sleep(2000);
+    const driven = Math.abs(B.state.cam.yaw - c);
+    return { onLeft, offered, idle, driven };
+  });
+  ok('the view lives in the left rail', view.onLeft);
+  ok('every view axis is offered to the rack', view.offered.length >= 5, view.offered.join(' '));
+  ok('a rack row on auto spin turns the scene', view.idle < 0.01 && view.driven > 0.1,
+     'idle ' + view.idle.toFixed(3) + ' → driven ' + view.driven.toFixed(3) + ' rad');
 
   /* the engine section runs for minutes after the boot snapshot; an exception thrown in
      it used to be printed by nobody and counted by nobody */

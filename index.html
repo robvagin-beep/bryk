@@ -375,6 +375,20 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
       <div id="focusBody"></div>
     </fieldset>
 
+    <!-- SPACE — how we look at the scene. It sat in the right column and Rob could not
+         find it there («ты удалил панель ракурсов камеры»): buried under Sound and Camera,
+         two sections about signal coming IN, while this is a decision about the picture.
+         It is a main setting, so it lives with the other main settings, on the left. The
+         keys stay in GLOBAL_PARAMS, so the rack on the right can still drive every one of
+         them — «слева как основная настройка, справа чтобы можно было мэппинг присваивать». -->
+    <fieldset id="gSpace"><legend>Space · view</legend>
+      <div class="row"><label title="0 = flat orthographic, up = depth opens out">Perspective</label><span data-mnt="persp"></span></div>
+      <div class="row"><label>Zoom</label><span data-mnt="zoom"></span></div>
+      <div class="row"><label>Tilt</label><span data-mnt="tilt"></span></div>
+      <div class="row"><label title="Degrees per second the whole scene turns. Drivable from the rack as cam.spin">Auto spin</label><span data-mnt="spin"></span></div>
+      <p class="note">Drag the stage to orbit, wheel to zoom, double-click to reset.</p>
+    </fieldset>
+
     <fieldset id="gPool"><legend>Assets</legend>
       <!-- Only what CANNOT be per-layer lives here. A body either exists or it does not,
            so Count is one number for the stage; the dropped files are one shared library
@@ -527,13 +541,6 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
       <div class="row"><label title="Bodies are pushed out of the mark, so streams part around it">Logo as void</label><span data-mnt="logoAvoid"></span></div>
     </fieldset>
 
-    <fieldset id="gSpace"><legend>Space</legend>
-      <div class="row"><label title="0 = flat orthographic, up = depth opens out">Perspective</label><span data-mnt="persp"></span></div>
-      <div class="row"><label>Zoom</label><span data-mnt="zoom"></span></div>
-      <div class="row"><label>Tilt</label><span data-mnt="tilt"></span></div>
-      <div class="row"><label>Auto spin</label><span data-mnt="spin"></span></div>
-      <p class="note">Drag the stage to orbit, wheel to zoom, double-click to reset.</p>
-    </fieldset>
 
     <fieldset id="gMoves"><legend>Moves</legend>
       <div class="seg wrap">
@@ -4167,7 +4174,7 @@ function renderFocus(){
     seg.append(rr,ad); host.appendChild(seg); }
 
   const all=paramsOf(L), byKey=k=>all.find(x=>x.key===k);
-  rows(['size','varSize','angles','links','linkDist','streak','smear','radius','stroke'].map(byKey).filter(Boolean));
+  rows(['size','varSize','angles','links','linkDist','linkMax','streak','smear','radius','stroke'].map(byKey).filter(Boolean));
 
   cap('field');
   rows([{key:'count',label:'density · bodies',min:20,max:900,step:1,
@@ -4288,30 +4295,51 @@ let DRIVEN_WATCH=false; const DRIVEN_LOG={};
    run over the whole stack. Alpha falls off with distance, so the web thins out toward
    the reach instead of ending on a hard circle. */
 function paintLinks(L,draws,life){
-  const R=L.look.linkDist==null?0.34:L.look.linkDist, amt=L.look.links||0;
+  const R=L.look.linkDist==null?0.22:L.look.linkDist, amt=L.look.links||0;
+  const K=Math.max(1,Math.round(L.look.linkMax==null?2:L.look.linkMax));
   if(!(R>0)||draws.length<2)return;
   const c=Math.max(0.02,R), r2=R*R;
   const G=new Map();
+  /* Math.floor, not |0: truncation folds −0.9…0 and 0…0.9 into the same bucket, making
+     the cell over the origin twice as wide as every other one. */
+  const cell3=(x,y,z)=>Math.floor(x/c)+','+Math.floor(y/c)+','+Math.floor(z/c);
   for(let i=0;i<draws.length;i++){ const b=draws[i].b;
-    const k=cellKey(b.x,b.y,c); let a=G.get(k); if(!a){ a=[]; G.set(k,a); } a.push(i); }
+    const k=cell3(b.x,b.y,b.z); let a=G.get(k); if(!a){ a=[]; G.set(k,a); } a.push(i); }
   ctx.save();
   ctx.lineWidth=1;
   ctx.strokeStyle=RAMP[(RAMP.length*0.62)|0]||'#888';
-  /* one path for the whole web: a stroke() per line would be hundreds of state changes */
   const seen=new Set();
-  for(const [key,cell] of G){
-    const [cx,cy]=key.split(',').map(Number);
-    for(let dx=0;dx<=1;dx++) for(let dy=(dx?-1:0);dy<=1;dy++){
-      const other=G.get((cx+dx)+','+(cy+dy)); if(!other)continue;
-      for(const ia of cell) for(const ib of other){
-        if(ia>=ib)continue;
-        const pair=ia*draws.length+ib; if(seen.has(pair))continue; seen.add(pair);
-        const A=draws[ia], B2=draws[ib];
-        const ddx=B2.b.x-A.b.x, ddy=B2.b.y-A.b.y, d2=ddx*ddx+ddy*ddy;
+  /* K NEAREST, not «everything within R». Each body gathers its candidates from the nine
+     cells around it, keeps the closest K, and draws only those — so the stroke count is
+     bounded by K·N however dense the crowd gets. The far pairs a radius test would have
+     drawn are exactly the ones that turn a constellation into a mat. */
+  for(let ia=0; ia<draws.length; ia++){
+    const A=draws[ia], ax=A.b.x, ay=A.b.y, az=A.b.z;
+    const cx=Math.floor(ax/c), cy=Math.floor(ay/c), cz=Math.floor(az/c);
+    const near=[];
+    for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++) for(let dz=-1;dz<=1;dz++){
+      const bucket=G.get((cx+dx)+','+(cy+dy)+','+(cz+dz)); if(!bucket)continue;
+      for(const ib of bucket){ if(ib===ia)continue;
+        /* THREE dimensions. Filtering in the plane let two bodies sitting on top of each
+           other in x/y but four units apart in z count as touching — and since the camera
+           rotates z into the screen, that pair drew as a line straight across the frame.
+           Those diagonals were the last of the mat. */
+        const ddx=draws[ib].b.x-ax, ddy=draws[ib].b.y-ay, ddz=draws[ib].b.z-az;
+        const d2=ddx*ddx+ddy*ddy+ddz*ddz;
         if(d2>r2)continue;
-        ctx.globalAlpha=amt*(1-Math.sqrt(d2)/R)*life*0.75;
-        ctx.beginPath(); ctx.moveTo(A.P.x,A.P.y); ctx.lineTo(B2.P.x,B2.P.y); ctx.stroke();
+        near.push({ib,d2});
       }
+    }
+    if(!near.length)continue;
+    near.sort((u,v)=>u.d2-v.d2);
+    for(let n=0;n<Math.min(K,near.length);n++){
+      const ib=near[n].ib;
+      /* one line per pair, whichever end asked for it first */
+      const pair=ia<ib ? ia*draws.length+ib : ib*draws.length+ia;
+      if(seen.has(pair))continue; seen.add(pair);
+      const B2=draws[ib];
+      ctx.globalAlpha=amt*(1-Math.sqrt(near[n].d2)/R)*life*0.75;
+      ctx.beginPath(); ctx.moveTo(A.P.x,A.P.y); ctx.lineTo(B2.P.x,B2.P.y); ctx.stroke();
     }
   }
   ctx.restore();
