@@ -672,24 +672,19 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
       const r = Math.round(own / q) * q;
       return Math.abs(r / q - Math.round(r / q));
     }).filter(d => d > 1e-9).length;
-    /* longest link the settings can produce, measured on screen through the projector */
+    /* The longest link ACTUALLY PAINTED, at the most the sliders allow.
+       This used to re-implement the neighbour search here — walk every pair, filter by
+       reach, project, take the max — which is a second copy of a rule that lives in
+       paintLinks, and the moment the two disagreed the copy grew a `continue` that
+       skipped anything over 0.18 of the frame before measuring. That silenced the gate
+       instead of the defect: with long pairs discarded before the max, «nothing exceeds
+       a fifth of the frame» could not fail however far the engine drew.
+       Now the renderer reports the longest stroke it put on the glass and the gate reads
+       it. One implementation, and the number is about pixels a human would see. */
     L.look.linkMax = 5; L.look.linkDist = 0.45; await sleep(600);
-    const cs = B.canvasSize(), R = L.look.linkDist;
-    const bs = B.bodiesOf(L);
-    let longest = 0;
-    for (let i = 0; i < bs.length; i++) for (let j = i + 1; j < bs.length; j++) {
-      const a = bs[i], b2 = bs[j];
-      const d = Math.hypot(b2.x - a.x, b2.y - a.y, b2.z - a.z);
-      if (d > R) continue;                                  /* the engine would not link it */
-      const pa = B.project(a), pb = B.project(b2);
-      const len = Math.hypot(pb.x - pa.x, pb.y - pa.y);
-      /* the engine refuses to draw beyond its own screen bound, so the gate measures the
-         same population the renderer would — otherwise it fails on pairs that exist in
-         space and are never drawn */
-      if (len > cs.w * 0.18) continue;
-      longest = Math.max(longest, len);
-    }
-    return { fps, offGrid, n: bs.length, longest, cap: cs.w * 0.2 };
+    B.linkReset(); await sleep(500);            /* several frames at the worst setting */
+    const rep = B.linkReport();
+    return { fps, offGrid, n: B.bodiesOf(L).length, longest: rep.longest, cap: rep.cap };
   });
   ok('angle snap lands every body on the grid', looks.offGrid === 0,
      looks.offGrid + ' of 200 off a quarter-turn');

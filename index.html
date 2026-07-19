@@ -4464,7 +4464,7 @@ let DRIVEN_WATCH=false; const DRIVEN_LOG={};
 /* A fifth of the short side of the stage. The number is the gate's, deliberately: the
    claim «no link crosses the frame» and the constant that enforces it must be the same
    one, or the gate is asking the engine for its own constant again (A4.4). */
-let LINK_PX_CAP=178;
+let LINK_PX_CAP=178, LINK_LONGEST=0;
 function paintLinks(L,draws,life){
   LINK_PX_CAP=W*0.2;
   const R=L.look.linkDist==null?0.22:L.look.linkDist, amt=L.look.links||0;
@@ -4519,6 +4519,11 @@ function paintLinks(L,draws,life){
          Faded, not cut: a hard skip would pop links in and out as the scene spins. */
       const sdx=B2.P.x-A.P.x, sdy=B2.P.y-A.P.y, slen=Math.hypot(sdx,sdy);
       if(slen>=LINK_PX_CAP) continue;
+      /* the longest line this frame actually PUT ON THE GLASS. The gate used to re-derive
+         the neighbour search in its own code and then compare its answer to a cap, which
+         is two implementations of one rule and an invitation to quietly relax whichever
+         one is red. It reads this instead: the renderer reports what it drew. */
+      if(slen>LINK_LONGEST) LINK_LONGEST=slen;
       const near1=1-Math.max(0,(slen-LINK_PX_CAP*0.8)/(LINK_PX_CAP*0.2));
       ctx.globalAlpha=amt*(1-Math.sqrt(near[n].d2)/R)*life*0.75*near1;
       ctx.beginPath(); ctx.moveTo(A.P.x,A.P.y); ctx.lineTo(B2.P.x,B2.P.y); ctx.stroke();
@@ -5038,6 +5043,9 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
   /* the gate sweeps behaviour keys by integrating them; it must feed `step` exactly what
      the frame loop feeds it, or it measures a different engine than the one that runs */
   behaviourParams, seedBody:mpSeedBody,
+  /* what the renderer drew, so the gate does not have to guess it */
+  linkReport:()=>({ longest:LINK_LONGEST, cap:LINK_PX_CAP }),
+  linkReset:()=>{ LINK_LONGEST=0; },
   /* `fit` retunes calibre rather than position, so a probe that samples target points
      cannot see it. This is the quantity it actually moves. */
   contactRadius,
