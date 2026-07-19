@@ -1881,7 +1881,20 @@ function patternPoint(p,pattern,t,o){
     return {x:Math.cos(a)*rad, y:(p.y*.72+Math.sin(ph+ring)*.34)*spread, z:Math.sin(a)*rad}; }
   if(pattern==='ribbon'){ const u=idx/n, a=u*TAU*2.2+t*dance*.75;
     return {x:(u-.5)*2.8*spread, y:Math.sin(a+p.phase*.3)*.62*spread, z:Math.cos(a*1.25)*.72*spread}; }
-  if(pattern==='burst'){ const pulse=.45+.55*(0.5+0.5*Math.sin(ph*1.2));
+  /* ── ЯДРО фокус-версии · Pulse burst (аудит A8.4 · Н4) ──────────────────────
+     Глубина пульса (.45/.55) и его скорость (ph*1.2) были ЗАШИТЫ константами,
+     а `amplitude` и `frequency` пресет объявлял и не читал — гейт «двигает ли
+     ползунок картинку» показал у обоих дельту на уровне шума (0.030 и 0.014
+     против пола 0.026). То есть у подачи, названной «пульсом», нельзя было
+     задать ни насколько глубоко она дышит, ни как быстро.
+     Две константы становятся этими двумя параметрами. Дефолты подобраны так,
+     что amp=1 и freq=1 дают ПОБУКВЕННО прежнюю формулу — картинка на старте
+     не меняется, появляется только управление.
+       amp 0 → радиус стоит  ·  amp 1 → канон  ·  amp >1 → глубже вдох
+     `twist` и `lanes` остаются нечитаемыми осознанно: скручивание и дорожки —
+     не про взрыв, они и с карточки отфильтрованы (patReads). */
+  if(pattern==='burst'){ const d=.55*amp;
+    const pulse=(1-d)+d*(0.5+0.5*Math.sin(ph*1.2*freq));
     const rad=(0.32+pulse*1.22)*spread;
     return {x:p.x*rad+Math.sin(ph+p.band)*.1, y:p.y*rad+Math.cos(ph*.8)*.1, z:p.z*rad}; }
   /* cloud — the default */
@@ -2402,12 +2415,25 @@ for(const [id,label,desc,drive] of [
    places heard about. So the table is DERIVED — move the key, sample the branch, keep it
    only if the picture moved. A new pattern gets a correct card for free, and a key that
    stops being read disappears from the panel by itself. */
+/* 🔴 Зонд врал на целом классе подач (аудит A8.4 · Н4, 2026-07-19).
+   Он кормил формулу телом `{id,phase,seed}` — без x/y/z/band. Ветки, которые
+   держат тело за координаты (burst, cloud, vortex, ribbon, lattice), читали
+   `p.x === undefined`, отдавали NaN, а `"NaN" === "NaN"` — строки РАВНЫ.
+   Вывод зонда «параметр не читается» был неотличим от «формула развалилась»,
+   и карточка ядра показывала два ползунка не потому, что остальные мёртвые,
+   а потому что детектор ослеп. Ровно тот случай, когда свой гейт ничего не
+   доказывает: он был зелёным всё это время.
+   Теперь тела настоящие — те же, что в бою (`baseParticle`), — а NaN больше
+   не может пройти тихо: он валит сборку с именем ветки. */
 const patReads=(id,key)=>{
   const base={spread:1,dance:1,count:24,amplitude:1,frequency:1,twist:1,lanes:7,formShape:'cube'};
   const alt={amplitude:2.4,frequency:2.2,twist:-2.1,lanes:19,spread:2.3,dance:1.7};
+  const BODIES=Array.from({length:10},(_,i)=>baseParticle(i,i*13+7));
   const sample=o=>{ let s='';
-    for(const t of [0.4,1.9]) for(let i=0;i<10;i++)
-      { const q=patternPoint({id:i,phase:i*0.37,seed:i*13},id,t,{...o,count:10});
+    for(const t of [0.4,1.9]) for(const p of BODIES)
+      { const q=patternPoint(p,id,t,{...o,count:BODIES.length});
+        if(!Number.isFinite(q.x)||!Number.isFinite(q.y)||!Number.isFinite(q.z))
+          throw new Error('patternPoint.'+id+' вернул не-число — зонд слеп, карточка будет пустой');
         s+=q.x.toFixed(5)+','+q.y.toFixed(5)+','+q.z.toFixed(5)+';'; }
     return s; };
   return sample(base)!==sample({...base,[key]:alt[key]});
@@ -2473,7 +2499,59 @@ PRESETS.push(P_('word','bryk · Motion Primer:195-230','formation','Word · form
     return { x:p[0]*P.scale+Math.sin(t*2+i)*P.jitter,
              y:p[1]*P.scale+Math.cos(t*2.2+i)*P.jitter, z:0 }; }, 'jitter'));
 
-const PROGRAMS={}; for(const P of PRESETS) PROGRAMS[P.id]=P;
+/* ══════════════════════════════════════════════════════════════════════════
+   ФОКУС-ВЕРСИЯ · диета пресетов (мастер-план A8.2 · Н2)
+   Rob: «функций больше, чем нужно… одна главная подача, минимум пресетов,
+   лёгкий интерфейс».
+
+   Тридцать пресетов делали шелф каталогом, а не инструментом: чтобы дойти до
+   подачи, ради которой всё строилось, нужно было прочитать пять категорий.
+   Здесь остаётся ОДНО ядро и шесть второстепенных — и они намеренно НЕ
+   равноправны: ядро живёт в своей категории и открыто по умолчанию,
+   остальные лежат ниже, за один клик.
+
+   Ничего не удалено насовсем. Движки (patternPoint, LAYOUTS, MP_STEP,
+   axisTarget) стоят на месте и работают — вырезана только РЕГИСТРАЦИЯ,
+   то есть панель. Полный арсенал: ветка и тег `full-v1`.
+   Вернуть любой пресет = дописать его id в FOCUS_KEEP.
+   ══════════════════════════════════════════════════════════════════════════ */
+const FOCUS_CORE='pat-burst';
+/* порядок здесь = порядок в шелфе: ядро первым */
+const FOCUS_KEEP=[
+  FOCUS_CORE,                                     /* ядро — Pulse burst      */
+  'pulsing-circle','vortex','spring','helix',     /* второстепенные · формы  */
+  'mark','word'                                   /* второстепенные · знак   */
+];
+/* полный арсенал остаётся достижимым из консоли и из проб: __bryk.presetsAll */
+const PRESETS_ALL=PRESETS.slice();
+{ /* PRESETS — const, поэтому правим на месте, а не переприсваиваем */
+  const byId=new Map(PRESETS_ALL.map(P=>[P.id,P]));
+  const kept=FOCUS_KEEP.map(id=>byId.get(id)).filter(Boolean);
+  const missing=FOCUS_KEEP.filter(id=>!byId.has(id));
+  if(missing.length) console.warn('[focus] пресет из allowlist не найден:',missing.join(', '));
+  PRESETS.length=0; for(const P of kept) PRESETS.push(P);
+  /* ядро — своя категория: оно не один из семи, оно ТА САМАЯ подача */
+  byId.get(FOCUS_CORE) && (byId.get(FOCUS_CORE).group='core');
+
+  /* DNA-ретюн (A8.2, дословно: «скейл крупнее, частицы заметно мельче»).
+     Спираль на дефолтном калибре читалась как жгут: тела 40px на радиусе в
+     треть кадра смыкаются, и двух прядей не видно. Крупнее шаг, мельче тело —
+     и спираль снова читается спиралью. `lookSeed` — общий механизм (makeLayer),
+     не ветка под helix: любой пресет вправе родиться со своим калибром. */
+  const helix=byId.get('helix');
+  if(helix) helix.lookSeed={ scale:1.55, size:16, varSize:0.45 };
+}
+
+/* ── ПОЛКА и СЛОВАРЬ — разные вещи (A8.2 · Н2) ─────────────────────────────────
+   `PRESETS` — что можно ВЫБРАТЬ: короткий список фокус-версии, из него строится
+   шелф. `PROGRAMS` — что движок УМЕЕТ: весь арсенал целиком.
+   Диета обязана убрать выбор, а не способность. Ни один потребитель PROGRAMS не
+   строит UI (makeLayer, рендер-луп, paramsOf, загрузка сцены) — все они отвечают
+   на вопрос «как считать этот слой», и слой может прийти из сохранённой сцены,
+   собранной ещё на полной версии. Схлопни PROGRAMS до полки — и такая сцена
+   молча потеряет слои, а гейты перестанут проверять живой код вместо того,
+   чтобы проверять его через другую дверь. */
+const PROGRAMS={}; for(const P of PRESETS_ALL) PROGRAMS[P.id]=P;
 
 /* ══════════════════════════════════════════════════════════════════════════
    LOGO — the mark itself, used two ways (both asked for):
@@ -2667,7 +2745,13 @@ const DEF_LOOK=()=>{ const o={}; for(const d of LOOK_PARAMS) o[d.key]=d.def; ret
 const lookOf=b=>(b&&b.L&&b.L.look)||state;
 
 function makeLayer(prog,variant){
-  const P=PROGRAMS[prog]; const params={};
+  const P=PROGRAMS[prog];
+  /* Промах по id — штатный случай (сохранённая сцена с чужим пресетом, опечатка
+     в пробе), а не «этого не бывает». Молчаливый TypeError строкой ниже говорил
+     `undefined.params` и не называл ни виновника, ни причину. */
+  if(!P) throw new Error('нет такого пресета: "'+prog+'". Словарь движка: '+
+    Object.keys(PROGRAMS).join(', '));
+  const params={};
   for(const d of P.params) params[d.key]=d.def;
   /* applyStylePreset, shuffler :342 — the preset's own start values over the defaults.
      This is what makes sine-wave and zigzag distinct presets of one engine rather than
@@ -2713,6 +2797,8 @@ function makeLayer(prog,variant){
      is a mat of overlapping shapes. A behaviour is read as a CROWD, so the individual is
      smaller and the spread is what carries. */
   if(P.group==='behaviour'){ look.size=22; look.varSize=0.55; }
+  /* и калибр, объявленный самим пресетом, — поверх группового (A8.2 · DNA-ретюн) */
+  if(P.lookSeed) Object.assign(look, P.lookSeed);
   return { id:++uid, prog, shapes:DEF_SHAPES(), look,
     /* Rob, 2026-07-18: «сделай просто слои и прозрачность ему». The shared pool is gone.
        It was the reason a knob felt dead: with one pool every layer's target was averaged
@@ -4435,8 +4521,12 @@ refreshCams(); camNoteText();
    placeholder so the same preset can be added twice running.
    Native <optgroup> is deliberate: the OS draws it, so it is keyboard- and
    screen-reader-correct for free and cannot drift from the panel canon. */
-const GROUPS=[['axis','axis · lanes'],['layout','layouts'],['particles','particles'],
-              ['behaviour','behaviours'],['formation','formation']];
+/* Фокус-версия (A8.2): три категории вместо пяти, и первая из них — не
+   категория, а ядро. `axis`, `particles` и `behaviour` остаются в таблице
+   пустыми: renderShelf пропускает группу без members (:4472), так что вернуть
+   семью = вернуть её id в FOCUS_KEEP, трогать шелф не нужно. */
+const GROUPS=[['core','pulse burst · ядро'],['layout','shapes'],['formation','letters & marks'],
+              ['axis','axis · lanes'],['particles','particles'],['behaviour','behaviours']];
 /* ── the shelf: one plate per category ──────────────────────────────────────────
    Rob, 2026-07-19: «панели add layer невозможно выбрать, они все просто одинаковые.
    Нужно дать вариатив типа плашек и чтобы в этих плашках были категории — большие
@@ -4445,7 +4535,8 @@ const GROUPS=[['axis','axis · lanes'],['layout','layouts'],['particles','partic
    height, the same weight, no way to tell a lane engine from a swarm without reading
    every line. A plate per category names the KIND of thing first — you pick the family
    with your eye and the member with one more click, which is how a shelf is read. */
-const GROUP_HINT={ axis:'lanes across the frame', layout:'a shape the field takes',
+const GROUP_HINT={ core:'the main delivery — a pulse that breathes with the beat',
+  axis:'lanes across the frame', layout:'a shape the field takes',
   particles:'a swarm with a pattern', behaviour:'a way of moving', formation:'letters and marks' };
 /* ── the shelf: a menu, not five boxes ──────────────────────────────────────────
    Rob, 2026-07-19: «пусть они будут панелями-кнопками без кнопки add, вот этой вот drop
@@ -4463,7 +4554,7 @@ const GROUP_HINT={ axis:'lanes across the frame', layout:'a shape the field take
    whole vocabulary of a family visible at once, and adding a layer is one click on a name
    rather than open-scroll-select-close. The chip row keeps the counts, because «17
    particles» is the thing that tells you where the variety lives. */
-let SHELF_CAT=GROUPS[0][0];
+let SHELF_CAT='core';   /* ядро открыто по умолчанию — фокус-версия (A8.2) */
 function renderShelf(){
   const bar=$('#addLayerBar'); if(!bar)return;
   bar.innerHTML='';
@@ -5996,6 +6087,8 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
     for(let i=3;i<d.length;i+=4) if(d[i]>24) n++;
     return n; },
   programs:()=>PROGRAMS, addLayer, duplicateLayer, focusLayer,
+  /* фокус-версия: что осталось на полке и что лежит в арсенале (A8.2 · Н2) */
+  focusCore:FOCUS_CORE, focusKeep:FOCUS_KEEP.slice(), presetsAll:()=>PRESETS_ALL,
   /* the debug path removes NOW. A probe asking «take this layer off the stack» is asking
      about state, not about choreography — leaving it fading for 0.6s would silently
      contaminate whatever it measures next. The panel's ✕ still animates. */

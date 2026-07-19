@@ -11,7 +11,32 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
     const put=(n,c,e)=>out.push([n,!!c,e==null?'':String(e)]);
     const bank=B.programs(), ids=Object.keys(bank);
 
+    /* Словарь движка — весь арсенал. Диета (A8.2) укоротила ПОЛКУ, а не движок,
+       поэтому это по-прежнему про перенос банков, и по-прежнему >=30. */
     put('the shelf carries the ported banks, not nine near-copies', ids.length>=30, ids.length+' presets');
+
+    /* ── ФОКУС-ВЕРСИЯ · диета (A8.2 · Н2) ───────────────────────────────────────
+       Всё выше меряет словарь движка, и после диеты он не изменился — значит ни
+       одна из тех проверок не заметит, если полка завтра снова распухнет до 39.
+       Эти четыре меряют ровно то, что было сделано: что предлагается ВЫБРАТЬ. */
+    const shelfIds = B.focusKeep;
+    const offered = [...document.querySelectorAll('.plate')];
+    put('фокус-полка предлагает ровно семь подач', shelfIds.length === 7, shelfIds.join(', '));
+    put('ядро — Pulse burst, и оно в своей категории',
+        B.focusCore === 'pat-burst' && bank['pat-burst'].group === 'core',
+        'group=' + bank['pat-burst'].group);
+    put('вырезанные семьи не предлагаются на полке',
+        !shelfIds.some(id => ['flow','waterfall','sine-wave','zigzag','grid','float','radial',
+                              'carousel','card-deck','flip-book','swarm','pack','magnet','orbit',
+                              'fall','scatter'].includes(id)),
+        shelfIds.join(', '));
+    put('но движок их не потерял — сцена с ними ещё загрузится',
+        ['flow','grid','swarm','pat-cloud'].every(id => !!bank[id]));
+    put('ядро открыто первым, без единого клика',
+        offered.length === 3 && offered[0].classList.contains('on') &&
+        offered[0].querySelector('.shelfItem') &&
+        /Pulse burst/i.test(offered[0].querySelector('.shelfItem').textContent),
+        offered.length + ' категории');
     /* The old pattern accepted `z:0`. Pattern-matching was the wrong contract anyway: what
        must hold is that a preset cites one of OUR files, because the whole point of the
        field is to make «I wrote something similar» impossible to pass off as a port. */

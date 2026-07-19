@@ -133,7 +133,10 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
        card's dropdown; it is now one preset per pattern, so «reachable» means «has its own
        button», which is Rob's rule that any preset choice IS a new layer. */
     const bank = B.programs();
-    const patIds = Object.keys(bank).filter(k => bank[k].group === 'particles');
+    /* Фокус-версия (A8.2) вынесла ядро в собственную категорию `core`, чтобы оно не
+       читалось как один из семнадцати. Достижимость от этого не изменилась — изменилась
+       полка, — поэтому паттерном считается и то, что лежит в `core`. */
+    const patIds = Object.keys(bank).filter(k => bank[k].group === 'particles' || bank[k].group === 'core');
     /* was `patIds.length === B.patterns().length` where patIds is derived FROM the bank —
        the assertion compared a number with itself. Check the names actually line up. */
     const bankNames = new Set(B.patterns().map(([id]) => id));
