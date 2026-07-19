@@ -237,6 +237,14 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
 .plateHint{font-size:var(--fz-s);color:var(--muted);margin:2px 0 var(--sp-1)}
 .lrow .lblend{flex:none;max-width:92px}
 
+.more{margin-top:var(--sp-2);border-top:1px solid var(--line);padding-top:var(--sp-1)}
+.more>summary{cursor:pointer;list-style:none;font-family:var(--grotesk);
+  font-size:var(--fz-s);color:var(--muted);letter-spacing:.06em;padding:4px 0}
+.more>summary::-webkit-details-marker{display:none}
+.more>summary::before{content:'▸ ';display:inline-block}
+.more[open]>summary::before{content:'▾ '}
+.more>summary:hover{color:var(--ink)}
+
 /* ═══ layer stack — EQJ .lrow grammar ═══ */
 #addLayerBar{margin-bottom:var(--sp-2)}
 #addLayerBar select{width:100%}
@@ -2313,32 +2321,32 @@ const LOOK_PARAMS=[
   {key:'size',    label:'size · one body',min:4,  max:48,  step:0.5,  def:16},
   {key:'scale',   label:'scale · frame',  min:0.2,max:2,   step:0.01, def:1},
   {key:'spacing', label:'spacing · air',  min:0.3,max:2.5, step:0.01, def:1},
-  {key:'varSize', label:'size range',     min:0,  max:1,   step:0.01, def:0.7},
+  {key:'varSize', label:'size range',     min:0,  max:1,   step:0.01, def:0.7, hard:1},
   {key:'radius',  label:'picture radius', min:0,  max:50,  step:1,    def:14},
-  {key:'stroke',  label:'outline only',   min:0,  max:1,   step:1,    def:0},
+  {key:'stroke',  label:'outline only',   min:0,  max:1,   step:1,    def:0,  hard:1},
   {key:'face',    label:'face heading',   min:0,  max:1,   step:0.01, def:0},
-  {key:'varTilt', label:'tilt variation', min:0,  max:1,   step:0.01, def:1},
+  {key:'varTilt', label:'tilt variation', min:0,  max:1,   step:0.01, def:1,  hard:1},
   /* 0 = free rotation. 2..24 snaps every body to that many angles around the circle —
      the switch between «debris drifting» and «a composition that agrees with itself». */
-  {key:'angles',  label:'angle snap',     min:0,  max:24,  step:1,    def:0},
+  {key:'angles',  label:'angle snap',     min:0,  max:24,  step:1,    def:0,  hard:1},
   /* ── draw the relationships, not the objects (Reas, Process Compendium) ───────
      A line between two bodies that are close enough. The visible work becomes the
      structure BETWEEN things rather than the things, and a field of a few hundred bodies
      grows fronts and membranes that read like reaction-diffusion — which was the whole
      question about what makes the Karl Sims class of image hypnotic. Costs one pass over
      the spatial hash we already build for collisions. */
-  {key:'links',   label:'link · web',     min:0,  max:1,   step:0.01, def:0},
+  {key:'links',   label:'link · web',     min:0,  max:1,   step:0.01, def:0,  hard:1},
   /* MilkDrop's motion vectors, ported to bodies. A short stroke from where a body WAS to
      where it is turns the field into visible flow — you stop reading positions and start
      reading current. Length is a multiple of the frame's own travel, so it costs nothing
      to compute: the previous position is already on the body. */
-  {key:'streak',  label:'streak · flow',  min:0,  max:8,   step:0.05, def:0},
+  {key:'streak',  label:'streak · flow',  min:0,  max:8,   step:0.05, def:0,  hard:1},
   /* Sub-frame blur: N stamps along the travel at 1/N alpha, shutter 0.5 (the 180° rule).
      Fast bodies stop reading as a stutter of stamps. Cost is linear in N, so it is a
      small integer and it is off by default. */
-  {key:'smear',   label:'motion blur',    min:0,  max:4,   step:1,    def:0},
-  {key:'linkDist',label:'link reach',     min:0.05,max:1.2,step:0.01, def:0.34},
-  {key:'tint',    label:'asset tint',     min:0,  max:1,   step:0.01, def:0.55}
+  {key:'smear',   label:'motion blur',    min:0,  max:4,   step:1,    def:0,  hard:1},
+  {key:'linkDist',label:'link reach',     min:0.05,max:1.2,step:0.01, def:0.34, hard:1},
+  {key:'tint',    label:'asset tint',     min:0,  max:1,   step:0.01, def:0.55, hard:1}
 ];
 const DEF_LOOK=()=>{ const o={}; for(const d of LOOK_PARAMS) o[d.key]=d.def; return o; };
 /* what the body actually wears: its owning layer's look, falling back to the pool's */
@@ -2571,35 +2579,35 @@ const GLOBAL_PARAMS = [
 const PHYS_PARAMS = [
   /* spring to the layout target. k = 1−exp(−dt·follow); at 10 that is 0.15/frame, already
      a hard snap. 20 was indistinguishable from 10 by eye. */
-  { key:'phys.follow',  f:'follow',  label:'follow',      min:0,   max:10,   step:0.05  },
+  { key:'phys.follow',  f:'follow',  label:'follow',      min:0,   max:10,   step:0.05 , hard:1 },
   /* push = overlap · collide · dt · 9. At 1.5 a contact resolves in two frames. */
-  { key:'phys.collide', f:'collide', label:'collide',     min:0,   max:1.5,  step:0.01  },
-  { key:'phys.radius',  f:'radius',  label:'body radius', min:0.02,max:0.4,  step:0.005 },
+  { key:'phys.collide', f:'collide', label:'collide',     min:0,   max:1.5,  step:0.01 , hard:1 },
+  { key:'phys.radius',  f:'radius',  label:'body radius', min:0.02,max:0.4,  step:0.005, hard:1 },
   /* curl amplitude is ~1.3, so swirl 0.25 ≈ 3 u/s — a body drifting across the frame in
      about a second. That is the top of «drift», and drift is what this force is for. */
-  { key:'phys.swirl',   f:'swirl',   label:'swirl',       min:0,   max:0.6,  step:0.005 },
+  { key:'phys.swirl',   f:'swirl',   label:'swirl',       min:0,   max:0.6,  step:0.005, hard:1 },
   /* attract is hyperbolic (6/d), so it runs hot near the centre: 0.5 already out-pulls a
      follow of 3. Negative side is the scatter half of the same knob. */
-  { key:'phys.attract', f:'attract', label:'attract',     min:-1,  max:1,    step:0.01  },
+  { key:'phys.attract', f:'attract', label:'attract',     min:-1,  max:1,    step:0.01 , hard:1 },
   /* gravity · 10 = u/s at the default damping. Measured against the gate: at 0.5 an
      unopposed body falls 4.75 units in 0.9s — one and a half screens, faster than the eye
      tracks. At 0.25 it crosses the frame in about 1.3s, which reads as falling. */
-  { key:'phys.gravity', f:'gravity', label:'gravity',     min:-0.15,max:0.15, step:0.005 },
-  { key:'phys.flock',   f:'flock',   label:'flock',       min:0,   max:1,    step:0.01  },
+  { key:'phys.gravity', f:'gravity', label:'gravity',     min:-0.15,max:0.15, step:0.005, hard:1 },
+  { key:'phys.flock',   f:'flock',   label:'flock',       min:0,   max:1,    step:0.01 , hard:1 },
   /* Field cell size. 0.35 gives a couple of enormous slow lobes across the frame — the
      lava read; 3 gives a fine boiling grain. The old hardcoded 1.3 sat in the middle and
      could not be left. */
-  { key:'phys.flowScale',f:'flowScale',label:'lava scale', min:0.15,max:3,    step:0.01  },
+  { key:'phys.flowScale',f:'flowScale',label:'lava scale', min:0.15,max:3,    step:0.01 , hard:1 },
   /* how fast the field itself churns, integrated so driving it never jumps the pattern */
-  { key:'phys.flowSpeed',f:'flowSpeed',label:'lava speed', min:0,   max:2,    step:0.01  },
+  { key:'phys.flowSpeed',f:'flowSpeed',label:'lava speed', min:0,   max:2,    step:0.01 , hard:1 },
   /* thickness: how quickly a body gives up its velocity. Named for what it is in a lava
      lamp rather than for the exponent it multiplies. */
-  { key:'phys.damp',    f:'damp',    label:'viscosity',   min:0.7, max:0.995,step:0.001 },
+  { key:'phys.damp',    f:'damp',    label:'viscosity',   min:0.7, max:0.995,step:0.001, hard:1 },
   /* ±% spread of the spring rate ACROSS bodies. Measured guidance from the motion
      research: one identical λ on hundreds of bodies reads as a single rigid transform,
      not as a material — 20–30% of spread is what makes a field feel like a substance.
      Seeded per body, so it is a property of the body, not a per-frame jitter. */
-  { key:'phys.vary',    f:'vary',    label:'lag spread',  min:0,   max:0.6,  step:0.01  }
+  { key:'phys.vary',    f:'vary',    label:'lag spread',  min:0,   max:0.6,  step:0.01 , hard:1 }
 ];
 
 const CURVE = { lin:v=>v, exp:v=>v*v, sqrt:v=>Math.sqrt(v),
@@ -3428,9 +3436,81 @@ const CURVES=[['lin','lin'],['exp','exp'],['sqrt','sqrt'],['ease','ease'],['gate
 const RMODES=[['up','up'],['bi','± bi']];
 function mkSel(opts,val,on){
   const s=document.createElement('select'); s.className='tinSelect';
-  for(const [v,l] of opts){ const o=document.createElement('option'); o.value=v; o.textContent=l;
-    if(v===val)o.selected=true; s.appendChild(o); }
+  /* an entry of the form ['--group', 'Label'] opens an optgroup */
+  let host=s;
+  for(const [v,l] of opts){
+    if(String(v).startsWith('--')){ host=document.createElement('optgroup'); host.label=l;
+      s.appendChild(host); continue; }
+    const o=document.createElement('option'); o.value=v; o.textContent=l;
+    if(v===val)o.selected=true; host.appendChild(o); }
   s.addEventListener('change',()=>on(s.value)); return s;
+}
+
+/* ── what a mapping can DO, said in the language of the room ─────────────────────
+   Rob, 2026-07-19: «у присвоения вариантов маппинга уйма тупейших присвоений, которые
+   ничего не делают… нам не нужны какие-то тупейшие назначения, непонятно как называются.
+   Разжуй это нормально».
+   The picker was `paramsOf()` dumped flat: thirty engine field names in declaration order,
+   `body radius` next to `viscosity` next to `lanes`, with nothing saying which of them a
+   kick should be wired to. This is the same list, grouped by the RESULT and named for it —
+   PULSE, DANCE, CROWD, SWIRL, LOOK, VIEW — with the dead-ends left out. What a VJ wants
+   from an equaliser is «пульсировала · танцевала · обходила друг друга · имела вихри»,
+   so those are the headings.
+   Targets whose range makes them useless under modulation (integer counts, mode switches)
+   are deliberately absent: driving `lanes` or `outline only` from the bass only ever
+   flickered. That is what «ничего не делают» was. */
+const MAP_GROUPS=[
+  ['PULSE · size and presence', [
+    ['size',      'body size — the kick made visible'],
+    ['w',         'layer presence — fades the whole layer in and out'],
+    ['scale',     'composition size — the field breathes as a whole'],
+    ['varSize',   'size spread — dominants grow, the swarm stays small']]],
+  ['DANCE · the pattern itself', [
+    ['dance',     'dance speed — how fast the figure evolves'],
+    ['amplitude', 'dance reach — how far it throws them'],
+    ['twist',     'twist of the figure'],
+    ['spread',    'how wide the figure sits in the frame'],
+    ['frequency', 'detail of the figure']]],
+  ['SWIRL · drift and vortices', [
+    ['phys.swirl',    'lava drift — the vortex field'],
+    ['phys.flowSpeed','how fast the vortices churn'],
+    ['phys.flowScale','size of the vortices'],
+    ['cam.spin',      'the whole scene turns']]],
+  ['CROWD · how they treat each other', [
+    ['phys.collide', 'push apart — they make room'],
+    ['phys.flock',   'school together — they move as one'],
+    ['phys.attract', 'gather to the centre'],
+    ['phys.follow',  'hold formation — snap or lag'],
+    ['spacing',      'air between them']]],
+  ['LOOK', [
+    ['links',    'web between neighbours'],
+    ['streak',   'motion streaks'],
+    ['satDrift', 'colour shimmer'],
+    ['phys.gravity','fall']]],
+  ['VIEW', [
+    ['cam.persp','depth opens out'],
+    ['cam.zoom', 'zoom'],
+    ['cam.tilt', 'tilt'],
+    ['cam.yaw',  'turn']]]
+];
+/* Build the picker from the groups, keeping only what THIS layer actually has — a
+   pattern preset has no `lanes`, a formation has no `twist`, and offering a target the
+   layer cannot answer is exactly the «ничего не делает» complaint. */
+function mapOptions(L){
+  const have=new Set(paramsOf(L).map(p=>p.key));
+  const out=[]; let n=0;
+  for(const [title,items] of MAP_GROUPS){
+    const live=items.filter(([k])=>have.has(k));
+    if(!live.length)continue;
+    out.push(['--g'+(n++), title]);
+    for(const [k,label] of live) out.push([k,label]);
+  }
+  /* anything the layer declares that no group claims — the preset's own oddities */
+  const claimed=new Set(MAP_GROUPS.flatMap(([,it])=>it.map(([k])=>k)));
+  const rest=paramsOf(L).filter(p=>!claimed.has(p.key));
+  if(rest.length){ out.push(['--gz','this preset']);
+    for(const p of rest) out.push([p.key,p.label]); }
+  return out;
 }
 function buildMatrix(){
   const host=$('#rack'); if(!host)return;
@@ -3442,8 +3522,10 @@ function buildMatrix(){
     const card=document.createElement('div'); card.className='mcard open';
     const hd=document.createElement('div'); hd.className='mhd';
     hd.appendChild(mkSel(FEATURES,r.feat,v=>{ r.feat=v; }));
-    hd.appendChild(mkSel(paramsOf(activeLayer()).map(p=>[p.key,p.label]),r.path,v=>{
-      BASES.delete(r.path); r.path=v; }));
+    hd.appendChild(mkSel(mapOptions(activeLayer()),r.path,v=>{
+      /* the base is keyed layer::path, so deleting by path alone never matched and the
+         old target kept a stale base behind it */
+      BASES.delete(activeLayer().id+'::'+r.path); r.path=v; }));
     const del=document.createElement('button'); del.className='mtgl x'; del.textContent='✕';
     del.title='Remove row';
     del.addEventListener('click',()=>{ matrix.splice(i,1); BASES.clear(); buildMatrix(); });
@@ -4151,10 +4233,29 @@ function renderFocus(){
     const row=document.createElement('div'); row.className='row';
     const lb=document.createElement('label'); lb.textContent=p.label; lb.title=p.label;
     const sl=document.createElement('span'); row.append(lb,sl); host.appendChild(row);
-    const s2=mkScrub({min:p.min,max:p.max,step:p.step,value:p.get(),allowExtend:true,
+    /* `hard` means the range IS the domain: a negative number of snap angles, a negative
+       streak length, a lava cell forty times the frame — Rob dragged all three past their
+       maxima because allowExtend was on everything, and the picture stopped making sense.
+       Extending belongs where a bigger number still means something (size, crowd), not
+       everywhere. */
+    const s2=mkScrub({min:p.min,max:p.max,step:p.step,value:p.get(),allowExtend:!p.hard,
       k:p.descKey||p.key, label:L.label+' '+p.label, onInput:v=>p.set(v)});
     sl.appendChild(s2.el);
   } };
+
+  /* ── what stays in sight, and what folds away ────────────────────────────────
+     Rob, 2026-07-19: «жёсткое тупое количество настроек, размноженное в миллиард
+     ползунков, которые непонятно что делают». Twenty-eight rows in one flat scroll,
+     because every research finding arrived as another slider and nothing was ever folded
+     back. A performance panel is not an inventory of what the engine can do.
+     What stays: the four words (density · scale · spacing · size) and the four forces you
+     actually reach for mid-set. Everything else is preparation — set once, then forget —
+     and lives one click away. The rows are identical either way; only the fold moves. */
+  const PRIMARY_LOOK=['size','varSize'];
+  const PRIMARY_MOTION=['phys.swirl','phys.collide','phys.attract','phys.follow'];
+  const rest=[];
+  const restCap=t=>rest.push({cap:t});
+  const restRows=list=>{ for(const p of list) if(p) rest.push(p); };
 
   cap('shapes');
   { const row=document.createElement('div'); row.className='row';
@@ -4174,7 +4275,7 @@ function renderFocus(){
     seg.append(rr,ad); host.appendChild(seg); }
 
   const all=paramsOf(L), byKey=k=>all.find(x=>x.key===k);
-  rows(['size','varSize','angles','links','linkDist','linkMax','streak','smear','radius','stroke'].map(byKey).filter(Boolean));
+  rows(PRIMARY_LOOK.map(byKey).filter(Boolean));
 
   cap('field');
   rows([{key:'count',label:'density · bodies',min:20,max:900,step:1,
@@ -4194,12 +4295,43 @@ function renderFocus(){
      and 3D interaction stay in the model (scenes carry them, the rack can drive them) —
      they are calibration, not performance, and they were four more rows of noise. */
   cap('motion');
-  rows(MOTION_ROWS.map(m=>{ const p=byKey(m.key); return p&&{...p,label:m.label}; }).filter(Boolean));
+  rows(MOTION_ROWS.filter(m=>PRIMARY_MOTION.includes(m.key))
+    .map(m=>{ const p=byKey(m.key); return p&&{...p,label:m.label}; }).filter(Boolean));
 
   if(P.params.length){ cap('pattern');
     rows(P.params.filter(d=>!P.keys||P.keys.includes(d.key))
       .map(x=>({...x, descKey:L.prog+'.'+x.key,
         get:()=>L.params[x.key], set:v=>L.params[x.key]=v}))); }
+
+  /* ── the fold ── */
+  restCap('marks');
+  restRows(['angles','radius','stroke','varTilt','tint'].map(byKey));
+  restCap('web · flow');
+  restRows(['links','linkDist','linkMax','streak','smear'].map(byKey));
+  restCap('lava · detail');
+  restRows(MOTION_ROWS.filter(m=>!PRIMARY_MOTION.includes(m.key))
+    .map(m=>{ const p=byKey(m.key); return p&&{...p,label:m.label}; }));
+  if(rest.length){
+    const det=document.createElement('details'); det.className='more';
+    det.open=!!L._moreOpen;
+    det.addEventListener('toggle',()=>{ L._moreOpen=det.open; });
+    const sum=document.createElement('summary');
+    sum.textContent='more · '+rest.filter(x=>!x.cap).length+' settings';
+    det.appendChild(sum);
+    const box=document.createElement('div');
+    for(const item of rest){
+      if(item.cap){ const h=document.createElement('div'); h.className='lcap';
+        h.textContent=item.cap; box.appendChild(h); continue; }
+      const row=document.createElement('div'); row.className='row';
+      const lb=document.createElement('label'); lb.textContent=item.label; lb.title=item.label;
+      const sl=document.createElement('span'); row.append(lb,sl); box.appendChild(row);
+      const s3=mkScrub({min:item.min,max:item.max,step:item.step,value:item.get(),
+        allowExtend:!item.hard, k:item.descKey||item.key,
+        label:L.label+' '+item.label, onInput:v=>item.set(v)});
+      sl.appendChild(s3.el);
+    }
+    det.appendChild(box); host.appendChild(det);
+  }
 
   const exId=PROG_EXTRAS[L.prog];
   if(exId){ const ex=document.getElementById(exId); if(ex) host.appendChild(ex); }
