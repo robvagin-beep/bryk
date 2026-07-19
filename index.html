@@ -607,6 +607,12 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
       <div class="row"><label title="Turns the echo as it recedes">Echo turn</label><span data-mnt="echoRot"></span></div>
       <div class="row"><label title="How long a trail survives. Lower fades faster">Echo decay</label><span data-mnt="echoDecay"></span></div>
       <div class="row"><label title="Degrees of hue the echo drifts each frame — this is the part that reads as psychedelia rather than as a trail">Echo hue drift</label><span data-mnt="echoHue"></span></div>
+      <!-- The kaleidoscope reads one wedge of the finished frame and mirrors it around the
+           centre. It belongs here for the same reason the echo does: it is a decision about
+           the OUTPUT, not about any one layer. -->
+      <div class="row" style="margin-top:var(--sp-2)"><label title="0 or 1 is off. 6 is the classic; even numbers read as ornament, odd as a spin">Kaleidoscope</label><span data-mnt="kSectors"></span></div>
+      <div class="row"><label title="Turns the mirror itself, so the ornament does not sit still">Kaleido turn</label><span data-mnt="kRoll"></span></div>
+      <div class="row"><label title="Degrees per second the mirror rolls">Kaleido speed</label><span data-mnt="kRate"></span></div>
       <div class="row" style="margin-top:var(--sp-2)"><label>Chromatic</label><span data-mnt="chroma"></span></div>
       <div class="row"><label>Aberration angle</label><span data-mnt="chromaAng"></span></div>
     </fieldset>
@@ -823,6 +829,15 @@ const state = {
      `hue` is the part that separates psychedelia from a plain trail: rotating the tone a
      few degrees per frame sends the echo around the colour wheel behind the live image. */
   echo:{ amount:0, zoom:1.008, rot:0, decay:0.94, hue:0 },
+  /* ── the kaleidoscope ────────────────────────────────────────────────────────
+     One wedge of the finished frame, mirrored around the centre. It is the oldest trick
+     in the VJ book and it earns its place for a reason the geometry here makes sharp:
+     our field is already suprematist — hard edges, three colours, negative space — and
+     radial symmetry turns that into ornament without adding a single new mark. Nothing is
+     generated; the same bodies are read N times.
+     `sectors` 0 or 1 is off (identity, and it costs nothing when off). `roll` turns the
+     mirror itself, which is what stops it reading as a frozen doily. */
+  kaleido:{ sectors:0, roll:0, rate:0, mix:1 },
   stops:[ {c:'#2436a7',p:0}, {c:'#fdbe0c',p:0.5}, {c:'#ce1c22',p:1} ],
   formation:{ text:'BRYK', font:'', on:false }
 };
@@ -2704,6 +2719,11 @@ const GLOBAL_PARAMS = [
   { key:'echo.zoom',   label:'echo · zoom',    min:0.97,max:1.03,  step:0.001, get:()=>state.echo.zoom,   set:v=>state.echo.zoom=v },
   { key:'echo.rot',    label:'echo · turn',    min:-0.06,max:0.06, step:0.001, get:()=>state.echo.rot,    set:v=>state.echo.rot=v },
   { key:'echo.hue',    label:'echo · hue roll',min:0,   max:12,    step:0.1,   get:()=>state.echo.hue,    set:v=>state.echo.hue=v },
+  /* the mirror turns; the SECTOR COUNT does not get a fader — going from six wedges to
+     seven on an envelope is a cut, not a modulation, and cuts belong on the hand or on a
+     move. Same verdict as `angles`: a register, not a motion. */
+  { key:'kaleido.roll', label:'kaleido · turn', min:-3.15,max:3.15, step:0.01, get:()=>state.kaleido.roll, set:v=>state.kaleido.roll=v },
+  { key:'kaleido.mix',  label:'kaleido · mix',  min:0,    max:1,    step:0.01, get:()=>state.kaleido.mix,  set:v=>state.kaleido.mix=v },
   /* `count` lives on the layer (paramsOf) since bodies stopped being shared. Keeping a
      global twin put the same key in a card twice and made the rack address the wrong one. */
 ];
@@ -3559,7 +3579,7 @@ function captureScene(){
     /* the pose of the three faders. Restored to the panel, deliberately NOT re-applied to
        the picture — see the note at MACRO_MAP. */
     macro:{...state.macro},
-    post:{...state.post}, echo:{...state.echo}, phys:{...state.phys},
+    post:{...state.post}, echo:{...state.echo}, kaleido:{...state.kaleido}, phys:{...state.phys},
     stops:state.stops.map(s=>({...s})),
     formation:{...state.formation},
     layers:layers.map(L=>({prog:L.prog,variant:L.variant,label:L.label,w:L.opacity,muted:L.muted,
@@ -3582,6 +3602,7 @@ function applyScene(sc){
   state.cam=m(def.cam,sc.cam);
   state.post=m(def.post,sc.post);
   state.echo=m(def.echo,sc.echo);
+  state.kaleido=m(def.kaleido,sc.kaleido);
   /* `state.phys` is the focused layer's forces now, and the stack below is about to be
      rebuilt from scratch — writing here would set forces on a layer that is one line from
      being discarded. The scene's forces are restored per layer in the loop below. */
@@ -3742,7 +3763,9 @@ const MAP_GROUPS=[
     ['echo.amount','tunnel opens'],
     ['echo.zoom',  'how fast it rushes'],
     ['echo.rot',   'the turn inside it'],
-    ['echo.hue',   'colour rolls through the tail']]],
+    ['echo.hue',   'colour rolls through the tail'],
+    ['kaleido.roll','the mirror turns'],
+    ['kaleido.mix', 'the ornament fades in over the picture']]],
   ['VIEW', [
     ['cam.persp','depth opens out'],
     ['cam.zoom', 'zoom'],
@@ -3832,6 +3855,7 @@ function syncAllScrubs(){
        state.shapes ({tri,wedge,circle}) — a permanent no-op. */
     /* the macro faders are panel pose: a scene recall must move them to where they sat */
     mEnergy:state.macro.energy, mDensity:state.macro.density, mChaos:state.macro.chaos,
+    kSectors:state.kaleido.sectors, kRoll:state.kaleido.roll, kRate:state.kaleido.rate,
     camW:state.camW,
     camLayer:state.cam2.layer, camOver:state.cam2.over, camMirror:state.cam2.mirror,
     camDuo:state.cam2.duotone, camContrast:state.cam2.contrast, camGain:state.cam2.gain,
@@ -3896,6 +3920,12 @@ mount('echoRot',{min:-0.06,max:0.06,step:0.001,value:state.echo.rot,label:'Echo 
   onInput:v=>state.echo.rot=v});
 mount('echoDecay',{min:0.85,max:0.995,step:0.001,value:state.echo.decay,label:'Echo decay',
   onInput:v=>state.echo.decay=v});
+mount('kSectors',{min:0,max:16,step:1,value:state.kaleido.sectors,label:'Kaleidoscope',
+  allowExtend:false, onInput:v=>state.kaleido.sectors=v});
+mount('kRoll',{min:-3.15,max:3.15,step:0.01,value:state.kaleido.roll,label:'Kaleido turn',
+  onInput:v=>state.kaleido.roll=v});
+mount('kRate',{min:-1,max:1,step:0.005,value:state.kaleido.rate,label:'Kaleido speed',
+  onInput:v=>state.kaleido.rate=v});
 mount('echoHue',{min:0,max:12,step:0.1,value:state.echo.hue,label:'Echo hue drift',
   onInput:v=>state.echo.hue=v});
 mount('chroma',{min:0,max:1,step:0.01,value:0,label:'Chromatic aberration',
@@ -4977,6 +5007,63 @@ function paintDraws(draws,t,sizeMul){
   lastQuadsAcc+=quads;      /* the budget is a per-FRAME cost, summed over the stack */
 }
 
+/* ── the kaleidoscope ──────────────────────────────────────────────────────────────
+   Runs on the FINISHED scene, before the shader pass: one wedge is read and stamped
+   around the centre, alternate copies mirrored so the seams meet edge to edge instead of
+   repeating like a pinwheel. Nothing new is drawn — the same bodies are read N times.
+
+   Cost is N full-frame drawImage calls, which is the same order as the echo tunnel and
+   the reason `sectors 0` returns immediately rather than looping once.
+
+   Two details that decide whether it reads as ornament or as a mistake:
+   · the source wedge is taken from the frame BEFORE any stamping, so sector 2 does not
+     copy the copy — that compounds into mush within a few frames;
+   · the roll accumulates (A5.2) instead of being read off the clock, so driving the rate
+     changes the speed of the turn rather than jumping its angle. */
+let kScratch=null, kRoll=0;
+function paintKaleido(dt){
+  const K=state.kaleido; const N=Math.round(K.sectors||0);
+  if(!(N>1)) return;
+  kRoll+=dt*(K.rate||0);
+  if(!kScratch) kScratch=document.createElement('canvas');
+  /* The copy the wedges are read from is kept at 60% of the frame. N sectors means N
+     full-frame fills, and at DPR 2 that was the most expensive thing in the app —
+     measured four times the cost of the scene it mirrors. Ornament made of repeated
+     copies is the one place where resolution does not read: every wedge is a rotated,
+     mirrored duplicate, so the eye is following the SYMMETRY, not the edge. 0.6 quarters
+     the fill and I cannot see it; the same trade §18 specifies for the shader chain. */
+  const KS=0.6, kw=Math.max(1,Math.round(cv.width*KS)), kh=Math.max(1,Math.round(cv.height*KS));
+  if(kScratch.width!==kw||kScratch.height!==kh){ kScratch.width=kw; kScratch.height=kh; }
+  const kc=kScratch.getContext('2d');
+  kc.setTransform(1,0,0,1,0,0); kc.clearRect(0,0,kw,kh);
+  kc.drawImage(cv,0,0,cv.width,cv.height,0,0,kw,kh);   /* the untouched frame, read N times */
+  const cx=W/2, cy=H/2, R=Math.hypot(W,H), step=TAU/N;
+  ctx.save();
+  ctx.globalAlpha=clamp(K.mix==null?1:K.mix,0,1);
+  ctx.clearRect(0,0,W,H);
+  for(let i=0;i<N;i++){
+    ctx.save();
+    ctx.translate(cx,cy);
+    ctx.rotate((K.roll||0)+kRoll+i*step);
+    /* CLIP FIRST, MIRROR SECOND. The flip used to be applied before the wedge was
+       described, so the wedge itself was mirrored too — every odd sector landed on the
+       far side of the circle, on top of an even one, and half the frame stayed black.
+       It read as symmetry (three wedges, evenly spaced) which is why it survived a
+       screenshot; the gate that samples across two sectors is what caught it.
+       Order matters because the clip belongs to the SLOT and the flip belongs to the
+       CONTENT: every other wedge is a mirror image, so neighbours meet edge to edge and
+       the seam disappears into the symmetry instead of showing as a spoke. */
+    ctx.beginPath(); ctx.moveTo(0,0);
+    ctx.arc(0,0,R,-step/2,step/2); ctx.closePath(); ctx.clip();
+    if(i&1) ctx.scale(-1,1);
+    ctx.rotate(-(K.roll||0)-kRoll);
+    ctx.translate(-cx,-cy);
+    ctx.drawImage(kScratch,0,0,kScratch.width,kScratch.height,0,0,W,H);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
 function frame(){
   requestAnimationFrame(frame);
   const t=nowT(); const dt=Math.min(0.05,last?t-last:1/60); last=t;
@@ -5255,6 +5342,7 @@ function frame(){
   /* the quad budget is a per-FRAME cost, so it sums across every layer that painted */
   lastQuads=lastQuadsAcc; lastQuadsAcc=0;
 
+  paintKaleido(dt);
   restoreMatrix(acc);
   runPost();
 

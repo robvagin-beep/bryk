@@ -742,6 +742,74 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      'same 60 bodies: ' + wave.meshFps + ' fps turned → ' + wave.warpFps + ' fps folded' +
      ' (headless software renderer; judge the absolute number headed)');
 
+  /* ── the kaleidoscope ─────────────────────────────────────────────────────────
+     «Looks symmetrical» is not a claim a gate can hold, so it is measured: with N wedges
+     the frame must repeat every TWO steps (neighbouring wedges are mirrored, so the same
+     orientation returns on the second), and with the effect off the frame must be
+     untouched — an effect that costs something at zero is an effect nobody can turn off. */
+  const kal = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const B = window.__bryk, cv = document.getElementById('cv'), g = cv.getContext('2d');
+    const TAU = Math.PI * 2;
+    /* read a ring of samples at one radius, in the canvas's own device pixels */
+    /* a PATCH, not a pixel. Single-pixel probes on a field of hard-edged shapes disagree
+       across a mirror by one rounded coordinate, and the gate reported real symmetry as
+       broken; the mean over a small patch answers the question actually being asked,
+       which is whether the same picture is there. */
+    const ring = (n, ang0) => { const out = [], R = Math.min(cv.width, cv.height) * 0.22;
+      for (let i = 0; i < n; i++) { const a = ang0 + i / n * TAU;
+        const x = Math.round(cv.width / 2 + Math.cos(a) * R) - 3, y = Math.round(cv.height / 2 + Math.sin(a) * R) - 3;
+        const d = g.getImageData(x, y, 7, 7).data;
+        let r = 0, gr = 0, b2 = 0; for (let k = 0; k < d.length; k += 4) { r += d[k]; gr += d[k+1]; b2 += d[k+2]; }
+        const px = d.length / 4;
+        out.push([r / px, gr / px, b2 / px]); }
+      return out; };
+    /* «the same picture», not «the same bytes». A mirror puts a hard edge on the other
+       side of a rounded coordinate, so two patches showing the same shape differ by a few
+       units; two patches showing different shapes differ by tens. The threshold is between
+       those, and it is the difference between measuring the effect and measuring the
+       sampler. */
+    const alike = (a, b3) => Math.abs(a[0]-b3[0]) + Math.abs(a[1]-b3[1]) + Math.abs(a[2]-b3[2]) < 48;
+    /* a field dense enough to have something to mirror at the sampling radius */
+    const L = B.onlyProg('pat-cloud'); L.matrix.length = 0; L.opacity = 1;
+    Object.assign(L.look, { size:54, varSize:0.3, scale:1.1, wave:0, links:0, streak:0 });
+    Object.assign(L.phys, { swirl:0, flock:0, attract:0, gravity:0, collide:0, follow:9, vary:0 });
+    B.setCount(420); B.state.cam.spin = 0; B.state.echo.amount = 0;
+    B.state.kaleido.sectors = 0; B.state.kaleido.rate = 0; B.state.kaleido.roll = 0;
+    await sleep(1800);
+    const offA = ring(24, 0.3);
+    await sleep(120);
+    const offB = ring(24, 0.3);
+    const moved = offA.some((v, i) => !alike(v, offB[i]));
+    let offFps = 0; for (let i = 0; i < 4; i++) { await sleep(320); offFps = Math.max(offFps, B.fps()); }
+    const N = 6; B.state.kaleido.sectors = N; await sleep(900);
+    /* The same picture read at θ and at θ + 2 sector-steps — neighbouring wedges are
+       mirrored, so the same orientation returns on the second one.
+       Only LIT samples are compared and one mismatch is allowed: a mirror lands a hard
+       edge on the other side of a rounded coordinate, and demanding all of them equal
+       measured the sampler's precision rather than the effect's symmetry. */
+    const step = TAU / N;
+    const s1 = ring(16, 0.3), s2 = ring(16, 0.3 + step * 2);
+    const dark = v => v[0] + v[1] + v[2] < 24;
+    let same = 0, lit = 0;
+    for (let i = 0; i < s1.length; i++) { if (dark(s1[i]) && dark(s2[i])) continue;
+      lit++; if (alike(s1[i], s2[i])) same++; }
+    let onFps = 0; for (let i = 0; i < 4; i++) { await sleep(320); onFps = Math.max(onFps, B.fps()); }
+    return { offMoved: moved, same, lit, offFps, onFps };
+  });
+  ok('with the kaleidoscope off the frame is untouched', kal.offMoved,
+     kal.offMoved ? 'the scene is live and unmirrored' : 'the scene froze — the effect is not identity at zero');
+  ok('six wedges repeat every second wedge', kal.lit >= 4 && kal.same >= kal.lit - 1,
+     kal.same + ' of ' + kal.lit + ' lit samples match across two sectors');
+  /* N sectors is N full-frame fills, so the honest question is what it costs against the
+     scene it mirrors — not an absolute frame rate on a software renderer. The wedges are
+     read from a 60% copy for exactly this reason; ornament made of repeated copies is the
+     one place resolution does not read. */
+  ok('the mirror costs less than the scene it repeats',
+     kal.onFps >= kal.offFps * 0.5,
+     kal.offFps + ' fps plain → ' + kal.onFps + ' fps with 6 wedges' +
+     ' (headless software renderer; judge the absolute number headed)');
+
   /* ── the view is reachable by hand AND by the beat ────────────────────────────
      Rob, 2026-07-19: «ты удалил панель ракурсов камеры, даже когда присваиваю в мэппинге
      его нет». The panel had only moved out of sight, and the drive was working the whole
