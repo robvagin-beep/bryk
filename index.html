@@ -2293,7 +2293,10 @@ function makeLayer(prog,variant){
   Object.assign(params, P.seed||{});
   /* a preset may also declare the crowd it was designed for */
   if(P.seed && P.seed.count) { /* handled by makeLayer's caller via L.count */ }
-  const seedCount=(P.seed&&P.seed.count)||220;
+  /* Rob, 2026-07-19: «если у нас есть диапазон до 6000 частиц, то количество лейеров на
+     каждый лейер можем давать предположим по 400, по 600». A layer arrives already a
+     field rather than a handful — 220 read as a sketch of one. */
+  const seedCount=(P.seed&&P.seed.count)||420;
   return { id:++uid, prog, shapes:DEF_SHAPES(), look:DEF_LOOK(),
     /* Rob, 2026-07-18: «сделай просто слои и прозрачность ему». The shared pool is gone.
        It was the reason a knob felt dead: with one pool every layer's target was averaged
