@@ -587,6 +587,39 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      ff.nFill > 20 && ff.nFrame > 20 && ff.shared === 0,
      'fill ' + ff.nFill + ' pts · frame ' + ff.nFrame + ' pts · overlapping ' + ff.shared);
 
+  /* ── driving a RATE must not jump the phase ───────────────────────────────────
+     Rob, 2026-07-19: «появляются и сразу дёргаются как мухи». Every animated preset read
+     its phase as `t · rate` with `t` the seconds since load, so modulating the rate threw
+     the phase sideways by Δrate·t — an error that GROWS the longer the app is open. The
+     test moves `dance` the way the mod rack does and measures how far bodies travel in
+     the frame after the change, against how far they travel in a quiet frame. A rate
+     change may accelerate them; it must not teleport them. */
+  const smooth = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const B = window.__bryk;
+    B.layers().slice().forEach(L => B.removeLayer(L.id));
+    const L = B.addLayer('pat-burst');
+    Object.assign(L.phys, { on: 1, follow: 6, damp: 0.9, collide: 0, swirl: 0,
+      gravity: 0, attract: 0, flock: 0 });
+    B.setCount(200);
+    /* let the clock run up: the old bug is invisible at t≈0 and vicious at t≈60 */
+    await sleep(9000);
+    const pos = () => B.bodiesOf(L).map(b => ({ x: b.x, y: b.y }));
+    const step = (a, b2) => { let m = 0;
+      for (let i = 0; i < a.length; i++) m = Math.max(m, Math.hypot(b2[i].x - a[i].x, b2[i].y - a[i].y));
+      return m; };
+    const a0 = pos(); await new Promise(r => requestAnimationFrame(r));
+    const quiet = step(a0, pos());
+    const a1 = pos();
+    L.params.dance = (L.params.dance || 0.72) + 0.25;   /* what a rack row does every frame */
+    await new Promise(r => requestAnimationFrame(r));
+    const jolt = step(a1, pos());
+    return { quiet, jolt, ratio: jolt / Math.max(1e-6, quiet) };
+  });
+  ok('driving a rate accelerates, never teleports', smooth.ratio < 6,
+     'quiet frame ' + smooth.quiet.toFixed(4) + ' → after a rate change ' +
+     smooth.jolt.toFixed(4) + ' (×' + smooth.ratio.toFixed(1) + ')');
+
   /* the engine section runs for minutes after the boot snapshot; an exception thrown in
      it used to be printed by nobody and counted by nobody */
   ok('console clean through the whole run', errors.length === bootErrs,

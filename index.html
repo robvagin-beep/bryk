@@ -783,7 +783,11 @@ const state = {
      follow 2.2 — softer than 3.4: arrives without snapping
      damp 0.93  — a touch more inertia, so movement carries instead of stopping dead */
 const DEF_PHYS=()=>({ on:1, dim3:0, follow:2.2, collide:0.5, radius:0.13,
-                      swirl:0, gravity:0, attract:0, flock:0, damp:0.93 });
+                      swirl:0, gravity:0, attract:0, flock:0, damp:0.93,
+                      /* the lava controls (Rob, 2026-07-19: «добавь настройки вот этого
+                         lava flow»). The drift had exactly one texture because the field's
+                         cell size and its rate of change were both welded into curlAt. */
+                      flowScale:0.5, flowSpeed:0.5, vary:0.25 });
 const physFallback=DEF_PHYS();
 Object.defineProperty(state,'phys',{
   enumerable:true, configurable:true,
@@ -1513,7 +1517,10 @@ function axisPoint(p,t,o){
   return { x:(ax.x*u*1.48+orbit.x)*s, y:(ax.y*u*1.06+orbit.y)*s, z:(ax.z*u*1.48+orbit.z)*s }; }
 function patternPoint(p,pattern,t,o){
   const spread=o.spread==null?1:o.spread, dance=o.dance==null?1:o.dance, idx=p.id, n=Math.max(1,o.count||1);
-  const ph=p.phase+t*dance;
+  /* `t*dance` made a rate change JUMP the phase by Δrate·t — the twitch Rob saw. The
+     caller integrates the rate and hands the phase in; `t*dance` survives only for the
+     probe paths that call this bare. */
+  const ph=p.phase+(o.tDance!=null?o.tDance:t*dance);
   const amp=o.amplitude==null?1:o.amplitude, freq=o.frequency==null?1:o.frequency;
   const twist=o.twist==null?1:o.twist, lanes=Math.max(2,Math.round(o.lanes||7));
   if(pattern==='wave'){ const u=idx/Math.max(1,n-1), x=(u-.5)*3.1;
@@ -1669,7 +1676,9 @@ function axisTarget(i,N,t,P,ctx){
   const step=Math.max(bodyW*0.55,
                       fill*(P.gap==null?1:P.gap))*(ctx.spacing||1);
   const loop=Math.max(perLane*step, 2*reach+2*step);    // wrap seam lives off-screen
-  const off=t*(P.speed==null?1:P.speed)*0.5;
+  /* accumulated, not t·speed: driving the transport must change how fast the lane moves,
+     never where it currently is */
+  const off=(ctx.clock?ctx.clock.speed:t*(P.speed==null?1:P.speed))*0.5;
   /* CASCADE. Each lane starts at its own phase, so neighbouring lanes are offset in time
      instead of marching in a rank — this is what makes a fall read as a cascade and a
      grid read as a wave. Waterfall used to be a whole separate function whose only real
@@ -1776,42 +1785,42 @@ const AXIS_KEYS_ALL=['axes','spread','angle','gap','stagger','scaleGrad','bend',
    nothing at all, silently. */
 const LAYOUTS={
   'pulsing-circle':(i,N,t,P,C)=>{
-    const a=i/Math.max(1,N)*TAU + t*0.18*P.sceneSpeed*(0.4+P.spin);
+    const a=i/Math.max(1,N)*TAU + (C.clock?C.clock.scene:t)*0.18*(0.4+P.spin);
     const rad=0.7+0.18*Math.sin(t*1.2);
     return {x:Math.cos(a)*rad*1.1*C.vx/1.9, y:Math.sin(a)*rad*C.vy/1.09, z:0, scale:1};
   },
   'float':(i,N,t,P,C)=>{
     const r1=C.rnd(i), r2=C.rnd(i+911), r3=C.rnd(i+53);
-    const x=(r1*2-1)*C.vx*0.9 + Math.sin(t*0.3*P.sceneSpeed + r1*10)*0.12;
-    const y=(r2*2-1)*C.vy*0.9 + Math.cos(t*0.27*P.sceneSpeed + r2*10)*0.12;
+    const x=(r1*2-1)*C.vx*0.9 + Math.sin((C.clock?C.clock.scene:t)*0.3 + r1*10)*0.12;
+    const y=(r2*2-1)*C.vy*0.9 + Math.cos((C.clock?C.clock.scene:t)*0.27 + r2*10)*0.12;
     return {x:x,y:y,z:0,scale:lerp(0.85,1.1,r3)};
   },
   'radial':(i,N,t,P,C)=>{
-    const a=i/Math.max(1,N)*TAU + t*0.3*P.sceneSpeed*(0.5+P.spin), R=1.0;
+    const a=i/Math.max(1,N)*TAU + (C.clock?C.clock.scene:t)*0.3*(0.5+P.spin), R=1.0;
     return {x:Math.cos(a)*R*C.vx/1.9, y:0, z:Math.sin(a)*R, scale:1};
   },
   'grid':(i,N,t,P,C)=>{
     const cols=Math.ceil(Math.sqrt(N)), rows=Math.ceil(N/cols);
-    const cyc=Math.floor(t*0.25*P.sceneSpeed), perm=(i+cyc*7)%Math.max(1,N);
+    const cyc=Math.floor((C.clock?C.clock.scene:t)*0.25), perm=(i+cyc*7)%Math.max(1,N);
     const gx=perm%cols, gy=Math.floor(perm/cols);
     const x=(gx-(cols-1)/2)*(C.vx*1.7/Math.max(1,cols));
     const y=(gy-(rows-1)/2)*(C.vy*1.7/Math.max(1,rows));
     return {x:x,y:-y,z:0,scale:0.92};
   },
   'vortex':(i,N,t,P,C)=>{
-    const u=i/Math.max(1,N), a=u*TAU*3 + t*0.5*P.sceneSpeed, rad=(0.14+u*1.05)*C.vy/1.09;
+    const u=i/Math.max(1,N), a=u*TAU*3 + (C.clock?C.clock.scene:t)*0.5, rad=(0.14+u*1.05)*C.vy/1.09;
     return {x:Math.cos(a)*rad, y:Math.sin(a)*rad, z:0, scale:lerp(1.12,0.5,u)};
   },
   'helix':(i,N,t,P,C)=>{
-    const u=i/Math.max(1,N), strand=i%2, a=u*TAU*2.2 + t*0.6*P.sceneSpeed + strand*Math.PI;
+    const u=i/Math.max(1,N), strand=i%2, a=u*TAU*2.2 + (C.clock?C.clock.scene:t)*0.6 + strand*Math.PI;
     return {x:Math.sin(a)*0.55, y:(u*2-1)*1.05*C.vy/1.09, z:Math.cos(a)*0.55, scale:1};
   },
   'spring':(i,N,t,P,C)=>{
-    const u=i/Math.max(1,N), a=u*TAU*4 + t*0.5*P.sceneSpeed;
+    const u=i/Math.max(1,N), a=u*TAU*4 + (C.clock?C.clock.scene:t)*0.5;
     return {x:(u*2-1)*1.5*C.vx/1.9, y:Math.sin(a)*0.5, z:Math.cos(a)*0.5, scale:1};
   },
   'flip-book':(i,N,t,P,C)=>{
-    const u=i/Math.max(1,N), op=t*0.9*P.sceneSpeed + i*0.45;
+    const u=i/Math.max(1,N), op=(C.clock?C.clock.scene:t)*0.9 + i*0.45;
     return {x:0, y:(u*2-1)*0.95*C.vy/1.09, z:0, scale:1.0, op:op};
   },
   'carousel':(i,N,t,P,C)=>{
@@ -1820,7 +1829,7 @@ const LAYOUTS={
     // away in Y and recede in Z, each inner card overlapping the outer one. A card entering from a side
     // starts far out (order very low = UNDER everything) and fades in fast, then rises as it nears the
     // centre and finally overtakes the previous centre card.
-    const N1=Math.max(1,N), front=t*0.14*P.sceneSpeed*N1;
+    const N1=Math.max(1,N), front=(C.clock?C.clock.scene:t)*0.14*N1;
     let d=i-front; d=((d%N1)+N1)%N1; if(d>N1/2) d-=N1;       // d in [-N/2, N/2]; 0 = centre
     /* PARK, capped. The source ran this on a couple of dozen photo frames, so a linear
        outer offset was harmless; at 220 bodies it threw the deck out to |x| 100 and left
@@ -1836,7 +1845,7 @@ const LAYOUTS={
   'card-deck':(i,N,t,P,C)=>{
     // a flip-through stack: centre card on top & protruding, pile recedes with a small offset to one side;
     // entering card comes in behind the pile (low order = under), leaving card slides & fades — recycle unseen.
-    const N1=Math.max(1,N), front=t*0.4*P.sceneSpeed;
+    const N1=Math.max(1,N), front=(C.clock?C.clock.scene:t)*0.4;
     let d=i-front; d=((d%N1)+N1)%N1; if(d>N1/2) d-=N1;       // d in [-N/2, N/2]; 0 = current top
     const ax=Math.abs(d), sgn=d<0?-1:1;
     const x  = sgn*(0.05*Math.min(ax,5));
@@ -2091,6 +2100,9 @@ for(const [id,label] of PATTERNS)
     (id==='form' ? PAT_PARAMS.concat(FORM_PARAM) : PAT_PARAMS).map(x=>x.key), {},
     (i,N,t,P,ctx)=>{ const b=pool[i]; if(!b||!b.pd)return {x:0,y:0,z:0};
       const q=patternPoint(b.pd, id, t, {...P, spread:1, count:N, seed:ctx.seed,
+        /* the integrated phase. Without this the fallback path inside patternPoint takes
+           over and the twitch comes straight back — the gate caught exactly that. */
+        tDance:ctx.clock?ctx.clock.dance:null,
         formShape:FORM_KEYS[clamp(Math.round(P.formShape||0),0,FORM_KEYS.length-1)]});
       const kx=ctx.vx/1.5*P.spread, ky=ctx.vy/1.5*P.spread;
       return { x:q.x*kx, y:q.y*ky, z:q.z*Math.min(kx,ky) }; }, 'amplitude'));
@@ -2501,9 +2513,6 @@ const PHYS_PARAMS = [
   /* spring to the layout target. k = 1−exp(−dt·follow); at 10 that is 0.15/frame, already
      a hard snap. 20 was indistinguishable from 10 by eye. */
   { key:'phys.follow',  f:'follow',  label:'follow',      min:0,   max:10,   step:0.05  },
-  /* below ~0.8 motion is dead on arrival; at 1.0 nothing ever stops. The interesting
-     third of the old range was 0.85…0.98. */
-  { key:'phys.damp',    f:'damp',    label:'damping',     min:0.7, max:0.99, step:0.005 },
   /* push = overlap · collide · dt · 9. At 1.5 a contact resolves in two frames. */
   { key:'phys.collide', f:'collide', label:'collide',     min:0,   max:1.5,  step:0.01  },
   { key:'phys.radius',  f:'radius',  label:'body radius', min:0.02,max:0.4,  step:0.005 },
@@ -2517,7 +2526,21 @@ const PHYS_PARAMS = [
      unopposed body falls 4.75 units in 0.9s — one and a half screens, faster than the eye
      tracks. At 0.25 it crosses the frame in about 1.3s, which reads as falling. */
   { key:'phys.gravity', f:'gravity', label:'gravity',     min:-0.15,max:0.15, step:0.005 },
-  { key:'phys.flock',   f:'flock',   label:'flock',       min:0,   max:1,    step:0.01  }
+  { key:'phys.flock',   f:'flock',   label:'flock',       min:0,   max:1,    step:0.01  },
+  /* Field cell size. 0.35 gives a couple of enormous slow lobes across the frame — the
+     lava read; 3 gives a fine boiling grain. The old hardcoded 1.3 sat in the middle and
+     could not be left. */
+  { key:'phys.flowScale',f:'flowScale',label:'lava scale', min:0.15,max:3,    step:0.01  },
+  /* how fast the field itself churns, integrated so driving it never jumps the pattern */
+  { key:'phys.flowSpeed',f:'flowSpeed',label:'lava speed', min:0,   max:2,    step:0.01  },
+  /* thickness: how quickly a body gives up its velocity. Named for what it is in a lava
+     lamp rather than for the exponent it multiplies. */
+  { key:'phys.damp',    f:'damp',    label:'viscosity',   min:0.7, max:0.995,step:0.001 },
+  /* ±% spread of the spring rate ACROSS bodies. Measured guidance from the motion
+     research: one identical λ on hundreds of bodies reads as a single rigid transform,
+     not as a material — 20–30% of spread is what makes a field feel like a substance.
+     Seeded per body, so it is a property of the body, not a per-frame jitter. */
+  { key:'phys.vary',    f:'vary',    label:'lag spread',  min:0,   max:0.6,  step:0.01  }
 ];
 
 const CURVE = { lin:v=>v, exp:v=>v*v, sqrt:v=>Math.sqrt(v),
@@ -2811,10 +2834,15 @@ const VMAX_PER_SEC=6;
 const GRID=new Map();
 function cellKey(x,y,c){ return ((x/c)|0)+','+((y/c)|0); }
 function cellKey3(b,c){ return ((b.x/c)|0)+','+((b.y/c)|0)+','+((b.z/c)|0); }
-function curlAt(x,y,t){
+function curlAt(x,y,t,scale){
   /* ψ = sin(a)·cos(b); curl = (∂ψ/∂y, −∂ψ/∂x) — divergence-free by construction,
-     so bodies swirl instead of piling into sinks */
-  const a=x*1.3+t*0.21, b=y*1.3-t*0.17;
+     so bodies swirl instead of piling into sinks.
+     `scale` is the size of a cell of the field: small values make a few enormous slow
+     lobes (lava), large values a fine boiling grain. It was welded to 1.3, which is why
+     the drift only ever had one texture. `t` arrives already integrated, so driving the
+     field speed cannot jump the pattern sideways. */
+  const S=scale==null?1.3:scale;
+  const a=x*S+t*0.21, b=y*S-t*0.17;
   return { x: -Math.sin(a)*Math.sin(b)*1.3, y: -Math.cos(a)*Math.cos(b)*1.3 };
 }
 /* A body's personal space cannot be larger than the gap it is being asked to stand in.
@@ -2914,7 +2942,7 @@ function stepPhysics(dt,t,f,L){
 
   for(let i=0;i<N;i++){
     const b=bods[i];
-    if(P.swirl>0.001){ const c=curlAt(b.x,b.y,t);
+    if(P.swirl>0.001){ const c=curlAt(b.x,b.y,L.clock?L.clock.flow:t,P.flowScale);
       b.vx+=c.x*P.swirl*dt; b.vy+=c.y*P.swirl*dt; }
     if(P.gravity!==0) b.vy-=P.gravity*dt;
     if(P.attract>0.001){
@@ -4007,12 +4035,16 @@ const BLENDS=[['source-over','normal'],['multiply','multiply'],['screen','screen
    Order is the order you reach for them: drift first (the standby), then how they treat
    each other, then how they organise, then the two that only some scenes want. */
 const MOTION_ROWS=[
-  {key:'phys.swirl',   label:'float · lava'},
-  {key:'phys.collide', label:'avoid each other'},
-  {key:'phys.attract', label:'gather to centre'},
-  {key:'phys.follow',  label:'hold formation'},
-  {key:'phys.flock',   label:'move together'},
-  {key:'phys.gravity', label:'fall'}
+  {key:'phys.swirl',    label:'float · lava'},
+  {key:'phys.flowScale',label:'lava · size of the swirl'},
+  {key:'phys.flowSpeed',label:'lava · how fast it churns'},
+  {key:'phys.damp',     label:'lava · viscosity'},
+  {key:'phys.vary',     label:'lava · lag spread'},
+  {key:'phys.collide',  label:'avoid each other'},
+  {key:'phys.attract',  label:'gather to centre'},
+  {key:'phys.follow',   label:'hold formation'},
+  {key:'phys.flock',    label:'move together'},
+  {key:'phys.gravity',  label:'fall'}
 ];
 const SHAPE_SETS={
   brand:   { tri:1, wedge:1, circle:1, asset:1 },
@@ -4423,6 +4455,21 @@ function frame(){
     /* this layer's forces act on this layer's bodies only, so a behaviour cannot fight
        another layer's behaviour over the same body — there is no shared body any more,
        and since A3.1 there is no shared force set either */
+    /* ── rates are INTEGRATED, never multiplied by the clock ────────────────────
+       Rob, 2026-07-19: «они появляются и сразу просто дёргаются как мухи, нам нужно
+       более плавно». The cause is arithmetic, not taste. Every animated preset read its
+       phase as `t · rate`, with `t` the seconds since the page loaded. Drive that rate
+       from the music and the phase does not speed up — it JUMPS, by `Δrate · t`. A minute
+       in, nudging `dance` by 0.1 throws the phase five radians sideways on a single
+       frame, sixty times a second. That is the twitch, and no amount of smoothing on the
+       envelope could have fixed it: the error grows with how long the app has been open.
+       Accumulating the phase instead makes the modulation change the SPEED, which is what
+       a rate control means. */
+    L.clock=L.clock||{ dance:0, speed:0, scene:0, flow:0 };
+    L.clock.dance += dt*(L.params.dance==null?1:L.params.dance);
+    L.clock.speed += dt*(L.params.speed==null?1:L.params.speed);
+    L.clock.scene += dt*(L.params.sceneSpeed==null?1:L.params.sceneSpeed);
+    L.clock.flow  += dt*(L.phys.flowSpeed==null?1:L.phys.flowSpeed);
     stepPhysics(dt,t,f,L);
     const LP=L.phys, LKL=L.look, LSC=(LKL.scale==null?1:LKL.scale);
 
@@ -4433,7 +4480,7 @@ function frame(){
       const tg=P.target(i,N,t,L.params,{variant:L.variant,seed:L.seed,vx:vxw,vy:vyw,
         /* the layer's own calibre and air, so a layout can space itself against the
            bodies it is actually placing instead of against a frozen global */
-        size:LKL.size, spacing:LKL.spacing,
+        size:LKL.size, spacing:LKL.spacing, clock:L.clock,
         rnd:k=>hash01(k+L.seed)});               /* shuffler C.rnd */
       /* SCALE is universal: it multiplies the target every layout returns, so all 28 of
          them gain «how big is this composition» without one of them knowing about it.
@@ -4443,7 +4490,15 @@ function frame(){
       b.px=b.x; b.py=b.y; b.pz=b.z;
       /* the transport to the target is the layer's own too (A3.2 register «транспорт к
          цели»): a snappy grid and a floating swarm can now live in the same frame */
-      const k=1-Math.exp(-dt*LP.follow);
+      /* every body answers the layout at its OWN rate. `pd.lane` is the body's seeded
+         −1..1 coordinate, so the spread is stable per body rather than a per-frame
+         jitter — a property of the object, the way a heavier shape lags a lighter one. */
+      const vary=LP.vary==null?0:LP.vary;
+      const kRate=LP.follow*(1+vary*((b.pd&&b.pd.lane)||0));
+      /* no floor: `hold formation` at 0 has to mean NO pull, or a layer can never be let
+         go to drift freely — a clamp here made every body creep toward its target and
+         broke the «one layer's forces stay inside that layer» gate */
+      const k=kRate>0?1-Math.exp(-dt*kRate):0;
       if(LP.on && !P.step){
         b.vx+=(tx-b.x)*k; b.vy+=(ty-b.y)*k; b.vz+=(tz-b.z)*k;
         const d2=Math.pow(LP.damp,dt*60);
