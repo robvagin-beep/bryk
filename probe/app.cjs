@@ -711,6 +711,39 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      Math.abs(looks.engineCap - looks.cap) < 1,
      'engine ' + Math.round(looks.engineCap) + 'px vs spec ' + Math.round(looks.cap) + 'px');
 
+  /* ── layer opacity actually fades ─────────────────────────────────────────────
+     Rob: «доработай карточкам прозрачность нормально чтоб работала». It did not: the frame
+     loop set the layer's alpha and every body then overwrote it with its own, so the
+     fader was dead across its whole travel and the layer only vanished at exactly 0. The
+     claim is that the fade is MONOTONIC and roughly proportional — a fader that only works
+     at its ends is not a fader. */
+  const fade = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const B = window.__bryk, cv = document.getElementById('cv'), g = cv.getContext('2d');
+    const L = B.onlyProg('pat-cloud'); L.matrix.length = 0; B.setCount(300);
+    Object.assign(L.look, { size: 50, links: 0, streak: 0 });
+    /* freeze the field: a moving picture makes every reading a different picture */
+    Object.assign(L.phys, { swirl:0, flock:0, attract:0, gravity:0, collide:0, follow:14, vary:0 });
+    L.params.dance = 0; L.params.sceneSpeed = 0; B.state.cam.spin = 0;
+    await sleep(2200);
+    const meanA = () => { const d = g.getImageData(0, 0, cv.width, cv.height).data; let s = 0;
+      for (let i = 3; i < d.length; i += 4) s += d[i]; return s / (d.length / 4); };
+    const out = {};
+    for (const o of [1, 0.75, 0.5, 0.25, 0]) { L.opacity = o; await sleep(380); out[o] = meanA(); }
+    /* and the fader may not extend past 1: above it, globalAlpha clamps and the travel is
+       dead — the cards in Rob's screenshot read 1.22 and 1.58 */
+    const row = document.querySelector('.lrow .lop .scrub');
+    const extendable = row && +row.getAttribute('aria-valuemax') > 1;
+    return { out, extendable };
+  });
+  const lv = [1, 0.75, 0.5, 0.25, 0].map(o => fade.out[o]);
+  ok('layer opacity fades the whole way, not just at zero',
+     lv[0] > lv[1] && lv[1] > lv[2] && lv[2] > lv[3] && lv[3] > lv[4] &&
+     lv[3] < lv[0] * 0.45 && lv[4] === 0,
+     lv.map(v => v.toFixed(1)).join(' → '));
+  ok('opacity cannot be dragged past all of it', !fade.extendable,
+     fade.extendable ? 'aria-valuemax is above 1' : 'clamped at 1');
+
   /* ── the mesh warp (R10.3) ────────────────────────────────────────────────────
      Three things have to hold together or the control is a lie in one of three ways:
      it must reach the mesh path on its own (the path used to open on `face` only, so the
@@ -816,6 +849,11 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     const L = B.onlyProg('pat-cloud'); L.matrix.length = 0; L.opacity = 1;
     Object.assign(L.look, { size:54, varSize:0.3, scale:1.1, wave:0, links:0, streak:0 });
     Object.assign(L.phys, { swirl:0, flock:0, attract:0, gravity:0, collide:0, follow:9, vary:0 });
+    /* SET THE MOTION, do not inherit it. The opacity block above deliberately freezes the
+       field to measure a still picture, and `onlyProg` hands back the same layer — so this
+       check read «the scene froze» and blamed the kaleidoscope for the previous gate's
+       setup. Every block that needs the scene alive has to say so itself. */
+    L.params.dance = 0.8; L.params.sceneSpeed = 0.6;
     B.setCount(420); B.state.cam.spin = 0; B.state.echo.amount = 0;
     B.state.kaleido.sectors = 0; B.state.kaleido.rate = 0; B.state.kaleido.roll = 0;
     await sleep(1800);

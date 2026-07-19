@@ -227,12 +227,25 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
   padding-top:var(--sp-2);box-shadow:inset 0 1px var(--line)}
 .mcard.open .mparams{display:block}
 
-.plate{border:1px solid var(--line);border-radius:var(--r-mid);padding:6px var(--sp-2) var(--sp-2);
-  margin-bottom:6px;background:var(--tint)}
-.plateHead{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-1);
-  margin-bottom:4px}
-.plateHead b{font-family:var(--grotesk);font-size:var(--fz-m);letter-spacing:.02em}
-.plateHead i{font-style:normal;font-size:var(--fz-s);color:var(--muted);
+/* the shelf — two levels: category chips, then the members of the one you picked */
+.shelfCats{display:flex;flex-wrap:wrap;gap:var(--sp-0);margin-bottom:var(--sp-1)}
+.chip{display:flex;align-items:baseline;gap:5px;padding:5px 9px;cursor:pointer;
+  background:var(--tint);border:1px solid transparent;border-radius:var(--r-full);
+  font-family:var(--grotesk);font-size:var(--fz-s);letter-spacing:.02em;color:var(--muted)}
+.chip:hover{color:var(--ink)}
+.chip.on{background:var(--tint-card);border-color:var(--accent-live);color:var(--ink)}
+.chip i{font-style:normal;font-size:var(--fz-s);opacity:.65}
+.chip:focus-visible{outline:2px solid var(--accent-live);outline-offset:2px}
+/* two columns: a preset name is short, and one column wasted half the rail and pushed the
+   layer stack below the fold — the thing the shelf exists to feed */
+.shelfList{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-0)}
+.shelfItem{text-align:left;padding:6px 8px;cursor:pointer;
+  background:var(--tint-card);border:1px solid var(--line);border-radius:var(--r-ctl);
+  font-family:var(--grotesk);font-size:var(--fz-s);color:var(--ink);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shelfItem:hover{border-color:var(--accent-live)}
+.shelfItem:active{transform:scale(.97)}
+.shelfItem:focus-visible{outline:2px solid var(--accent-live);outline-offset:1px}
   font-variant-numeric:tabular-nums}
 .plateHint{font-size:var(--fz-s);color:var(--muted);margin:2px 0 var(--sp-1)}
 .lrow .lblend{flex:none;max-width:92px}
@@ -1534,6 +1547,17 @@ function warpNode(u,v,wp,right,up){
            y:wp.y+ny/nl*d*a - right.y*gather,
            z:wp.z+nz/nl*d*a - right.z*gather };
 }
+/* ── the layer's own alpha ────────────────────────────────────────────────────────
+   The frame loop sets `ctx.globalAlpha = L.opacity` before painting a layer, and every
+   body then SET its own alpha instead of multiplying — `ctx.globalAlpha = alpha` — which
+   threw the layer's away on the first body. Measured: mean canvas alpha 35.34 at opacity
+   1 and 35.29 at 0.25, i.e. the whole travel of the fader did nothing, and then 0 blanked
+   the layer because a separate early-out skips a layer at `opacity <= 0.002`. That is
+   exactly «прозрачность не работает»: dead everywhere except the very end.
+   Multiplying is not enough on its own — `ctx.save()/restore()` around a body would
+   restore the layer alpha, but these paths set it unconditionally on every draw. So the
+   layer alpha is held here and every write that reaches the canvas goes through it. */
+let LAYER_A=1;
 let scratchHi=0;
 function drawQuadWorld(img,C,right,up,alpha,cam,G){
   /* a warped quad needs more nodes than a flat one — at 4 the wave reads as three creases.
@@ -1574,12 +1598,12 @@ function drawQuadWorld(img,C,right,up,alpha,cam,G){
   }
   /* one composite at the end — per-triangle alpha would double-blend on fades
      and the 5×5 grid would show through */
-  ctx.globalAlpha=alpha;
+  ctx.globalAlpha=alpha*LAYER_A;
   ctx.drawImage(scratch,0,0,bw,bh,x0,y0,bw,bh);
   ctx.globalAlpha=1;
 }
 function drawBillboard(img,P,size,rot,alpha){
-  ctx.save(); ctx.globalAlpha=alpha; ctx.translate(P.x,P.y);
+  ctx.save(); ctx.globalAlpha=alpha*LAYER_A; ctx.translate(P.x,P.y);
   if(rot)ctx.rotate(rot);
   ctx.drawImage(img,-size/2,-size/2,size,size); ctx.restore();
 }
@@ -2664,7 +2688,12 @@ function paramsOf(L){
        scene addresses it by name, and because opacity is what presence always MEANT once
        the shared pool is gone: how much of this layer you see. `share` is retired — it
        existed only to stop two layers averaging one body, and there is no shared body. */
-    { key:'w', label:'opacity', min:0, max:1, step:0.01, get:()=>L.opacity, set:v=>L.opacity=v },
+    /* clamped at the setter, not only at the fader: a saved scene, a rack row driven past
+       its base, or a macro can all reach this, and a layer at 1.6 is a layer at 1 wearing a
+       number that lies. Fading such a layer out does nothing for the first third of the
+       travel — which is exactly what «прозрачность не работает» looks like from the hand. */
+    { key:'w', label:'opacity', min:0, max:1, step:0.01, get:()=>L.opacity,
+      set:v=>L.opacity=clamp(v,0,1) },
     /* `count` rebuilds the whole crowd, so on a continuous envelope it is a stutter, not a
        motion — but it IS musical at structural points («the field doubles on the drop»).
        Offered, and offered honestly: the picker says it needs a gate. */
@@ -3727,7 +3756,7 @@ function applyScene(sc){
       const L=makeLayer(ls.prog,ls.variant);
       Object.assign(L,{label:ls.label??L.label,w:ls.w??1,muted:!!ls.muted,solo:!!ls.solo,
         seed:ls.seed??L.seed, count:ls.count??220,
-        opacity:ls.opacity??ls.w??1, blend:ls.blend||'source-over'});
+        opacity:clamp(ls.opacity??ls.w??1,0,1), blend:ls.blend||'source-over'});
       /* migration: before 2026-07-18 the mix was one global `shapes` object plus `assetW`.
          An old scene hands every layer that same mix, which is exactly what it looked
          like when it was saved. New scenes carry their own. */
@@ -4212,33 +4241,54 @@ const GROUPS=[['axis','axis · lanes'],['layout','layouts'],['particles','partic
    with your eye and the member with one more click, which is how a shelf is read. */
 const GROUP_HINT={ axis:'lanes across the frame', layout:'a shape the field takes',
   particles:'a swarm with a pattern', behaviour:'a way of moving', formation:'letters and marks' };
-(function(){ const bar=$('#addLayerBar'); if(!bar)return;
+/* ── the shelf: a menu, not five boxes ──────────────────────────────────────────
+   Rob, 2026-07-19: «пусть они будут панелями-кнопками без кнопки add, вот этой вот drop
+   down… ты выбираешь его, и у тебя потом появляются ещё, как разделы… сейчас она выглядит
+   просто как куча каких-то блоков, очень неудобно и непонятно и путается».
+
+   Five plates, each with a title, a count and its own dropdown, cost five bordered boxes
+   and fifteen lines before the layer stack even started — and every one of them looked the
+   same, so the eye had nothing to land on. Worse, the choice was hidden inside a native
+   select: you could not see what a category CONTAINED without opening it, one category at
+   a time, which is the opposite of a shelf.
+
+   Two levels, the way a menu works. A row of category chips, then the members of the one
+   you picked, laid out as buttons you can read at a glance. One box instead of five, the
+   whole vocabulary of a family visible at once, and adding a layer is one click on a name
+   rather than open-scroll-select-close. The chip row keeps the counts, because «17
+   particles» is the thing that tells you where the variety lives. */
+let SHELF_CAT=GROUPS[0][0];
+function renderShelf(){
+  const bar=$('#addLayerBar'); if(!bar)return;
   bar.innerHTML='';
+  const chips=document.createElement('div'); chips.className='shelfCats';
   for(const [g,gl] of GROUPS){
     const items=PRESETS.filter(P=>P.group===g); if(!items.length)continue;
-    const plate=document.createElement('div'); plate.className='plate';
-    const head=document.createElement('div'); head.className='plateHead';
-    head.innerHTML='<b></b><i></i>';
-    head.querySelector('b').textContent=gl;
-    head.querySelector('i').textContent=items.length;
-    plate.appendChild(head);
-    /* the hint rides in the info dock on hover instead of taking a third line in every
-       plate — five plates × three lines pushed the layer stack below the fold */
-    const sel=document.createElement('select'); sel.className='tinSelect';
-    sel.setAttribute('aria-label','Add a layer from '+gl);
-    const ph=document.createElement('option');
-    ph.value=''; ph.textContent='+ add'; ph.selected=true; sel.appendChild(ph);
-    for(const P of items){ const o=document.createElement('option');
-      o.value=P.id; o.textContent=P.label; o.title=P.desc; sel.appendChild(o); }
-    sel.dataset.desc=gl+' — '+(GROUP_HINT[g]||'');
-    sel.addEventListener('change',()=>{
-      const P=PROGRAMS[sel.value]; sel.value='';       /* back to the placeholder at once */
-      if(!P)return;
-      addLayer(P.id); setStatus('layer added · '+P.label,'ok'); setFoot(P.desc);
-    });
-    plate.appendChild(sel); bar.appendChild(plate);
+    const c=document.createElement('button');
+    c.className='chip'+(g===SHELF_CAT?' on':'');
+    c.type='button';
+    c.innerHTML='<b></b><i></i>';
+    c.querySelector('b').textContent=gl;
+    c.querySelector('i').textContent=items.length;
+    c.dataset.desc=gl+' — '+(GROUP_HINT[g]||'');
+    c.setAttribute('aria-pressed',g===SHELF_CAT?'true':'false');
+    c.addEventListener('click',()=>{ SHELF_CAT=g; renderShelf(); });
+    chips.appendChild(c);
   }
-})();
+  bar.appendChild(chips);
+  const list=document.createElement('div'); list.className='shelfList';
+  for(const P of PRESETS.filter(x=>x.group===SHELF_CAT)){
+    const b=document.createElement('button');
+    b.className='shelfItem'; b.type='button'; b.textContent=P.label;
+    /* the description goes to the info dock, not into a tooltip nobody waits for */
+    b.dataset.desc=P.desc;
+    b.addEventListener('click',()=>{
+      addLayer(P.id); setStatus('layer added · '+P.label,'ok'); setFoot(P.desc); });
+    list.appendChild(b);
+  }
+  bar.appendChild(list);
+}
+renderShelf();
 
 /* Behaviour and Manner are built by renderFocus now — they are whole force sets for the
    FOCUSED layer, so they live with the forces, in the rail, and are rebuilt when the
@@ -4640,14 +4690,21 @@ function renderLayers(){
     }
     d.appendChild(r2);
 
-    const sc=mkScrub({min:0,max:1,step:0.01,value:L.opacity,label:L.label+' opacity',
+    /* OPACITY IS A PROPORTION, so its range is the whole of it. `allowExtend` is computed
+       as «anything that is not a (0,1,1) toggle», which quietly made this extensible: the
+       cards in Rob's screenshot read 1.22 and 1.58, and everything above 1 is the same
+       fully-opaque picture — `globalAlpha` clamps. The fader had a dead third of its travel
+       and no way to know it, which is worse than a short slider. There is no meaningful
+       «more than all of it». */
+    const sc=mkScrub({min:0,max:1,step:0.01,value:clamp(L.opacity,0,1),allowExtend:false,
+      label:L.label+' opacity',
       /* THE SAME SEAM, and this one was missed. Every layer is born with a seeded row on
          `w` (seedRows), so BASES always holds `<id>::w` — which means the presence fader,
          the control a DJ touches more than any other, was the one place where the hand did
          NOT rebase and the drive loop snapped it back inside 16ms. The card's scrubs got
          the write-through; the row's did not, and the comment there claiming to be «the
          only place they touch» was what hid it. */
-      onInput:v=>{ L.opacity=v; if(BASES.has(L.id+'::w')) BASES.set(L.id+'::w',v); }});
+      onInput:v=>{ L.opacity=clamp(v,0,1); if(BASES.has(L.id+'::w')) BASES.set(L.id+'::w',L.opacity); }});
     /* the most-used fader in a set had no line in the dock: its key is `w_<id>`, minted
        per layer, so no static DESC entry can ever name it, and it lives in the layer row
        rather than in a `.row`, so there is no label to fall back to either. A literal on
@@ -5044,7 +5101,7 @@ function paintLinks(L,draws,life){
          one is red. It reads this instead: the renderer reports what it drew. */
       if(slen>LINK_LONGEST) LINK_LONGEST=slen;
       const near1=1-Math.max(0,(slen-LINK_PX_CAP*0.8)/(LINK_PX_CAP*0.2));
-      ctx.globalAlpha=amt*(1-Math.sqrt(near[n].d2)/R)*life*0.75*near1;
+      ctx.globalAlpha=amt*(1-Math.sqrt(near[n].d2)/R)*life*0.75*near1*LAYER_A;
       ctx.beginPath(); ctx.moveTo(A.P.x,A.P.y); ctx.lineTo(B2.P.x,B2.P.y); ctx.stroke();
     }
   }
@@ -5066,7 +5123,7 @@ function paintStreaks(L,draws,life){
     const back=project({x:b.x-sx,y:b.y-sy,z:b.z},state.cam);
     const dx=d.P.x-back.x, dy=d.P.y-back.y;
     if(dx*dx+dy*dy<1) continue;                    /* shorter than a pixel: nothing to draw */
-    ctx.globalAlpha=clamp(0.5*life*(d.alpha==null?1:d.alpha),0,1);
+    ctx.globalAlpha=clamp(0.5*life*(d.alpha==null?1:d.alpha),0,1)*LAYER_A;
     ctx.lineWidth=Math.max(1,(d.scale==null?1:d.scale)*1.5);
     ctx.beginPath(); ctx.moveTo(back.x,back.y); ctx.lineTo(d.P.x,d.P.y); ctx.stroke();
   }
@@ -5554,7 +5611,10 @@ function frame(){
       : a.P.z-b2.P.z);
 
     ctx.save();
-    ctx.globalAlpha=L.opacity;
+    /* held for the whole layer, because the body paths overwrite globalAlpha rather than
+       compose with it — see the note at LAYER_A */
+    LAYER_A=clamp(L.opacity,0,1);
+    ctx.globalAlpha=LAYER_A;
     ctx.globalCompositeOperation=L.blend||'source-over';
     if((LKL.links||0)>0.004) paintLinks(L,draws,LLIFE);
     if((LKL.streak||0)>0.01) paintStreaks(L,draws,LLIFE);
@@ -5571,7 +5631,7 @@ function frame(){
        layer and every frame that follows, and grows the save stack by one per frame — the
        same shape of bug as the global `state.phys` the note above cites. */
     try{ paintDraws(draws,t,sizeMul); }
-    finally{ WARP=null; ctx.restore(); }
+    finally{ WARP=null; LAYER_A=1; ctx.restore(); }
     drawnTotal+=draws.length;
   }
   /* the quad budget is a per-FRAME cost, so it sums across every layer that painted */
