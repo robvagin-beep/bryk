@@ -272,7 +272,10 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     /* the rail must show what the engine just did — the forces section is rebuilt on
        every apply, so read the row that carries `collide` out of the live DOM */
     const collideRow = [...document.querySelectorAll('#focusBody .row')]
-      .find(r => r.querySelector('label') && r.querySelector('label').textContent === 'collide');
+      .find(r => r.querySelector('label') &&
+                 r.querySelector('label').textContent === 'avoid each other');
+    /* the row is named for what it does now, not for the force it holds — «collide»
+       became «avoid each other» when the forces section was rewritten in Rob's words */
     put('the rail follows a behaviour change',
         !!collideRow && Math.abs(parseFloat(collideRow.querySelector('.sval').textContent) -
                                  B.state.phys.collide) < 0.02,

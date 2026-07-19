@@ -4003,6 +4003,17 @@ const BLENDS=[['source-over','normal'],['multiply','multiply'],['screen','screen
    dial a triangle and a circle separately: «просто добавляется в каждую карточку базовый
    пресет нашего бренда, 3 добавленных svg, вот и всё». A set is one decision; the
    randomiser re-deals which body wears which of them. */
+/* what each force is FOR, in the words of the thing you are trying to make happen.
+   Order is the order you reach for them: drift first (the standby), then how they treat
+   each other, then how they organise, then the two that only some scenes want. */
+const MOTION_ROWS=[
+  {key:'phys.swirl',   label:'float · lava'},
+  {key:'phys.collide', label:'avoid each other'},
+  {key:'phys.attract', label:'gather to centre'},
+  {key:'phys.follow',  label:'hold formation'},
+  {key:'phys.flock',   label:'move together'},
+  {key:'phys.gravity', label:'fall'}
+];
 const SHAPE_SETS={
   brand:   { tri:1, wedge:1, circle:1, asset:1 },
   circles: { tri:0, wedge:0, circle:1, asset:0 },
@@ -4059,31 +4070,32 @@ function renderFocus(){
     seg.append(rr,ad); host.appendChild(seg); }
 
   const all=paramsOf(L), byKey=k=>all.find(x=>x.key===k);
+  rows(['size','varSize','radius','stroke'].map(byKey).filter(Boolean));
+
   cap('field');
   rows([{key:'count',label:'density · bodies',min:20,max:900,step:1,
          get:()=>L.count,set:v=>{ L.count=Math.round(v); rebuildLayer(L); }}]
-       .concat(['scale','spacing','size','varSize'].map(byKey).filter(Boolean)));
+       .concat(['scale','spacing'].map(byKey).filter(Boolean)));
 
-  cap('forces');
-  /* a whole force set in one gesture, for THIS layer — quantised like every other
-     performance action, so it lands on the bar rather than mid-phrase */
-  for(const [lbl,table,fn] of [['behaviour',BEHAVIOURS,applyBehaviour],
-                               ['manner',mannerTable(),applyManner]]){
-    const row=document.createElement('div'); row.className='row';
-    const lb=document.createElement('label'); lb.textContent=lbl; row.appendChild(lb);
-    const sel=mkSel([['','—']].concat(Object.keys(table).map(k=>[k,k])),'',v=>{
-      if(v) fire(()=>{ fn(v); renderFocus(); }, v); });
-    sel.setAttribute('aria-label',lbl+' preset'); row.appendChild(sel); host.appendChild(row);
-  }
-  rows(PHYS_PARAMS.map(d=>byKey(d.key)).filter(Boolean));
+  /* ── MOTION, named for what it does ─────────────────────────────────────────
+     This was FORCES: two dropdowns that overwrote the eight sliders under them, and the
+     eight sliders themselves named after the engine — follow · damping · collide · body
+     radius · swirl · attract · gravity · flock. Rob, 2026-07-19: «два drop down меню,
+     которые вообще не работают, это противоречит всей карточке. Нам надо больше настроек
+     конкретных, чтобы они авоидили друг друга, либо как-то выстраивались красиво, либо
+     больше плавали — типа лава-лампы».
+     The dropdowns are gone: a preset that silently rewrites every slider next to it is a
+     contradiction, not a shortcut. What is left is six controls named after the behaviour
+     you are asking for, not the term the integrator holds it under. Damping, body radius
+     and 3D interaction stay in the model (scenes carry them, the rack can drive them) —
+     they are calibration, not performance, and they were four more rows of noise. */
+  cap('motion');
+  rows(MOTION_ROWS.map(m=>{ const p=byKey(m.key); return p&&{...p,label:m.label}; }).filter(Boolean));
 
-  if(P.params.length){ cap('drawing');
+  if(P.params.length){ cap('pattern');
     rows(P.params.filter(d=>!P.keys||P.keys.includes(d.key))
       .map(x=>({...x, descKey:L.prog+'.'+x.key,
         get:()=>L.params[x.key], set:v=>L.params[x.key]=v}))); }
-  /* the rest of the look — the texture-baked half — stays reachable but out of the way */
-  cap('material');
-  rows(['radius','stroke','tint','face','varTilt'].map(byKey).filter(Boolean));
 
   const exId=PROG_EXTRAS[L.prog];
   if(exId){ const ex=document.getElementById(exId); if(ex) host.appendChild(ex); }
@@ -4481,13 +4493,34 @@ function frame(){
    ══════════════════════════════════════════════════════════════════════════ */
 readColours();
 buildRamp(); buildStops(); rebuildPool(); rebuildTextures();
-/* One layer at boot — two at full weight average into a band. And the axis engine
-   defaults to a SINGLE lane at 0°, which is literally a horizontal line: correct
-   behaviour, wrong first impression. Open on a field, not a stripe. */
-(function(){ const L=addLayer('flow');
-  Object.assign(L.params,{axes:6, angle:14, gap:0.46, speed:0.62,
-                          bend:0.22, bendFreq:2, scaleGrad:0.2, tilt3d:0.12});
-  L.count=620; rebuildLayer(L); })();
+/* ── the standby ────────────────────────────────────────────────────────────────
+   Rob tuned this live and sent it back as two exported scenes (`bryk-scene (1).json`,
+   2026-07-19): «это те настройки, которые должны по умолчанию всегда быть в самом
+   начале — фигуры плавают спокойно и ждут музыки; когда музыка играет, они начинают
+   танцевать. Важно чтобы это было сразу, когда мы открываем аппку».
+   So the app does not open on a demo of the axis engine any more. It opens on the brand
+   standby: one Pulse burst, flat camera, soft forces — drift, mutual avoidance, a hint of
+   pull — and a mod matrix that is silent at rest and comes alive on the first beat. The
+   values below are his, carried over verbatim from the export rather than re-derived. */
+(function(){ const L=addLayer('pat-burst');
+  L.count=631; L.opacity=1; L.blend='source-over';
+  Object.assign(L.look,{ size:16, scale:1, spacing:1, varSize:0.7,
+                         radius:14, stroke:0, face:0, varTilt:1, tint:0.55 });
+  Object.assign(L.phys,{ on:1, dim3:0, follow:2.2, collide:0.5, radius:0.13,
+                         swirl:0.1, gravity:0, attract:0.09, flock:0, damp:0.93 });
+  Object.assign(L.params,{ spread:1.85, dance:0.72, amplitude:1, frequency:1, twist:1, lanes:7 });
+  /* the matrix he tuned: nothing moves in silence, everything answers the band it is on.
+     `size` on the fast bass envelope is the pulse; `dance` on flux is the build-up. */
+  L.matrix=[
+    { feat:'env.bassFast', path:'size',         mode:'bi', depth:0.30, curve:'exp'  },
+    { feat:'env.midSlow',  path:'phys.collide', mode:'up', depth:0.10, curve:'ease' },
+    { feat:'env.highSlow', path:'phys.follow',  mode:'up', depth:0.19, curve:'lin'  },
+    { feat:'band.bass',    path:'amplitude',    mode:'up', depth:0.15, curve:'lin'  },
+    { feat:'env.midFast',  path:'satDrift',     mode:'up', depth:0.54, curve:'lin'  },
+    { feat:'env.bassSlow', path:'twist',        mode:'up', depth:1.08, curve:'lin'  },
+    { feat:'flux',         path:'dance',        mode:'bi', depth:0.55, curve:'exp'  }
+  ];
+  rebuildLayer(L); renderLayers(); buildMatrix(); })();
 resize(); refreshDevices(); setArmState('idle');
 SCRUBS.bpm.set(120);
 selectInput(FIXON?'fix124':'clock').then(()=>{ inSel.value=curInput; syncTransport(); });
