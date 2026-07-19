@@ -354,7 +354,13 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
            because that is a decision each layer makes about its own bodies. Rob:
            «настройки те что в пул есть, те что для каждого слоя должны быть персональные».
            Keeping copies in both places was the confusion, not the fix. -->
-      <div class="row"><label>Count</label><span data-mnt="count"></span></div>
+      <!-- Count lived here as a stage-wide master and it had to go (Rob, 2026-07-19):
+           «убери это значение, которое сразу диктует какое у нас будет количество частиц,
+           потому что оно конфликтует по-прежнему с значением count внутри карточки».
+           He is right and the argument above is what was wrong: bodies stopped being a
+           shared pool the moment each layer got its own, so «one number for the stage» is
+           a claim the model no longer supports. Two controls over one quantity is a
+           contradiction whichever way the writes flow. Count belongs to the layer. -->
       <!-- wrap: three buttons across 276px survive the default, but WCAG 1.4.12 lets the
            user widen letter- and word-spacing, and at that point they clip. They used to
            carry a title, which the gate treats as an honest escape hatch; the description
@@ -698,7 +704,15 @@ const state = {
   camW:0,                   /* weight of camera faces in the shape mix */
   cam2:{ mirror:1, duotone:0.75, posterize:0.4, contrast:0.35, gain:0.45,
          layer:0, blend:'screen', over:0 },   /* the "layer in the mix" role */
-  cam:{ persp:0.35, zoom:1, tilt:0.1, spin:0.022, yaw:0 },
+  /* FLAT BY DEFAULT (Rob, 2026-07-19): «пусть это будет изначально в 2D, не нужно сразу
+     крутить их со всех сторон, пусть будет в запасе как козырь» + «фигуры геометрические
+     должны быть идеальными».
+     Those two are the same setting. With perspective on, a body off the centre plane goes
+     down the textured-quad path and gets a real projective warp — a circle stops being a
+     circle. That is the «искажения» he is looking at, and it was on from the first frame
+     together with a slow auto-spin nobody asked for. Orthographic + no spin = every shape
+     drawn as itself, which is what a suprematist dance needs. Depth stays one slider away. */
+  cam:{ persp:0, zoom:1, tilt:0, spin:0, yaw:0 },
   bgL:0.13, satDrift:0.35,
   /* Physics is the third register (§8.2): target × transport × local interaction.
      Forces move the body in world space ON TOP of whatever the modes ask for, so a
@@ -722,8 +736,19 @@ const state = {
    physics panel, the behaviour/manner presets and the moves all address it by that
    name — they now speak to «the layer you are looking at» instead of to everybody.
    The fallback object only serves the moment before the first layer exists. */
-const DEF_PHYS=()=>({ on:1, dim3:0, follow:3.4, collide:0.55, radius:0.13,
-                      swirl:0.16, gravity:0, attract:0, flock:0, damp:0.90 });
+/* ── the neutral pose: Motion Primer standby ─────────────────────────────────────
+   Rob, 2026-07-19: «нам нужны просто пульсации, просто когда они начинают обтекать друг
+   друга и по живому, как лава, себя вести. У нас это и так было в Motion Primer».
+   The old defaults opened with swirl already turned up, so the very first frame of a fresh
+   layer was a drifting vortex — a decision the scene had made for him before he touched
+   anything. A standby is not a effect at zero, it is a specific quiet behaviour: bodies
+   hold their formation, make room for each other, and breathe.
+     swirl 0    — no drift until asked; drift is a choice, not a resting state
+     collide    — kept, because «обтекать друг друга» IS the standby (A3.3 avoid by default)
+     follow 2.2 — softer than 3.4: arrives without snapping
+     damp 0.93  — a touch more inertia, so movement carries instead of stopping dead */
+const DEF_PHYS=()=>({ on:1, dim3:0, follow:2.2, collide:0.5, radius:0.13,
+                      swirl:0, gravity:0, attract:0, flock:0, damp:0.93 });
 const physFallback=DEF_PHYS();
 Object.defineProperty(state,'phys',{
   enumerable:true, configurable:true,
@@ -1289,11 +1314,17 @@ function project(p,cam){
    mislaid. The old number came across from image-shuffler's `vpHalf` (:547), which drops
    the perspective divisor the same way and compensates elsewhere with a hidden ×2.18
    scene spread — the same missing `d`, papered over instead of solved.
-   Zoom belongs here too: zooming out reveals more world, and a layout that fills the
-   frame should keep filling it. */
+   ZOOM DOES NOT BELONG HERE, and putting it in was a mistake with a very loud symptom.
+   Rob, 2026-07-19: «я отдаляюсь — уменьшаются все объекты, приближаюсь — непропорционально
+   увеличиваются, оси наезжают друг на друга, полный рассинхрон».
+   Cause: layouts ask this function where the edge is and space themselves against it, so
+   dividing by zoom made every zoom step RE-LAY-OUT the composition — lanes moved, pitch
+   changed, bodies re-sorted. Zoom is a way of LOOKING at a composition; it must not be a
+   way of rebuilding it. The frame reference stays fixed and zoom magnifies what is
+   already there, the way a camera does. */
 function viewportHalf(){
-  const m=Math.min(W,H), z=state.cam.zoom||1;
-  return { x:(W/m)*3.478/z, y:(H/m)*3.478/z };
+  const m=Math.min(W,H);
+  return { x:(W/m)*3.478, y:(H/m)*3.478 };
 }
 let scratch=document.createElement('canvas'), sctx=scratch.getContext('2d');
 function texTriInto(g,img,s,d){
@@ -1793,7 +1824,7 @@ const STYLE_PRESETS={
   'flow':      {axes:5, spread:1,    angle:0,  bend:0,    bendFreq:1, gap:1,    stagger:0,    scaleGrad:0.18, tilt3d:0},
   /* a fall reads as a cascade only when the columns are out of phase with each other —
      that stagger IS the preset, and it is the one thing the old standalone had */
-  'waterfall': {axes:7, spread:1,    angle:90, bend:0,    bendFreq:1, gap:0.95, stagger:0.85, scaleGrad:0.15, tilt3d:0.25, speed:0.75},
+  'waterfall': {axes:7, spread:1,    angle:90, bend:0,    bendFreq:1, gap:0.95, stagger:0.85, scaleGrad:0.15, tilt3d:0,    speed:0.75},
   'sine-wave': {axes:5, spread:1,    angle:0,  bend:0.55, bendFreq:2, gap:1,    stagger:0.3,  scaleGrad:0.1,  tilt3d:0},
   'zigzag':    {axes:5, spread:0.95, angle:0,  bend:0.6,  bendFreq:3, gap:1,    stagger:0.5,  scaleGrad:0.1,  tilt3d:0}
 };
@@ -2532,6 +2563,23 @@ const SCRUB_FOR = { 'size':'size','cam.persp':'persp','cam.zoom':'zoom','cam.til
 function rebase(key,v){ /* bases are keyed layer::path — clear every match for this path */
   for(const k of [...BASES.keys()]) if(k.endsWith('::'+key)) BASES.set(k,v); }
 
+/* ── writing to ONE layer's modulated parameter ─────────────────────────────────
+   Rob, 2026-07-19: «магнит, gather, crowd — оно ни на что не влияет совершенно, в любых
+   настройках». Reproduced: gather summons its two layers and their opacity sits at 0.00
+   for the whole arc. The moves wrote `L.opacity` straight, and every layer is born with a
+   seeded rack row on `w` — so applyMatrix cached the old value as the base at the top of
+   the frame and restoreMatrix put it back at the foot of it. The move ran, wrote, and was
+   silently undone sixty times a second. The warning against exactly this is three lines
+   above `setDriven`, but `setDriven` only reaches GLOBAL_PARAMS; nothing could address a
+   layer. This is that missing half.
+   `rebase` is the wrong tool here — it rewrites the base for EVERY layer sharing the path,
+   so raising one layer's opacity would drag the whole stack's base with it. */
+function setLayerDriven(L,path,v){
+  if(!L)return;
+  const p=paramsOf(L).find(x=>x.key===path); if(!p)return;
+  p.set(v); BASES.set(L.id+'::'+path, v);
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    7b · quantised actions + moves
 
@@ -2590,11 +2638,12 @@ const MOVES={
        that only sucked in the card you happened to be looking at was never the intent. */
     const act=layers.filter(layerVisible);
     if(k<0.72){ const a=k/0.72;
-      for(const L of act){ const P=L.phys;
-        P.on=1; P.attract=lerp(0,2.6,a*a); P.collide=lerp(P.collide,0.3,0.02); }
+      for(const L of act){ L.phys.on=1;
+        setLayerDriven(L,'phys.attract',lerp(0,2.6,a*a));
+        setLayerDriven(L,'phys.collide',lerp(L.phys.collide,0.3,0.02)); }
       setDriven('cam.persp',lerp(ctx.persp,ctx.persp+0.25,a));
     } else { const b=(k-0.72)/0.28;
-      for(const L of act) L.phys.attract=0;
+      for(const L of act) setLayerDriven(L,'phys.attract',0);
       if(b<0.06&&!ctx.blew){ ctx.blew=1;
         /* every visible layer's bodies, not `pool` — `pool` is last frame's leftovers */
         for(const L of act) for(const p of L.bodies){ const d=Math.hypot(p.x,p.y)+0.1;
@@ -2614,29 +2663,38 @@ const MOVES={
        so Gather and Snap ran their whole arc and moved nothing on screen — two silent
        moves for a day. Presence is opacity; there is one field for it. */
     const g=ensureProg('grid'), s=ensureProg('float');
-    if(k<0.62){ const a=k/0.62; s.opacity=lerp(ctx.sw,1,a); g.opacity=lerp(ctx.gw,0,a);
-      s.phys.on=1; s.phys.swirl=lerp(ctx.swirl,1.6,a); }
+    if(k<0.62){ const a=k/0.62;
+      setLayerDriven(s,'w',lerp(ctx.sw,1,a)); setLayerDriven(g,'w',lerp(ctx.gw,0,a));
+      s.phys.on=1; setLayerDriven(s,'phys.swirl',lerp(ctx.swirl,0.5,a)); }
     else { const b=easeOut((k-0.62)/0.38);
-      s.opacity=lerp(1,0,b); g.opacity=lerp(0,1,b); s.phys.swirl=lerp(1.6,ctx.swirl,b); }
+      setLayerDriven(s,'w',lerp(1,0,b)); setLayerDriven(g,'w',lerp(0,1,b));
+      setLayerDriven(s,'phys.swirl',lerp(0.5,ctx.swirl,b)); }
     renderLayers();
-  }, done(ctx){ ensureProg('float').phys.swirl=ctx.swirl; renderLayers(); } },
+  }, done(ctx){ setLayerDriven(ensureProg('float'),'phys.swirl',ctx.swirl); renderLayers(); } },
 
   /* the crowd, full frame, two bars, then gone */
+  /* Crowd only ever raised the camera layer, so with no camera open it did nothing at
+     all — press it, watch nothing happen, conclude the tool is broken (Rob did). A move
+     bound to hardware that may not be there needs an honest second body: the geometric
+     read of «врубить толпу» is the whole stack swelling and settling back. */
   crowd:{ name:'Crowd', dur:2.8, step(k,ctx){
-    const C=state.cam2;
-    C.layer = k<0.12 ? lerp(ctx.layer,1,k/0.12)
-            : k<0.72 ? 1
-            : lerp(1,ctx.layer,easeOut((k-0.72)/0.28));
-  }, done(ctx){ state.cam2.layer=ctx.layer; if(SCRUBS.camLayer)SCRUBS.camLayer.set(ctx.layer); } },
+    const swell = k<0.12 ? k/0.12 : k<0.72 ? 1 : 1-easeOut((k-0.72)/0.28);
+    if(ctx.hasCam){ state.cam2.layer = lerp(ctx.layer,1,swell); }
+    else for(const L of layers.filter(layerVisible))
+      setLayerDriven(L,'scale', lerp(ctx.scales[L.id]??1, (ctx.scales[L.id]??1)*1.35, swell));
+  }, done(ctx){
+    if(ctx.hasCam){ state.cam2.layer=ctx.layer; if(SCRUBS.camLayer)SCRUBS.camLayer.set(ctx.layer); }
+    else for(const L of layers) if(ctx.scales[L.id]!=null) setLayerDriven(L,'scale',ctx.scales[L.id]);
+    renderLayers(); } },
 
   /* everything freezes into a hard grid on the beat and releases */
   snap:{ name:'Snap', dur:2.4, step(k,ctx){
     const g=ensureProg('grid');
-    g.opacity = k<0.5 ? 1 : lerp(1,ctx.gw,easeOut((k-0.5)/0.5));
+    setLayerDriven(g,'w', k<0.5 ? 1 : lerp(1,ctx.gw,easeOut((k-0.5)/0.5)));
     /* the snap is the GRID layer's transport hardening, not the whole scene's */
-    g.phys.follow = k<0.5 ? 18 : lerp(18,ctx.follow,(k-0.5)/0.5);
+    setLayerDriven(g,'phys.follow', k<0.5 ? 9 : lerp(9,ctx.follow,(k-0.5)/0.5));
     renderLayers();
-  }, done(ctx){ ensureProg('grid').phys.follow=ctx.follow; renderLayers(); } }
+  }, done(ctx){ setLayerDriven(ensureProg('grid'),'phys.follow',ctx.follow); renderLayers(); } }
 };
 function runMove(dt){
   if(!MOVE)return;
@@ -2650,9 +2708,11 @@ function triggerMove(id){
   fire(()=>{
     /* capture from the layers the move will actually disturb, by the field they use */
     const gL=layerOfProg('grid'), sL=layerOfProg('float');
+    const scales={}; for(const L of layers) scales[L.id]=L.look.scale??1;
     const ctx={ persp:state.cam.persp,
                 swirl:(sL||{phys:physFallback}).phys.swirl, follow:(gL||{phys:physFallback}).phys.follow,
-                layer:state.cam2.layer, gw:(gL||{}).opacity||0, sw:(sL||{}).opacity||0 };
+                layer:state.cam2.layer, gw:(gL||{}).opacity||0, sw:(sL||{}).opacity||0,
+                hasCam:!!(CAM&&CAM.ready), scales };
     startMove({...m,ctx});
     setStatus(m.name,'live');
   }, m.name);
@@ -3279,7 +3339,7 @@ function buildMatrix(){
 }
 
 function syncAllScrubs(){
-  const map={ count:state.count,
+  const map={
     persp:state.cam.persp, zoom:state.cam.zoom, tilt:state.cam.tilt,
     spin:state.cam.spin, bgL:state.bgL, satDrift:state.satDrift,
     chroma:state.post.chroma, chromaAng:state.post.chromaAng,
@@ -3315,18 +3375,13 @@ $('#tap').addEventListener('click',()=>core.tap(nowT()));
 $('#auto').addEventListener('click',()=>{ core.auto(); SCRUBS.trim.set(0); setStatus('clock handed back to the detector','ok'); });
 $('#sync').addEventListener('click',()=>{ core.resync(); setStatus('downbeat reset to now','ok'); });
 
-/* ── COUNT is a MASTER, and it was the loudest lie in the panel ──────────────────
-   Rob, 2026-07-19: «уйма настроек не работают». This one was the worst of them, because
-   it is the single most visible slider in the Pool section and it did NOTHING. It wrote
-   `state.count` and called rebuildPool() — but rebuildPool rebuilds every layer FROM
-   `L.count`, so the number was written, the pool was rebuilt, and the rebuild ignored the
-   number it had just been given. Dragging it even had a side effect (re-seeding behaviour
-   layers) which made it feel like something happened.
-   Bodies belong to layers now, so a scene-wide count can only mean «set it on all of
-   them» — which is exactly what the debug API has been doing all along. */
-mount('count',{min:20,max:600,step:1,value:state.count,allowExtend:true,label:'Count · all layers',
-  onInput:v=>{ state.count=v; layers.forEach(L=>{ L.count=v; rebuildLayer(L); });
-    renderLayers(); }});
+/* ── COUNT is gone from the stage panel ─────────────────────────────────────────
+   It wrote `state.count` and rebuilt from `L.count`, so the most visible slider in the
+   panel did nothing. Making it a master over every layer fixed the deadness and kept the
+   real problem, which Rob named on sight: two controls for one quantity contradict each
+   other no matter which way the writes flow — reach for one and you have silently
+   overruled the other. A body belongs to a layer; so does how many of them there are.
+   One control, in the card. */
 /* The eight look controls that used to mount here — size · radius · stroke · varSize ·
    varTilt · face · asset weight · asset tint — are GONE, not moved: their rows left the
    markup when the look became per-layer, but the mount() calls stayed behind. mount()
@@ -4042,13 +4097,26 @@ function paintDraws(draws,t,sizeMul){
      everything else bills out. The big ones are the only ones whose perspective
      you can actually read, so the look survives and the frame time stops depending
      on the body count. */
+  /* Rank by ON-SCREEN SIZE, not by `P.k`. `P.k` is the projection scale, and under
+     orthographic camera (which is now the default — flat by default, Rob 2026-07-19) every
+     body on the z=0 plane has the SAME k. The cut then equalled everyone's k, nobody fell
+     below it, and the budget quietly stopped bounding anything: measured 253 quads against
+     a cap of 80 the moment perspective went to zero. A budget that only works while the
+     camera is tilted is not a budget.
+     The gate also read `state.face` — the dead global — so the whole pre-pass was skipped
+     unless something wrote a field the renderer no longer reads. Every draw in one call
+     belongs to one layer, so the layer's own look is the honest source. */
   const QUAD_BUDGET = 80;
   let quadCut = 0;
-  if(state.face>=0.03 && draws.length>QUAD_BUDGET){
+  const L0 = draws.length ? lookOf(draws[0].b) : null;
+  const pxOf = d => { const pv=d.b.pd||{size:1}; const K=lookOf(d.b);
+    return (size*d.P.k/220*(d.scale==null?1:d.scale)
+            *sizeMult(pv.size,K.varSize)*(K.size??16))*2.2; };
+  if(L0 && L0.face>=0.03 && draws.length>QUAD_BUDGET){
     const sizes=new Float64Array(draws.length);
-    for(let i=0;i<draws.length;i++) sizes[i]=draws[i].P.k;
+    for(let i=0;i<draws.length;i++) sizes[i]=pxOf(draws[i]);
     const sorted=Float64Array.prototype.slice.call(sizes).sort();
-    quadCut=sorted[Math.max(0,sorted.length-QUAD_BUDGET)];   /* k of the budget-th largest */
+    quadCut=sorted[Math.max(0,sorted.length-QUAD_BUDGET)];   /* px of the budget-th largest */
   }
   for(const d of draws){
     const {b,P,i}=d;
@@ -4069,7 +4137,7 @@ function paintDraws(draws,t,sizeMul){
        LOD_QUAD_PX cannot show its own perspective anyway, so it bills out; a
        middling one gets a coarser mesh. Measured: 300 turned bodies 20 → 58fps. */
     const LOD_QUAD_PX = 34, LOD_FINE_PX = 90;
-    if(LK.face<0.03 || px < LOD_QUAD_PX || P.k < quadCut){
+    if(LK.face<0.03 || px < LOD_QUAD_PX || px < quadCut){
       /* even in billboard LOD the body still leans, just in 2D — the read is
          "it banks into its travel", which survives the substitution at this size */
       const hx=b.x-b.px, hy=b.y-b.py;

@@ -397,9 +397,12 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      drawing nothing. With the drive reconnected it reads 40 → 46 → 49, which is the real
      shape of the invariant: quad cost must not SCALE with population. Six times the bodies
      for a quarter more quads is the LOD doing its job; a linear rise would be the bug. */
-  ok('quad count does not scale with body count',
-     budget[2].peak <= budget[0].peak * 1.5 && budget[2].peak <= budget[2].cap,
-     budget.map(r => r.n + ':' + r.peak).join(' → ') + ' (6× bodies)');
+  /* The invariant is that cost STOPS tracking population — not that it never rises. Below
+     the cap it may rise; once saturated it must go flat, and it must never exceed the cap.
+     Doubling 600 → 1200 is the honest test of the flat part. */
+  ok('quad cost stops tracking body count',
+     budget.every(r => r.peak <= r.cap) && budget[2].peak <= budget[1].peak,
+     budget.map(r => r.n + ':' + r.peak).join(' → ') + ' (cap ' + budget[0].cap + ')');
 
   /* ── A3.1 · a layer's behaviour belongs to a layer ────────────────────────────
      Rob, live: «слои не работают, всё полупрозрачное». Half of that was compositing
