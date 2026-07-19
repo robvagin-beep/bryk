@@ -1055,6 +1055,28 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     put('🔒 и буфер канваса тоже квадратный', cv.width === cv.height, cv.width + '×' + cv.height);
     put('пад берётся с клавиатуры', el.tabIndex >= 0 && !!el.getAttribute('aria-label'));
 
+    /* 🔴 ОДНА система координат (Роб: «моушн панель кривая», 2026-07-19).
+       Было две: сетка и хендл мерились по всему боксу, кривая и диагональ — по
+       вкладышу в 13px. Кривая висела внутри собственной сетки, концы не приходили
+       ни в угол, ни в узел, а тычок в подпись SLOW давал не тот угол, который она
+       называет. Гейт тычет РУКОЙ в четыре подписи и в центр: если координаты снова
+       разъедутся, промах вылезет здесь, а не на глазах у Роба. */
+    const r0 = el.getBoundingClientRect(), M = 17;
+    const hit = (dx, dy) => { const ev = o => new PointerEvent(o, { clientX: r0.left + dx,
+        clientY: r0.top + dy, bubbles: true, pointerId: 1 });
+      el.dispatchEvent(ev('pointerdown')); el.dispatchEvent(ev('pointerup'));
+      return { x: B.state.motion.x, y: B.state.motion.y }; };
+    const corners = [['slow', M, r0.height - M, 0, 0], ['fast', r0.width - M, r0.height - M, 1, 0],
+                     ['soft', M, M, 0, 1], ['raw', r0.width - M, M, 1, 1],
+                     ['centre', r0.width / 2, r0.height / 2, 0.5, 0.5]];
+    let worst = 0, worstName = '';
+    for (const [nm, dx, dy, ex, ey] of corners) { const m = hit(dx, dy);
+      const e = Math.max(Math.abs(m.x - ex), Math.abs(m.y - ey));
+      if (e > worst) { worst = e; worstName = nm; } }
+    put('тычок в подпись даёт ровно тот угол, который она называет',
+        worst < 0.02, worst ? ('худший промах ' + worst.toFixed(3) + ' на ' + worstName) : 'точно');
+    B.state.motion.x = 0.5; B.state.motion.y = 0.5; await s(150);
+
     /* Нейтраль. Центр пада во флоте даёт 1.15; отвалится нормировка — и сцена,
        которую Роб тюнил руками, поедет на 15% в первом же кадре. */
     put('центр пада = темп ×1.00, сцена не разгоняется сама',

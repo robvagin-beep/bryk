@@ -275,21 +275,25 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
    становится эллипсом, сетка и кривая изинга съезжают, пад врёт.
    Нужно компактнее — режь ШИРИНУ (max-width), пропорцию не трогай.
    Ломалось дважды (W14 aspect-ratio:1.9, W15 не заметил при интеграции). */
-/* Размер — да, пропорция — нет. На всю ширину колонки пад съедал 236px и уводил
-   стек слоёв под сгиб: для фокус-версии, которая худеет, слишком много веса на
-   одном контроле. Режется ШИРИНА, квадрат остаётся квадратом. */
-.mpad{position:relative;width:100%;max-width:172px;aspect-ratio:1;touch-action:none;
+/* Ширина — во всю колонку, как у любого другого контрола.
+   Я ужимал пад до 172px ради компактности и этим сделал группу кривой: легенда и
+   ряд Speed шли до 261, а пад и превью обрывались на 186 — два правых края в одном
+   блоке, и глаз читает это как съехавшую вёрстку. Высота — цена за квадрат, и она
+   честнее рваного края. */
+.mpad{position:relative;width:100%;aspect-ratio:1;touch-action:none;
   cursor:crosshair;margin:var(--sp-1) 0 var(--sp-2)}
 .mpad canvas{position:absolute;inset:0;width:100%;height:100%;border:1px solid var(--line);
   border-radius:var(--r-mid);background:var(--paper)}
 .mpad:focus-visible{outline:2px solid var(--accent-live);outline-offset:2px}
+/* Подписи живут в ПОЛЯХ, а не на поле кривой. Раньше они стояли в 7px от края,
+   то есть внутри области построения: RAW садился ровно на верхний конец кривой,
+   SLOW — на нижний, и оба читались как часть графика. Теперь поле построения
+   отступает на MPAD_M (см. drawPad), а подписи занимают освободившуюся рамку. */
 .mcn{position:absolute;font-size:var(--fz-s);letter-spacing:.08em;color:var(--muted);
-  text-transform:uppercase;pointer-events:none;user-select:none}
-.mcn.nw{left:7px;top:6px}.mcn.ne{right:7px;top:6px}
-.mcn.sw{left:7px;bottom:6px}.mcn.se{right:7px;bottom:6px}
-/* превью — спутник пада, поэтому по его ширине: одинаковый край читается как один
-   объект, а во всю колонку оно отрывалось от квадрата и висело само по себе */
-.mprev{position:relative;height:30px;max-width:172px;background:var(--paper);
+  text-transform:uppercase;pointer-events:none;user-select:none;line-height:1}
+.mcn.nw{left:3px;top:3px}.mcn.ne{right:3px;top:3px}
+.mcn.sw{left:3px;bottom:3px}.mcn.se{right:3px;bottom:3px}
+.mprev{position:relative;height:26px;background:var(--paper);
   border:1px solid var(--line);border-radius:var(--r-mid);overflow:hidden;margin-top:var(--sp-1)}
 .mprev canvas{position:absolute;inset:0;width:100%;height:100%}
 
@@ -5363,7 +5367,8 @@ for(const [slot,name] of [['mEnergy','energy'],['mDensity','density'],['mChaos',
 (function initMotionPad(){
   const CS=getComputedStyle(document.body);
   const cINK=CS.getPropertyValue('--ink').trim(), cMUT=CS.getPropertyValue('--muted').trim(),
-        cACC=CS.getPropertyValue('--accent-live').trim(), cLINE=CS.getPropertyValue('--line').trim();
+        cACC=CS.getPropertyValue('--accent-live').trim(), cLINE=CS.getPropertyValue('--line').trim(),
+        cBG=CS.getPropertyValue('--paper').trim();
   const padEl=$('#mpad'), padC=$('#mpadc'), prevC=$('#mprevc');
   if(!padEl||!padC||!prevC){ console.error('Motion Pad: нет разметки #mpad/#mpadc/#mprevc'); return; }
   const pc=padC.getContext('2d'), rc=prevC.getContext('2d');
@@ -5378,39 +5383,77 @@ for(const [slot,name] of [['mEnergy','energy'],['mDensity','density'],['mChaos',
   setTimeout(()=>{ PD=fit(padC); RD=fit(prevC); },90);
   const cur=()=>motionResolve(state.motion.x,state.motion.y);
 
-  function drawPad(){ const {w,h}=PD, c=cur(); pc.clearRect(0,0,w,h);
-    pc.strokeStyle=cLINE; pc.lineWidth=1;
-    for(let i=1;i<4;i++){ const g=i/4; pc.globalAlpha=.6;
-      pc.beginPath(); pc.moveTo(g*w,0); pc.lineTo(g*w,h); pc.stroke();
-      pc.beginPath(); pc.moveTo(0,g*h); pc.lineTo(w,g*h); pc.stroke(); }
-    pc.globalAlpha=1; const p0=13;
-    /* кривая изинга — то, что пад ВЫДАЁТ, нарисованное поверх того, чем его задают */
-    pc.strokeStyle=cACC; pc.globalAlpha=.45; pc.lineWidth=2; pc.beginPath();
-    for(let i=0;i<=60;i++){ const t=i/60, xx=p0+t*(w-2*p0), yy=(h-p0)-c.ease(t)*(h-2*p0);
-      i?pc.lineTo(xx,yy):pc.moveTo(xx,yy); } pc.stroke();
-    pc.globalAlpha=.14; pc.setLineDash([3,4]); pc.beginPath();
-    pc.moveTo(p0,h-p0); pc.lineTo(w-p0,p0); pc.stroke(); pc.setLineDash([]); pc.globalAlpha=1;
-    const px=state.motion.x*w, py=(1-state.motion.y)*h;
-    pc.strokeStyle=cINK; pc.globalAlpha=.22; pc.beginPath();
-    pc.moveTo(px,0); pc.lineTo(px,h); pc.moveTo(0,py); pc.lineTo(w,py); pc.stroke(); pc.globalAlpha=1;
-    /* 🔒 хендл — КРУГ. Если он поехал эллипсом, сломана пропорция бокса, а не эта строка */
-    pc.fillStyle=cINK; pc.beginPath(); pc.arc(px,py,6,0,Math.PI*2); pc.fill();
-    pc.fillStyle=cACC; pc.beginPath(); pc.arc(px,py,2.2,0,Math.PI*2); pc.fill(); }
+  /* ── ОДНА система координат ────────────────────────────────────────────────
+     Было две, и отсюда шло ощущение кривизны: сетка и точка-хендл мерились по
+     всему боксу, а кривая и её диагональ — по вкладышу в 13px. Кривая висела
+     внутри собственной сетки, её концы не приходили ни в угол, ни в узел, а
+     хендл в углу пада не совпадал с углом графика, хотя означал ровно его.
+     Теперь всё — сетка, диагональ, кривая, крестовина, хендл и попадание
+     указателя — живёт в ОДНОМ прямоугольнике построения, а поля отданы
+     подписям. `MPAD_M` — единственное место, где эта рамка задаётся. */
+  const MPAD_M=17;
+  const plot=()=>{ const {w,h}=PD;
+    return { x0:MPAD_M, y0:MPAD_M, pw:Math.max(1,w-2*MPAD_M), ph:Math.max(1,h-2*MPAD_M) }; };
 
-  /* превью: две точки на одной дистанции — линейная и через кривую. Разница между
-     ними и ЕСТЬ характер, который иначе пришлось бы объяснять словами */
+  function drawPad(){ const {w,h}=PD, c=cur(), R=plot(); pc.clearRect(0,0,w,h);
+    /* сетка — четверти ПОЛЯ ПОСТРОЕНИЯ, поэтому концы кривой садятся в его углы */
+    pc.strokeStyle=cLINE; pc.lineWidth=1; pc.globalAlpha=.55;
+    for(let i=0;i<=4;i++){ const gx=R.x0+R.pw*i/4, gy=R.y0+R.ph*i/4;
+      pc.beginPath(); pc.moveTo(gx,R.y0); pc.lineTo(gx,R.y0+R.ph); pc.stroke();
+      pc.beginPath(); pc.moveTo(R.x0,gy); pc.lineTo(R.x0+R.pw,gy); pc.stroke(); }
+    pc.globalAlpha=1;
+    /* диагональ «без характера»: линейный ход, с которым сравнивается кривая */
+    pc.strokeStyle=cINK; pc.globalAlpha=.13; pc.setLineDash([3,4]); pc.beginPath();
+    pc.moveTo(R.x0,R.y0+R.ph); pc.lineTo(R.x0+R.pw,R.y0); pc.stroke();
+    pc.setLineDash([]); pc.globalAlpha=1;
+    /* кривая изинга — то, что пад ВЫДАЁТ, поверх того, чем его задают */
+    pc.strokeStyle=cACC; pc.globalAlpha=.85; pc.lineWidth=2;
+    pc.lineJoin='round'; pc.lineCap='round'; pc.beginPath();
+    for(let i=0;i<=64;i++){ const t=i/64, xx=R.x0+t*R.pw, yy=(R.y0+R.ph)-c.ease(t)*R.ph;
+      i?pc.lineTo(xx,yy):pc.moveTo(xx,yy); } pc.stroke(); pc.globalAlpha=1;
+    const px=R.x0+state.motion.x*R.pw, py=(R.y0+R.ph)-state.motion.y*R.ph;
+    /* крестовина — только по полю построения, чтобы не резать подписи в полях */
+    pc.strokeStyle=cINK; pc.globalAlpha=.20; pc.beginPath();
+    pc.moveTo(px,R.y0); pc.lineTo(px,R.y0+R.ph);
+    pc.moveTo(R.x0,py); pc.lineTo(R.x0+R.pw,py); pc.stroke(); pc.globalAlpha=1;
+    /* 🔒 хендл — КРУГ. Поехал эллипсом — сломана пропорция бокса, а не эта строка.
+       Тёмная подложка под ним: точка садится на кривую своего же цвета и без неё
+       сливается с ней ровно в том положении, где на неё смотрят. */
+    pc.fillStyle=cBG; pc.globalAlpha=.9;
+    pc.beginPath(); pc.arc(px,py,7,0,Math.PI*2); pc.fill(); pc.globalAlpha=1;
+    pc.fillStyle=cINK; pc.beginPath(); pc.arc(px,py,5.5,0,Math.PI*2); pc.fill();
+    pc.fillStyle=cACC; pc.beginPath(); pc.arc(px,py,2.4,0,Math.PI*2); pc.fill(); }
+
+  /* Превью: два бегунка по одной дистанции — ровный ход и ход через кривую.
+     Разница между ними и ЕСТЬ характер, который иначе объясняешь словами.
+     Прежняя версия читалась как недоделка: голая рамка, две точки без дорожки и
+     без общего края с падом. Теперь — одна дорожка на обоих (они идут по одному
+     пути, в этом весь смысл сравнения), тот же отступ MPAD_M, что у поля пада,
+     и ghost позади ink, а не под ним на отдельной полке. */
   function drawPrev(dt){ const {w,h}=RD, c=cur(); rc.clearRect(0,0,w,h);
-    const y0=h/2, x0=13, x1=w-13;
-    rc.strokeStyle=cLINE; rc.lineWidth=1; rc.beginPath(); rc.moveTo(x0,y0); rc.lineTo(x1,y0); rc.stroke();
+    const y0=Math.round(h/2)+.5, x0=MPAD_M, x1=w-MPAD_M, span=Math.max(1,x1-x0);
+    rc.strokeStyle=cLINE; rc.lineWidth=1; rc.globalAlpha=.8;
+    rc.beginPath(); rc.moveTo(x0,y0); rc.lineTo(x1,y0); rc.stroke(); rc.globalAlpha=1;
+    /* засечки старта и финиша — дорожка получает начало и конец, а не растворяется */
+    rc.strokeStyle=cLINE;
+    for(const x of [x0,x1]){ rc.beginPath(); rc.moveTo(x,y0-4); rc.lineTo(x,y0+4); rc.stroke(); }
     phase+=dt*motionSpeed()*0.6; if(phase>1.35)phase-=1.35; const p=cl(phase);
-    rc.fillStyle=cMUT; rc.globalAlpha=.45; rc.beginPath();
-    rc.arc(x0+p*(x1-x0),y0+7,3,0,Math.PI*2); rc.fill(); rc.globalAlpha=1;
-    rc.fillStyle=cINK; rc.beginPath(); rc.arc(x0+c.ease(p)*(x1-x0),y0-7,4.6,0,Math.PI*2); rc.fill(); }
+    /* ghost — ровный ход, эталон. Полупрозрачный и меньше: он для сравнения */
+    rc.fillStyle=cMUT; rc.globalAlpha=.5;
+    rc.beginPath(); rc.arc(x0+p*span,y0,2.6,0,Math.PI*2); rc.fill(); rc.globalAlpha=1;
+    /* ink — ход через кривую, то, что реально делает сцена */
+    const ix=x0+c.ease(p)*span;
+    rc.fillStyle=cBG; rc.beginPath(); rc.arc(ix,y0,5.6,0,Math.PI*2); rc.fill();
+    rc.fillStyle=cACC; rc.beginPath(); rc.arc(ix,y0,4,0,Math.PI*2); rc.fill(); }
 
   function commit(){ state.motion.speed=+motionSpeed().toFixed(2);
     if(SCRUBS.mSpeed) SCRUBS.mSpeed.set(state.motion.speed); drawPad(); }
-  function fromEvt(e){ const r=padEl.getBoundingClientRect();
-    return { x:(e.clientX-r.left)/r.width, y:1-(e.clientY-r.top)/r.height }; }
+  /* по ПОЛЮ ПОСТРОЕНИЯ, а не по боксу: иначе точка встаёт не под курсор, и в углах
+     промах равен всей рамке — тыкаешь в SLOW, а получаешь 0.1/0.1 */
+  function fromEvt(e){ const r=padEl.getBoundingClientRect(), R=plot();
+    const sx=r.width/Math.max(1,PD.w), sy=r.height/Math.max(1,PD.h);
+    return { x:(e.clientX-r.left-R.x0*sx)/(R.pw*sx),
+             y:1-(e.clientY-r.top-R.y0*sy)/(R.ph*sy) }; }
   let drag=false;
   padEl.addEventListener('pointerdown',e=>{ drag=true; padEl.setPointerCapture(e.pointerId);
     const p=fromEvt(e); state.motion.x=cl(p.x); state.motion.y=cl(p.y); commit();
