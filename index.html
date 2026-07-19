@@ -1265,6 +1265,27 @@ function project(p,cam){
   const z=Math.max(0.4, d-q.z*(cam.persp||0)), k=base*cam.zoom/z;
   return { x:W/2+q.x*k, y:H/2-q.y*k, z:q.z, k };
 }
+/* ── how big the frame actually is, in world units ───────────────────────────────
+   This was the constant `1.6`, and it was wrong by a factor of 2.17. Solve `project`
+   backwards for the edge of the canvas at z = 0:
+
+       screen_x = W/2 + q.x·k ,  k = base·zoom/z ,  base = min(W,H)·0.46 ,  z = d = 3.2
+       edge  ⇒  |q.x| = (W/2)/k = (W / min(W,H)) · d/(2·0.46) / zoom
+                                = (W / min(W,H)) · 3.478 / zoom
+
+   Every layout asks this function «where is the edge» and then reaches for it. Told the
+   frame was 1.6 wide when it is 3.478, they all stopped at 46% of the way out and huddled
+   — Rob, 2026-07-19: «оно сугубо всё отображает в центре viewport». It was never a taste
+   problem, and no amount of turning `spread` up could reach an edge the engine had
+   mislaid. The old number came across from image-shuffler's `vpHalf` (:547), which drops
+   the perspective divisor the same way and compensates elsewhere with a hidden ×2.18
+   scene spread — the same missing `d`, papered over instead of solved.
+   Zoom belongs here too: zooming out reveals more world, and a layout that fills the
+   frame should keep filling it. */
+function viewportHalf(){
+  const m=Math.min(W,H), z=state.cam.zoom||1;
+  return { x:(W/m)*3.478/z, y:(H/m)*3.478/z };
+}
 let scratch=document.createElement('canvas'), sctx=scratch.getContext('2d');
 function texTriInto(g,img,s,d){
   /* affine solve for one triangle + a 0.6px inflated clip so neighbouring cells
@@ -1553,12 +1574,25 @@ function axisTarget(i,N,t,P,ctx){
   const vx=ctx.vx, vy=ctx.vy;
   const reach=Math.abs(ct)*vx+Math.abs(st)*vy+0.6;      // half visible path + overshoot
   const perpReach=Math.abs(st)*vx+Math.abs(ct)*vy;
-  /* PITCH follows the body's own calibre. This read a frozen global (`state.size`, stuck
-     at 16 and unreachable from the panel since the look moved per layer), so growing the
-     bodies left the lanes exactly where they were and the field collapsed into itself —
-     Rob: «тело растёт, дорожки не расходятся, всё налазит». `spacing` is the air knob on
-     top of it, so calibre and air are two separate decisions instead of one tangled one. */
-  const step=Math.max(0.045,(P.gap==null?1:P.gap)*(ctx.spacing||1)*0.5*(ctx.size/100));
+  /* ── PITCH is solved from the frame, not guessed from a constant ────────────────
+     Two failures met here. The pitch read a frozen global (`state.size`, stuck at 16 and
+     unreachable since the look moved per layer), so growing the bodies left the lanes
+     where they were and the field collapsed into itself — Rob: «тело растёт, дорожки не
+     расходятся, всё налазит». And it was an absolute number, so the moment the viewport
+     maths was corrected and the lane got twice as long, the same crowd became a clump
+     drifting down a mostly empty lane. A constant cannot answer «how far apart» — the
+     answer depends on how much lane there is and how many bodies are sharing it.
+
+     `fill` is the pitch at which THIS crowd covers exactly this lane. `gap` then reads as
+     what it says: 1 is a full lane, below crowds them into a train, above opens it up.
+     The floor is one body width (a body is calibre/100 wide in world units — the renderer
+     draws it at `calibre/100 · k` pixels), so no amount of crowding can stack bodies on
+     top of each other. `spacing` is the air knob over the whole thing. */
+  const perLaneReach=2*reach;
+  const fill=perLaneReach/perLane;
+  const bodyW=(ctx.size||16)/100;
+  const step=Math.max(bodyW*0.55,
+                      fill*(P.gap==null?1:P.gap))*(ctx.spacing||1);
   const loop=Math.max(perLane*step, 2*reach+2*step);    // wrap seam lives off-screen
   const off=t*(P.speed==null?1:P.speed)*0.5;
   /* CASCADE. Each lane starts at its own phase, so neighbouring lanes are offset in time
@@ -1605,7 +1639,7 @@ const AXIS_PARAMS=[
   {key:'axes',      label:'lanes',        min:1,  max:16,  step:1,    def:4},
   {key:'spread',    label:'fill · to edge',min:0, max:1.3, step:0.01, def:1},
   {key:'angle',     label:'angle',        min:0,  max:360, step:1,    def:0},
-  {key:'gap',       label:'gap along lane',min:0.1,max:2,  step:0.01, def:0.9},
+  {key:'gap',       label:'gap along lane',min:0.2,max:2,  step:0.01, def:1},
   {key:'stagger',   label:'cascade',      min:0,  max:1,   step:0.01, def:0},
   {key:'speed',     label:'speed',        min:-2, max:2,   step:0.01, def:0.62},
   {key:'bend',      label:'bend',         min:-1.5,max:1.5,step:0.01, def:0},
@@ -1743,12 +1777,16 @@ const LAYOUTS={
    the controls then stay live to tweak. This is what makes sine-wave and zigzag presets
    rather than programs: same engine, different seed. */
 const STYLE_PRESETS={
-  'flow':      {axes:5, spread:1,    angle:0,  bend:0,    bendFreq:1, gap:0.42, stagger:0,    scaleGrad:0.18, tilt3d:0},
+  /* `gap` is a FRACTION of the lane-filling pitch now, so 1 means «this crowd covers this
+     lane». The old seeds (0.40–0.46) were absolute-pitch numbers tuned against a viewport
+     the engine measured at 46% of its real size; carried over literally they would leave
+     every preset as a short train in a long empty lane. */
+  'flow':      {axes:5, spread:1,    angle:0,  bend:0,    bendFreq:1, gap:1,    stagger:0,    scaleGrad:0.18, tilt3d:0},
   /* a fall reads as a cascade only when the columns are out of phase with each other —
      that stagger IS the preset, and it is the one thing the old standalone had */
-  'waterfall': {axes:7, spread:1,    angle:90, bend:0,    bendFreq:1, gap:0.40, stagger:0.85, scaleGrad:0.15, tilt3d:0.25, speed:0.75},
-  'sine-wave': {axes:5, spread:1,    angle:0,  bend:0.55, bendFreq:2, gap:0.46, stagger:0.3,  scaleGrad:0.1,  tilt3d:0},
-  'zigzag':    {axes:5, spread:0.95, angle:0,  bend:0.6,  bendFreq:3, gap:0.46, stagger:0.5,  scaleGrad:0.1,  tilt3d:0}
+  'waterfall': {axes:7, spread:1,    angle:90, bend:0,    bendFreq:1, gap:0.95, stagger:0.85, scaleGrad:0.15, tilt3d:0.25, speed:0.75},
+  'sine-wave': {axes:5, spread:1,    angle:0,  bend:0.55, bendFreq:2, gap:1,    stagger:0.3,  scaleGrad:0.1,  tilt3d:0},
+  'zigzag':    {axes:5, spread:0.95, angle:0,  bend:0.6,  bendFreq:3, gap:1,    stagger:0.5,  scaleGrad:0.1,  tilt3d:0}
 };
 /* STYLE_AXIS — shuffler :336-341. WHICH keys each preset shows. Waterfall showing eight
    sliders while reading four was exactly the cost of not having this — and then it grew
@@ -4167,7 +4205,7 @@ function frame(){
      layer opacity and blend mode, applied to the whole layer, not to the geometry. */
   ctx.clearRect(0,0,W,H);
   const act=layers.filter(layerVisible).filter(L=>L.opacity>0.002);
-  const vxw=(W/Math.min(W,H))*1.6, vyw=(H/Math.min(W,H))*1.6;   /* viewport half-extent in world */
+  const vp=viewportHalf(), vxw=vp.x, vyw=vp.y;
   let drawnTotal=0;
 
   /* the one force that crosses the stack: bodies from different layers make room for
@@ -4293,6 +4331,10 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
      the ported reference set is MANNER_PRESET. One key for both let a gate go green on
      the table the UI does not use. */
   mannerPresets:()=>MANNER_PRESET, bodiesOf:L=>L.bodies, sizeMult,
+  /* measure the frame the way the SCREEN sees it, not the way a layout believes it —
+     a gate that asks the engine for its own constant and compares the engine against it
+     will pass however wrong that constant is (this one did, at 46% of the real frame) */
+  project:p=>project(p,state.cam), canvasSize:()=>({w:W,h:H}),
   /* watch what the ENGINE receives, not what the panel draws */
   /* clear on ENABLE only: clearing on disable wiped the very log the caller was about to
      read, so the gate saw «0 frames» and reported a dead drive on a live one */

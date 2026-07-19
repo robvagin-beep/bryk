@@ -489,10 +489,32 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     await settle();
     const base = extent(), basePitch = pitch();
 
-    /* 1 · fill: at spread 1 the outer lanes must reach the frame edge. The old fan divided
-       itself by the lane count and topped out at 69% of the half-frame at ANY setting. */
-    const vy = 1.6 * 1;                       /* viewport half-height in world at 1440×900 */
-    const reachRatio = base.y / vy;
+    /* 1 · fill: at spread 1 the outer lanes must reach the frame edge — measured ON THE
+       CANVAS, in pixels. The first version of this check compared the field against the
+       engine's own idea of where the edge is, so it read 107% while the picture only
+       covered 46% of the screen: the constant it trusted was itself the bug. Asking the
+       projector where a body actually lands is the only version of this test that can
+       fail when the world-to-screen maths is wrong. */
+    /* COVERAGE, not span. An axis recycles: bodies are supposed to live past the edge so
+       the seam is never seen, so «max distance from centre» says nothing about whether
+       the picture fills the screen — it only says the tail is long. Slice the canvas into
+       eight horizontal bands and ask how many of them actually contain a body. At the old
+       constant the field covered the middle four and left the top and bottom empty; that
+       is the failure Rob was looking at, and this is the number that shows it. */
+    const cs = B.canvasSize(), BANDS = 8;
+    const seen = new Set();
+    let span = 0;
+    for (const p of B.bodiesOf(L)) {
+      const s = B.project({ x: p.x, y: p.y, z: p.z });
+      span = Math.max(span, Math.abs(s.y - cs.h / 2) / (cs.h / 2));
+      if (s.x < 0 || s.x > cs.w || s.y < 0 || s.y > cs.h) continue;
+      seen.add(Math.min(BANDS - 1, Math.floor(s.y / cs.h * BANDS)));
+    }
+    /* two different failures, two different numbers:
+         span     — does the field REACH the edge (46% was the bug; over 100% is bleed,
+                    which a recycling axis is supposed to have)
+         coverage — is it a field at all, or one hairline through the middle */
+    const reachRatio = span, bandRatio = seen.size / BANDS;
 
     /* 2 · scale moves the whole composition, and only that */
     L.look.scale = 0.5; await sleep(1100);
@@ -513,11 +535,13 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
       return { ratio: hi / lo, gm }; };
     const flat = stat(mult(0)), spread = stat(mult(1));
 
-    return { reachRatio, shrink: small.y / base.y, basePitch, wide, n0, n1,
+    return { reachRatio, bandRatio, shrink: small.y / base.y, basePitch, wide, n0, n1,
              flatRatio: flat.ratio, spreadRatio: spread.ratio, spreadGm: spread.gm };
   });
-  ok('axis fills the frame to the edge', vocab.reachRatio > 0.85 && vocab.reachRatio < 1.25,
-     'outer lane at ' + (vocab.reachRatio * 100).toFixed(0) + '% of the half-frame');
+  ok('axis reaches the frame edge', vocab.reachRatio > 0.95,
+     'field spans ' + (vocab.reachRatio * 100).toFixed(0) + '% of the half-frame (46% was the bug)');
+  ok('...as a field, not a hairline', vocab.bandRatio >= 0.75,
+     (vocab.bandRatio * 8) + '/8 bands of the canvas carry bodies');
   ok('scale resizes the whole composition', Math.abs(vocab.shrink - 0.5) < 0.12,
      'scale 0.5 → extent ×' + vocab.shrink.toFixed(2));
   ok('spacing opens the air, not the crowd', vocab.wide > vocab.basePitch * 1.4 && vocab.n1 === vocab.n0,
