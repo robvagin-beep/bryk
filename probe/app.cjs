@@ -1110,32 +1110,25 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
           'slow ×' + (slow/mid).toFixed(2) + ' · mid ×1 · fast ×' + (fast/mid).toFixed(2));
     }
 
-    /* ── макро × пад (Роб, 2026-07-19 · «досвязать») ────────────────────────────
-       До связки наверху панели стояли ДВА ответа на вопрос «какой характер у сета»,
-       и они молча расходились: energy гнала темп, точка пада стояла и врала.
-       Гейт держит ровно тот контракт, который заявлен: energy везёт X, chaos везёт
-       Y, density не трогает пад вообще, а рука на паде не дёргает фейдеры обратно.
-       Последнее — не придирка: связь в обе стороны сделала бы из двух контролов
-       петлю, где непонятно, кто кого ведёт. */
-    const m0 = { x: B.state.motion.x, y: B.state.motion.y };
-    B.applyMacro('energy', 0.9, true); await s(260);
-    const eX = B.state.motion.x, eY = B.state.motion.y;
-    put('energy ведёт X пада (темп)', eX > m0.x + 0.05, m0.x.toFixed(2) + ' → ' + eX.toFixed(2));
-    put('…и не трогает Y', Math.abs(eY - m0.y) < 1e-9);
-    B.applyMacro('chaos', 0.9, true); await s(260);
-    put('chaos ведёт Y пада (характер)', B.state.motion.y > eY + 0.05,
-        eY.toFixed(2) + ' → ' + B.state.motion.y.toFixed(2));
-    put('…и не трогает X', Math.abs(B.state.motion.x - eX) < 1e-9);
-    const dPad = { x: B.state.motion.x, y: B.state.motion.y };
-    B.applyMacro('density', 0.15, true); await s(260);
-    put('density пад не трогает — плотность не про движение',
-        Math.abs(B.state.motion.x - dPad.x) < 1e-9 && Math.abs(B.state.motion.y - dPad.y) < 1e-9);
-    const mac0 = { ...B.state.macro };
-    B.state.motion.x = 0.2; B.state.motion.y = 0.8; await s(260);
-    put('а рука на паде фейдеры не дёргает (связь в одну сторону)',
-        ['energy','density','chaos'].every(k => Math.abs(B.state.macro[k] - mac0[k]) < 1e-9));
-    B.applyMacro('energy', 0.5, true); B.applyMacro('chaos', 0.5, true);
-    B.state.motion.x = 0.5; B.state.motion.y = 0.5; await s(200);
+    /* ── ОДИН инструмент (A12) ──────────────────────────────────────────────────
+       Здесь стоял гейт на связку макро×пад: energy везёт X, chaos везёт Y. Связка
+       снята вместе с макро, и правильно — она была концептуально дефектна в трёх
+       местах сразу (Y не независимая ось, хаос отнимал темп у energy, а «раскрутить
+       хаос» уводило приходы слоёв в linear, то есть в самую МЕХАНИЧНУЮ кривую набора).
+       Проверяем то, что осталось: инструмент один, и его ручки ортогональны. */
+    const before = { x: B.state.motion.x, y: B.state.motion.y };
+    B.state.motion.chaos = 0.8; await s(300);
+    put('хаос не трогает оси пада — он третья ручка, а не связка',
+        Math.abs(B.state.motion.x - before.x) < 1e-9 &&
+        Math.abs(B.state.motion.y - before.y) < 1e-9);
+    /* и наоборот: темп не должен незаметно менять сцепление тел с целью */
+    const chaosNow = B.state.motion.chaos;
+    B.state.motion.x = 0.95; await s(300);
+    put('и темп не трогает хаос', Math.abs(B.state.motion.chaos - chaosNow) < 1e-9);
+    B.state.motion.chaos = 0; B.state.motion.x = 0.5; B.state.motion.y = 0.5; await s(200);
+    put('макро-аппарат снят целиком, ничего не осталось висеть',
+        typeof B.applyMacro === 'undefined' && !B.state.macro &&
+        !document.getElementById('gMacro'));
 
     /* Двусторонняя связь — канон пада: ползунок, который ведёт точку в одну сторону
        и не идёт за ней обратно, разъезжается с падом на первом же перетаскивании. */

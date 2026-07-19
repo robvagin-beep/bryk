@@ -248,9 +248,7 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
 .navItem{grid-column:span 1;text-align:left;padding:8px var(--sp-2);cursor:pointer;
   background:var(--tint);border:1px solid var(--line);border-radius:var(--r-ctl);
   font-family:var(--grotesk);font-size:var(--fz-m);color:var(--ink);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-  transition:border-color var(--dur-press) var(--ease-out),
-             background var(--dur-press) var(--ease-out)}
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* ядро — во всю ширину и в акценте: это ТА САМАЯ подача, а не первый пункт списка */
 .navItem.core{grid-column:1/-1;font-size:var(--fz-l);letter-spacing:.02em;
   background:var(--tint-hi);border-color:var(--accent-live)}
@@ -280,8 +278,9 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
    ряд Speed шли до 261, а пад и превью обрывались на 186 — два правых края в одном
    блоке, и глаз читает это как съехавшую вёрстку. Высота — цена за квадрат, и она
    честнее рваного края. */
-.mpad{position:relative;width:100%;aspect-ratio:1;touch-action:none;
+.mpad{position:relative;width:100%;aspect-ratio:1;touch-action:none;user-select:none;
   cursor:crosshair;margin:var(--sp-1) 0 var(--sp-2)}
+.mpad:active{cursor:grabbing}
 .mpad canvas{position:absolute;inset:0;width:100%;height:100%;border:1px solid var(--line);
   border-radius:var(--r-mid);background:var(--paper)}
 .mpad:focus-visible{outline:2px solid var(--accent-live);outline-offset:2px}
@@ -387,8 +386,9 @@ body.noui #corner:focus-within #uiBtn{opacity:1}
 body.blackout #stage{visibility:hidden}
 
 /* ═══ states ═══ */
-.btn,#lamp,.mtgl{transition:transform var(--dur-press) var(--ease-out),
-  background-color var(--dur-press) var(--ease-out),color var(--dur-press) var(--ease-out)}
+.btn,#lamp,.mtgl,.navItem{transition:transform var(--dur-press) var(--ease-out),
+  background-color var(--dur-press) var(--ease-out),color var(--dur-press) var(--ease-out),
+  border-color var(--dur-press) var(--ease-out)}
 .btn:active,.mtgl:active{transform:scale(.97)}
 @media (hover:hover) and (pointer:fine){
   .btn:not(.on):not(.is-disabled):hover{background:var(--tint-hi);color:var(--ink)}
@@ -399,7 +399,7 @@ body.blackout #stage{visibility:hidden}
   outline:2px solid var(--accent-live);outline-offset:1px}
 button,.tinSelect{touch-action:manipulation}
 @media (prefers-reduced-motion:reduce){
-  .btn,#lamp,.mtgl,.scrub .slive,input.sw::before{transition:none}
+  .btn,#lamp,.mtgl,.navItem,.scrub .slive,input.sw::before{transition:none}
   #tray{transition:opacity 120ms linear;transform:none}
   #corner:hover #tray,#corner:focus-within #tray{transform:none}
 }
@@ -434,38 +434,46 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
 <aside id="panel">
   <div class="ptitle">Build</div>
   <div class="pbody">
-    <!-- MACRO — three knobs for the whole set (master plan §17.1). Everything below this
-         line is preparation you do at home; these three and the presence faders are what
-         a hand reaches for while the room is full. They sit at the top because that is
-         where a hand lands without looking.
-         They are LIVE controls, not stored state: moving one writes through to every
-         parameter it owns and rebases it, so the rack keeps modulating around the new
-         pose. A scene remembers where the three faders SAT — so the pose is recalled —
-         and does not re-apply them on load, because the parameter values the scene
-         restores are already the ones the macros produced when it was saved. Re-applying
-         would overwrite the scene with the macro map and quietly flatten it. -->
-    <fieldset id="gMacro"><legend>Macro</legend>
-      <div class="row"><label>Energy</label><span data-mnt="mEnergy"></span></div>
-      <div class="row"><label>Density</label><span data-mnt="mDensity"></span></div>
-      <div class="row"><label>Chaos</label><span data-mnt="mChaos"></span></div>
-    </fieldset>
+    <!-- ═══ CHARACTER — ОДИН инструмент на весь сет (A12) ═══════════════════════
+         Роб: «energy density chaos нужно связать, усреднить, доработать с нашей
+         моушен панелью, так чтобы она отвечала за это всё целиком».
 
-    <!-- MOTION PAD (A8.3 · Н3). Идея Роба: раз подача одна, изинг ПОВЕДЕНИЯ задаётся
-         одним падом, а не россыпью строк маппинга. X — темп, Y — характер доводки.
-         Стоит под макро, потому что это тот же регистр: то, за что рука берётся при
-         полном зале, а не подготовка дома.
-         Пад НИЧЕГО НЕ ПИШЕТ в параметры слоёв. Он множитель в точке потребления —
-         клоки, транспорт, кривые прихода/ухода. Именно поэтому он не воюет с
-         карточкой и не «залипает», как залипал бы ещё один макро. -->
+         Наверху стояли ДВА ответа на вопрос «какой характер у этого сета», и они
+         расходились молча. Замер показал, насколько: Energy поднимал `dance` в 1.9
+         раза И тянул точку пада, а та множила тот же клок — один жест давал ×2.21
+         по темпу. Chaos писал follow в ноль, и ось X пада начинала множить ноль,
+         то есть теряла работу, ничего об этом не сообщая.
+
+         Теперь инструмент один: ПАД и одна ручка рядом.
+           пад X   — темп: клоки слоёв и скорость доводки до цели
+           пад Y   — характер прихода и ухода
+           CHAOS   — насколько тела вообще держатся за свою цель
+
+         Energy и Density сняты, и это не упрощение ради упрощения:
+         · Energy наполовину БЫЛ падом (его `dance` и есть темп), а вторая половина
+           — калибр — на формациях всё равно затирается подгонкой под ячейку;
+         · у Density самый широкий ход, `spacing`, читает только `axisTarget` —
+           функция, которой нет на полке фокус-версии. Мёртвая запись на всех трёх
+           вариативах. Его `scale` при этом воюет с собственным `scale` марки и
+           кадрирует логотип, а `count` уже стоит на карточке слоя.
+         Полный аппарат — в ветке `full-v1`.
+
+         Главное отличие от макро: ЗДЕСЬ НИЧЕГО НЕ ПИШЕТСЯ В СЛОИ. И пад, и хаос —
+         множители в точке чтения. Поэтому нет ни захвата, ни ребейза, ни расширения
+         диапазонов: отпусти — и сцена ровно там, где её настроили руками. Объединять
+         надо было вниз, к контракту пада, а не вверх к контракту макро. -->
     <fieldset id="gMotion"><legend>Character</legend>
       <div class="mpad" id="mpad" tabindex="0" role="application"
+           data-desc="Character of the whole set — drag: X is tempo, Y is how it arrives"
            aria-label="Motion pad — X speed, Y easing character">
         <canvas id="mpadc"></canvas>
         <span class="mcn nw">soft</span><span class="mcn ne">raw</span>
         <span class="mcn sw">slow</span><span class="mcn se">fast</span>
       </div>
-      <div class="row"><label>Speed</label><span data-mnt="mSpeed"></span></div>
       <div class="mprev"><canvas id="mprevc"></canvas></div>
+      <div class="row"><label>Speed</label><span data-mnt="mSpeed"></span></div>
+      <div class="row"><label>Arrival</label><span data-mnt="mChar"></span></div>
+      <div class="row"><label>Chaos</label><span data-mnt="mChaos"></span></div>
     </fieldset>
 
     <!-- THE RAIL (Rob, 2026-07-19). Two things, in this order, and nothing else:
@@ -901,13 +909,13 @@ const state = {
      A4.1, for the same reason: one global object made a decision about the focused card
      apply to every card on the stack. */
   bgL:0.13, satDrift:0.35,
-  /* where the three macro faders SIT. Not a value the engine reads — the engine reads the
-     parameters they wrote. Kept so a scene can recall the pose of the panel along with
-     the picture. Neutral is where the standby was built, not 0. */
-  macro:{ energy:0.5, density:0.5, chaos:0.5 },
+  /* `macro:{energy,density,chaos}` удалён вместе с фейдерами (A12). Он хранил ПОЗУ
+     трёх ручек, которые писали в параметры; ручек нет, писателя нет, поза хранить
+     нечего. Читатель старых сцен (`applyScene`) про ключ `macro` ещё знает — он
+     переносит из него хаос и осознанно теряет остальное. */
   /* Где стоит точка Motion Pad. `speed` — производное зеркало (его пишет commit),
      чтобы ползунок мог показывать и вести темп; авторитет — всегда x/y. */
-  motion:{ x:0.5, y:0.5, speed:1 },
+  motion:{ x:0.5, y:0.5, speed:1, chaos:0 },
   /* Physics is the third register (§8.2): target × transport × local interaction.
      Forces move the body in world space ON TOP of whatever the modes ask for, so a
      режим stays a target provider and never has to know about collisions.
@@ -1942,7 +1950,12 @@ function patternPoint(p,pattern,t,o){
      не про взрыв, они и с карточки отфильтрованы (patReads). */
   if(pattern==='burst'){ const d=.55*amp;
     const pulse=(1-d)+d*(0.5+0.5*Math.sin(ph*1.2*freq));
-    const rad=(0.32+pulse*1.22)*spread;
+    /* 🔴 Выше amplitude 2.295 радиус уходил В МИНУС (аудит логики, баг 5), а объявленный
+       максимум 3. Отрицательный радиус — это не «глубже вдох», это выворот поля через
+       центр: знак x/y/z переворачивается, и раз в цикл вся вспышка схлопывается и
+       выстреливает зеркально. Пол в нуле оставляет обещанное — на предельной глубине
+       тела сходятся в точку и расходятся обратно, — но без хлопка наизнанку. */
+    const rad=Math.max(0,0.32+pulse*1.22)*spread;
     return {x:p.x*rad+Math.sin(ph+p.band)*.1, y:p.y*rad+Math.cos(ph*.8)*.1, z:p.z*rad}; }
   /* cloud — the default */
   const curl=Math.sin(ph+p.x*3)*Math.cos(ph*.7+p.z*4);
@@ -2475,15 +2488,27 @@ for(const [id,label,desc,drive] of [
 const patReads=(id,key)=>{
   const base={spread:1,dance:1,count:24,amplitude:1,frequency:1,twist:1,lanes:7,formShape:'cube'};
   const alt={amplitude:2.4,frequency:2.2,twist:-2.1,lanes:19,spread:2.3,dance:1.7};
+  /* Пропуск в `alt` — это молчаливое «ключ не читается»: подменять нечем, обе выборки
+     совпадают, и параметр исчезает со ВСЕХ карточек. Ровно то гниение таблицы, ради
+     защиты от которого её и вывели из формулы. Пусть промах будет слышно. */
+  if(!(key in alt)){ console.error('patReads: нет пробного значения для «'+key+
+    '» — ключ пропадёт с карточек. Допиши его в alt.'); return false; }
   const BODIES=Array.from({length:10},(_,i)=>baseParticle(i,i*13+7));
   const sample=o=>{ let s='';
     for(const t of [0.4,1.9]) for(const p of BODIES)
       { const q=patternPoint(p,id,t,{...o,count:BODIES.length});
-        if(!Number.isFinite(q.x)||!Number.isFinite(q.y)||!Number.isFinite(q.z))
-          throw new Error('patternPoint.'+id+' вернул не-число — зонд слеп, карточка будет пустой');
+        if(!Number.isFinite(q.x)||!Number.isFinite(q.y)||!Number.isFinite(q.z)){
+          /* Гремит, но не убивает. Раньше здесь стоял throw на верхнем уровне: любая
+             будущая ветка, отдавшая не-число хотя бы на одном пробном теле, уносила
+             ВСЁ приложение в белый экран. Цена ошибки — «на карточке лишний ползунок»,
+             и она не стоит полного отказа инструмента посреди сета. */
+          console.error('patternPoint.'+id+' вернул не-число на ключе '+key+
+            ' — зонд слеп, карточка недосчитается ползунков');
+          return NaN; }
         s+=q.x.toFixed(5)+','+q.y.toFixed(5)+','+q.z.toFixed(5)+';'; }
     return s; };
-  return sample(base)!==sample({...base,[key]:alt[key]});
+  const a=sample(base), b=sample({...base,[key]:alt[key]});
+  return (a===a&&b===b) ? a!==b : false;   /* NaN из sample = зонд не смог, а не «читается» */
 };
 for(const [id,label] of PATTERNS){
   /* `form` is the one pattern that picks a polyhedron, so it and only it shows the
@@ -2494,7 +2519,9 @@ for(const [id,label] of PATTERNS){
   const shown = declared.filter(d=> d.key==='spread' || d.key==='dance' ||
                                     d.key==='formShape' || patReads(id,d.key)).map(d=>d.key);
   PRESETS.push(P_('pat-'+id,'particle-dance:patternPoint.'+id,'particles',label,
-    'particle-dance · '+label,
+    (id==='burst'
+      ? 'The core delivery — a field that breathes with the beat. Spread sets its reach, amplitude how deep it breathes, frequency how fast'
+      : 'particle-dance · '+label),
     declared, shown, {},
     (i,N,t,P,ctx)=>{ const b=pool[i]; if(!b||!b.pd)return {x:0,y:0,z:0};
       const q=patternPoint(b.pd, id, t, {...P, spread:1, count:N, seed:ctx.seed,
@@ -2517,7 +2544,7 @@ for(const [id,label] of PATTERNS){
    частички собираются вовнутрь, как будто ты из осколков собрал этот логотип, либо это
    пустота, намёк негативным пространством на сам логотип». */
 PRESETS.push(P_('mark','bryk LOGO · Motion Primer:195-230','formation','Mark · logo',
-  'Тела собираются В марку, а в режиме frame обходят её и марка читается пустотой',
+  'Bodies settle INTO the mark — or, in frame mode, route around it so the mark reads as negative space',
   /* 1.6 put the mark at 108% of the frame height — measured, and visible as a crop top
      and bottom. 1.15 leaves it reading whole with air around it, which is what a mark
      wants; the slider still goes to 4 for anyone who wants it bleeding. */
@@ -2581,8 +2608,15 @@ const PRESETS_ALL=PRESETS.slice();
   const missing=FOCUS_KEEP.filter(id=>!byId.has(id));
   if(missing.length) console.warn('[focus] пресет из allowlist не найден:',missing.join(', '));
   PRESETS.length=0; for(const P of kept) PRESETS.push(P);
-  /* ядро — своя категория: оно не один из семи, оно ТА САМАЯ подача */
-  byId.get(FOCUS_CORE) && (byId.get(FOCUS_CORE).group='core');
+  /* ядро — своя категория: оно не один из семи, оно ТА САМАЯ подача.
+     🔴 И вместе с группой оно теряло ГЛУБИНУ (аудит логики, баг 3): камера-сид
+     выдаётся по группе — `layout` и `particles` рождаются с перспективой и медленным
+     поворотом, — а переименовав группу в `core`, я молча вывел ядро из этого списка.
+     Стендбай не пострадал (он ставит камеру сам), а вот второй Pulse burst, добавленный
+     рукой, приезжал плоским рядом с объёмным первым. Сид теперь свой и явный, поэтому
+     от имени группы больше не зависит. */
+  const core=byId.get(FOCUS_CORE);
+  if(core){ core.group='core'; core.camSeed={ persp:0.72, spin:0.03, tilt:0.12, zoom:1 }; }
 
   /* DNA-ретюн (A8.2) снят вместе с вкладкой shapes: helix больше не на полке.
      Механизм `lookSeed` в makeLayer остаётся — он общий, и первый же пресет,
@@ -3192,6 +3226,21 @@ function speedToX(target,y){
 const MOTION_NEUTRAL = motionResolve(0.5,0.5).speed;
 const motionSpeed = () => motionResolve(state.motion.x,state.motion.y).speed / MOTION_NEUTRAL;
 const motionEase  = () => motionResolve(state.motion.x,state.motion.y).ease;
+
+/* ── ХАОС — вторая рука того же инструмента (A12) ──────────────────────────────
+   Раньше это был макро-фейдер: он ПИСАЛ в параметры слоёв и потому тащил за собой
+   весь аппарат относительного захвата — снимок, дельту, расширение диапазонов,
+   ребейз (пятьдесят с лишним строк applyMacro), — только чтобы не затирать сцену,
+   которую настроили руками.
+   Здесь он множитель в точке потребления, как темп и кривая пада. Ноль — ровно то,
+   что настроено руками, поэтому он ничего не может испортить и его не нужно
+   «захватывать». Единица — полный распад: формация отпущена, стая рассыпана,
+   завихрение на максимуме. На марке это один жест «логотип разваливается».
+     МЯГКО, а не резко: тянем к полюсу, а не умножаем. Умножение убивает параметр,
+   стоящий в нуле (свирл ×3 от нуля — всё ещё ноль), и хаос был бы мёртв ровно на
+   тех сценах, где он нужнее всего. */
+const chaosTo = (v,pole,c) => v + (pole - v) * c;
+const motionChaos = () => state.motion.chaos || 0;
 function featVal(f,id){
   switch(id){
     case 'rms': return f.rms;
@@ -3319,140 +3368,20 @@ function setLayerDriven(L,path,v){
    the composition gone. Held to roughly 40% at both faders full, which is 455 bodies at
    45px, the field stays a composition all the way up. Beyond that is still reachable by
    typing a number into the card — extremes belong there, not in the travel of a macro. */
-const MACRO_MAP={
-  energy:[
-    {k:'size',        a:0.20, b:0.45},   /* the calibre the kick is read on: 22 → 45px */
-    {k:'dance',       a:0.10, b:0.75},   /* how fast the figure itself evolves */
-    {k:'phys.collide',a:0.05, b:0.55},   /* harder bodies, more visible impact */
-    {k:'phys.attract',a:0.50, b:0.72},   /* attract is bipolar: 0.5 of the range is zero */
-    {k:'streak',      a:0.00, b:0.35},   /* travel starts to leave a mark */
-    {k:'cam.persp',   a:0.10, b:0.70}    /* the room opens up as it gets loud */
-  ],
-  density:[
-    {k:'count',       a:0.06, b:0.22},   /* 139 → 455 bodies; rebuild, so it lands on release */
-    {k:'scale',       a:0.35, b:0.62},   /* 0.83 → 1.32: fills the frame without spilling past it */
-    {k:'spacing',     a:0.72, b:0.22},   /* inverted on purpose: denser means less air */
-    {k:'links',       a:0.00, b:0.45},
-    {k:'varSize',     a:0.30, b:0.85}    /* a crowd needs dominants or it reads as texture */
-  ],
-  chaos:[
-    {k:'phys.swirl',  a:0.05, b:0.70},
-    {k:'phys.vary',   a:0.10, b:0.85},   /* lag spread: they stop answering as one object */
-    {k:'varTilt',     a:0.10, b:1.00},
-    {k:'phys.flock',  a:0.55, b:0.02},   /* inverted: order is agreement, chaos is not */
-    {k:'phys.follow', a:0.70, b:0.18}    /* let go of the formation */
-  ]
-};
-/* `count` re-deals the whole crowd, so writing it on every pointermove would stutter the
-   field for the whole length of the gesture. It lands once, when the fader is released —
-   the same verdict `mod:'gate'` makes for the rack, applied to the hand. */
-const MACRO_ON_RELEASE=new Set(['count']);
-/* ── RELATIVE, not absolute ───────────────────────────────────────────────────────
-   The first version read the fader's position as an ABSOLUTE point in each parameter's
-   range and parked all three at 0.5, with a comment claiming 0.5 was «where the standby
-   was built». It was not, and could not be: MACRO_MAP is a table derived on its own, the
-   standby is a scene Rob tuned by hand, and nothing reconciles the two. Measured on the
-   boot picture, committing a fader AT ITS PARKED POSITION — a gesture of zero magnitude,
-   which is exactly what typing a number does — moved count 140→297, follow 1→4.4, swirl
-   0.85→0.225 and took 47% of the lit pixels off the screen. One touch, no drag, no undo,
-   on the scene he asked the app to open into.
+/* ═══ ЗДЕСЬ ЖИЛ МАКРО-АППАРАТ (снят 2026-07-19, A12) ══════════════════════════
+   MACRO_MAP · MACRO_ON_RELEASE · MACRO_GRAB · macroGrab · applyMacro · MACRO_PAD —
+   около ста строк, из которых полезной работы было на десять. Всё остальное:
+   снимок значений при захвате, относительная дельта, расширение диапазонов под
+   уже стоящее значение, ребейз строк рэка — существовало ИСКЛЮЧИТЕЛЬНО потому, что
+   макро ПИСАЛИ в параметры слоёв и обязаны были не затирать руку.
 
-   So a macro TRIMS FROM WHERE YOU ARE: it snapshots the values it owns when the gesture
-   starts and moves them by the fader's DISPLACEMENT since then, scaled by the span the
-   map declares. At the parked position it does nothing at all, which is the only honest
-   meaning of a control nobody has touched. It also fixes the unreachable value: standby
-   `swirl` is 0.85, above the 0.6 its own range tops out at, and no absolute fader position
-   could ever have restored it. */
-let MACRO_GRAB=null;
-/* ── МАКРО × MOTION PAD — один организм, а не два регулятора характера ─────────
-   Роб, 2026-07-19: «доработай панель, чтобы она взаимодействовала и с верхними
-   energy density chaos — ты по сути просто вставил нашего характера по нашему же
-   принципу, там можно ещё досвязать».
+   Пад ничего не пишет, и ему ничего этого не нужно. Сведя верхний блок к контракту
+   пада (множитель в точке чтения), мы не «упростили интерфейс» — мы удалили целый
+   класс задач: рассинхрон панели и сцены, гонку писателей за один параметр, дрейф
+   на невидимых слоях, восстановление позы при загрузке сцены.
 
-   Он прав, и вот в чём именно. До этой правки наверху панели стояли ДВА ответа на
-   один вопрос «какой у сета характер»: три фейдера и пад. Они даже пересекались —
-   energy крутит `dance` (темп фигуры), пад крутит клоки (темп сцены), — но нигде
-   не было видно, что это одна ось. Оператор двигал energy, сцена ускорялась, а
-   точка пада стояла на месте и врала.
-
-   Поэтому пад становится ДИСПЛЕЕМ этой оси, а макро — быстрым входом в него:
-     energy → X (темп): «жёстче бьёт» и «идёт горячее» — одно и то же движение
-     chaos  → Y (характер): порядок держит доводку сглаженной, хаос уводит её
-              в крайние кривые — рваный linear и глубокий cubic
-     density → НИЧЕГО. Плотность — про количество тел, не про их движение, и
-              придумывать ей ось на паде значило бы связать ради связи.
-
-   Механика — та же, что у всего остального в макро: относительный сдвиг от точки
-   захвата, поэтому рука, поставившая пад вручную, не воюет с фейдером — фейдер
-   везёт её точку дальше, а не отменяет. Обратный ход тоже честный: тянешь пад
-   рукой — фейдеры остаются где стояли, потому что пад шире их, а не наоборот. */
-const MACRO_PAD={ energy:{ axis:'x', span:0.42 }, chaos:{ axis:'y', span:0.42 } };
-function macroGrab(name){
-  const snap={};
-  for(const L of layers){ const ps=paramsOf(L), per={};
-    for(const t of (MACRO_MAP[name]||[])){ const p=ps.find(x=>x.key===t.k); if(p) per[t.k]=p.get(); }
-    snap[L.id]=per; }
-  /* точка пада снимается вместе со всем остальным — иначе относительный сдвиг
-     считался бы от «текущего», и фейдер уползал бы сам от себя за один жест */
-  MACRO_GRAB={ name, from:state.macro[name], snap,
-               pad:{ x:state.motion.x, y:state.motion.y } };
-}
-function applyMacro(name,m,released){
-  const list=MACRO_MAP[name]; if(!list)return;
-  /* one grab per gesture; a different fader starts its own */
-  if(!MACRO_GRAB||MACRO_GRAB.name!==name) macroGrab(name);
-  const G=MACRO_GRAB, d=clamp(m,0,1)-G.from;
-  /* A gesture of zero magnitude writes NOTHING. Not «writes the same value back»: the
-     write itself was destructive, because clamping to the declared range drags in any
-     value that sits outside it, and Rob's standby swirl (0.85) sits above the working
-     maximum of 0.6 on purpose. Touching a fader without moving it took it to 0.6. */
-  if(d===0 && !released) return;
-  if(d===0){ state.macro[name]=clamp(m,0,1); syncAllScrubs(); MACRO_GRAB=null; return; }
-  /* the fader's own position is set HERE, not by the caller. `syncAllScrubs` paints the
-     panel from `state.macro`, so a caller that wrote the pose after calling this left the
-     panel showing the previous value — the picture was one move ahead of its own fader.
-     One writer for the pose, and it is the function that acts on it. */
-  state.macro[name]=clamp(m,0,1);
-  for(const L of layers){
-    const ps=paramsOf(L);
-    const held=(G.snap&&G.snap[L.id])||{};
-    for(const t of list){
-      /* `released` means «also land the rebuild targets», not «land ONLY them»: a fader
-         let go of has to leave every parameter it owns where the fader now points. The
-         first version read this as an either/or and a released macro wrote nothing but
-         count — the continuous half never arrived, and typing a number into the fader
-         (which commits without ever dragging) moved nothing at all. */
-      if(MACRO_ON_RELEASE.has(t.k) && !released) continue;
-      const p=ps.find(x=>x.key===t.k); if(!p)continue;
-      /* the span the map declares, walked from where this parameter stood when you
-         grabbed the fader — see the note above the function */
-      const base=held[t.k]!=null?held[t.k]:p.get();
-      /* the range, WIDENED to admit where the value already stood. A hand that put swirl
-         above its working maximum meant it; a macro may move that value, and may not
-         quietly confiscate it. Same principle as extendParamRange on the scrubs. */
-      const lo=Math.min(p.min,base), hi=Math.max(p.max,base);
-      const v=clamp(base+(t.b-t.a)*d*(p.max-p.min), lo, hi);
-      p.set(p.step>=1?Math.round(v):v);
-      /* rebase only what the rack is actually driving — writing a base for an unmapped
-         path would leave a stale entry that outlives the row that never existed */
-      if(BASES.has(L.id+'::'+t.k)) BASES.set(L.id+'::'+t.k,v);
-    }
-  }
-  /* и та же дельта — на ось пада, если она у этого фейдера есть (см. MACRO_PAD).
-     Пишется ТОЧКА, а не темп: авторитет пада — всегда x/y, speed остаётся
-     производным зеркалом, которое цикл пада пересчитает сам. */
-  const pad=MACRO_PAD[name];
-  if(pad && G.pad){
-    const from=G.pad[pad.axis];
-    state.motion[pad.axis]=clamp(from+d*pad.span,0,1);
-  }
-  /* Only on release. `syncAllScrubs` ends by rebuilding the layer stack and the focused
-     card, so calling it from `onInput` would re-create that whole subtree on every pixel
-     of the drag — sixty DOM rebuilds a second, over a canvas that wants the frame. The
-     picture follows the fader live because the engine reads the parameters directly; the
-     card sliders catch up when the hand lets go. */
-  if(released){ MACRO_GRAB=null; syncAllScrubs(); }
-}
+   Полный аппарат жив в ветке `full-v1`. Возвращать его — значит возвращать и всё
+   перечисленное, поэтому решение стоит принимать целиком, а не по частям. */
 
 /* ══════════════════════════════════════════════════════════════════════════
    7b · quantised actions + moves
@@ -3532,25 +3461,23 @@ const MOVES={
     }
   }, done(ctx){ setDriven('cam.persp',ctx.persp); for(const L of layers) L.phys.attract=0; } },
 
-  /* chaos → order: scatter takes over, then the grid snaps back. The guilloché move,
-     carried onto geometry (§4 «Собраться») */
+  /* ── «Собраться»: хаос → порядок ──────────────────────────────────────────────
+     🔴 Приём призывал `grid` и `float` — пресеты, которых ПОСЛЕ ДИЕТЫ нет на полке.
+     Работать он не переставал (движок их помнит), но нажатие G выкидывало на сцену
+     слой, который оператор не может ни добавить, ни вернуть рукой: приём говорил на
+     языке, которого в интерфейсе больше нет.
+     И, что важнее, он всё это время описывал хаос через две подмены — сначала подними
+     рассыпанный слой, потом опусти и подними собранный. Хаос теперь есть как таковой,
+     поэтому приём просто ВЕДЁТ ЕГО: полный распад, затем сбор. Одна величина вместо
+     двух слоёв, работает на любом вариативе — и на ядре, и на марке, где «логотип
+     собирается из рассыпанного» это и есть главный жест. */
   gather:{ name:'Gather', dur:5.4, step(k,ctx){
-    /* A move borrows layers that may simply not be on the stack — boot puts up one Axis,
-       so pressing 2 on a fresh page used to throw and kill the whole rAF loop. A move
-       that needs a layer summons it rather than assuming it; ensureProg leaves it silent
-       (w:0) so nothing appears until the move actually raises it. */
-    /* `s.w` / `g.w`: the field is `opacity`. Writing `w` created a property nobody reads,
-       so Gather and Snap ran their whole arc and moved nothing on screen — two silent
-       moves for a day. Presence is opacity; there is one field for it. */
-    const g=ensureProg('grid'), s=ensureProg('float');
-    if(k<0.62){ const a=k/0.62;
-      setLayerDriven(s,'w',lerp(ctx.sw,1,a)); setLayerDriven(g,'w',lerp(ctx.gw,0,a));
-      s.phys.on=1; setLayerDriven(s,'phys.swirl',lerp(ctx.swirl,0.5,a)); }
-    else { const b=easeOut((k-0.62)/0.38);
-      setLayerDriven(s,'w',lerp(1,0,b)); setLayerDriven(g,'w',lerp(0,1,b));
-      setLayerDriven(s,'phys.swirl',lerp(0.5,ctx.swirl,b)); }
-    renderLayers();
-  }, done(ctx){ setLayerDriven(ensureProg('float'),'phys.swirl',ctx.swirl); renderLayers(); } },
+    /* 0 → 0.62 рассыпаемся, дальше собираемся с замедлением к концу */
+    state.motion.chaos = k<0.62 ? lerp(ctx.chaos,1,k/0.62)
+                                : lerp(1,ctx.chaos,easeOut((k-0.62)/0.38));
+    if(SCRUBS.mChaos) SCRUBS.mChaos.set(+state.motion.chaos.toFixed(2));
+  }, done(ctx){ state.motion.chaos=ctx.chaos;
+    if(SCRUBS.mChaos) SCRUBS.mChaos.set(+ctx.chaos.toFixed(2)); } },
 
   /* the crowd, full frame, two bars, then gone */
   /* Crowd only ever raised the camera layer, so with no camera open it did nothing at
@@ -3567,14 +3494,15 @@ const MOVES={
     else for(const L of layers) if(ctx.scales[L.id]!=null) setLayerDriven(L,'scale',ctx.scales[L.id]);
     renderLayers(); } },
 
-  /* everything freezes into a hard grid on the beat and releases */
+  /* ── «Замок»: всё схватывается на бите и отпускает ───────────────────────────
+     Та же история, что у Gather: приём держался за `grid`. Схватывание — это хаос,
+     уведённый в ноль, то есть тела намертво встают на свои цели; отпускание — возврат
+     туда, где стоял фейдер. */
   snap:{ name:'Snap', dur:2.4, step(k,ctx){
-    const g=ensureProg('grid');
-    setLayerDriven(g,'w', k<0.5 ? 1 : lerp(1,ctx.gw,easeOut((k-0.5)/0.5)));
-    /* the snap is the GRID layer's transport hardening, not the whole scene's */
-    setLayerDriven(g,'phys.follow', k<0.5 ? 9 : lerp(9,ctx.follow,(k-0.5)/0.5));
-    renderLayers();
-  }, done(ctx){ setLayerDriven(ensureProg('grid'),'phys.follow',ctx.follow); renderLayers(); } }
+    state.motion.chaos = k<0.5 ? 0 : lerp(0,ctx.chaos,easeOut((k-0.5)/0.5));
+    if(SCRUBS.mChaos) SCRUBS.mChaos.set(+state.motion.chaos.toFixed(2));
+  }, done(ctx){ state.motion.chaos=ctx.chaos;
+    if(SCRUBS.mChaos) SCRUBS.mChaos.set(+ctx.chaos.toFixed(2)); } }
 };
 function runMove(dt){
   if(!MOVE)return;
@@ -3586,12 +3514,12 @@ function runMove(dt){
 function triggerMove(id){
   const m=MOVES[id]; if(!m)return;
   fire(()=>{
-    /* capture from the layers the move will actually disturb, by the field they use */
-    const gL=layerOfProg('grid'), sL=layerOfProg('float');
+    /* Снимок того, что приём тронет, — чтобы вернуть в точности. Gather и Snap
+       больше не заимствуют слои (они ведут хаос), поэтому им нужна одна величина
+       вместо четырёх, снятых с пресетов, которых нет на полке. */
     const scales={}; for(const L of layers) scales[L.id]=L.look.scale??1;
-    const ctx={ persp:state.cam.persp,
-                swirl:(sL||{phys:physFallback}).phys.swirl, follow:(gL||{phys:physFallback}).phys.follow,
-                layer:state.cam2.layer, gw:(gL||{}).opacity||0, sw:(sL||{}).opacity||0,
+    const ctx={ persp:state.cam.persp, chaos:state.motion.chaos||0,
+                layer:state.cam2.layer,
                 hasCam:!!(CAM&&CAM.ready), scales };
     startMove({...m,ctx});
     setStatus(m.name,'live');
@@ -3753,6 +3681,11 @@ function resolveContacts(act,dt){
 function stepPhysics(dt,t,f,L){
   const P=L.phys;
   if(!P.on) return;
+  /* Хаос (A12) — читается здесь, не пишется в P. Слой остаётся тем, чем его
+     настроили: отпусти фейдер, и всё вернётся точно туда, где стояло. */
+  const CH=motionChaos();
+  const SWIRL = CH ? chaosTo(P.swirl, Math.max(P.swirl,0.7), CH) : P.swirl;
+  const FLOCK = CH ? chaosTo(P.flock, 0, CH) : P.flock;
   /* a layer's forces act on that layer's bodies — swirl, gravity, attract and flock are
      private. Collide left this function for resolveContacts() above, because avoidance is
      the one force that is meant to cross the stack. */
@@ -3766,8 +3699,8 @@ function stepPhysics(dt,t,f,L){
 
   for(let i=0;i<N;i++){
     const b=bods[i];
-    if(P.swirl>0.001){ const c=curlAt(b.x,b.y,L.clock?L.clock.flow:t,P.flowScale);
-      b.vx+=c.x*P.swirl*dt; b.vy+=c.y*P.swirl*dt; }
+    if(SWIRL>0.001){ const c=curlAt(b.x,b.y,L.clock?L.clock.flow:t,P.flowScale);
+      b.vx+=c.x*SWIRL*dt; b.vy+=c.y*SWIRL*dt; }
     if(P.gravity!==0) b.vy-=P.gravity*dt;
     if(P.attract>0.001){
       /* Magnet: pull grows the closer you get (Motion Primer `attract`, boost/(d+soft)).
@@ -3793,7 +3726,7 @@ function stepPhysics(dt,t,f,L){
   /* applied at the FOOT of this function, after every force has had its say — clamping
      mid-way would just let the next block push past the ceiling again */
 
-  if(P.flock>0.001){
+  if(FLOCK>0.001){
     /* cohesion toward the local mean. It builds its own grid unconditionally now: the
        collide pass moved out of this function and across the stack, so the bucket it used
        to inherit would hold indices into a DIFFERENT array — a silent mis-read, not a
@@ -3812,8 +3745,8 @@ function stepPhysics(dt,t,f,L){
       mx/=cell.length; my/=cell.length;
       let mz=0; if(D3){ for(const i of cell) mz+=bods[i].z; mz/=cell.length; }
       for(const i of cell){ const b=bods[i];
-        b.vx+=(mx-b.x)*P.flock*dt*2; b.vy+=(my-b.y)*P.flock*dt*2;
-        if(D3) b.vz+=(mz-b.z)*P.flock*dt*2; }
+        b.vx+=(mx-b.x)*FLOCK*dt*2; b.vy+=(my-b.y)*FLOCK*dt*2;
+        if(D3) b.vz+=(mz-b.z)*FLOCK*dt*2; }
     }
   }
 
@@ -4073,9 +4006,14 @@ function captureScene(){
     camW:state.camW, cam2:{...state.cam2}, mixSeed:state.mixSeed,
     count:state.count, size:state.size, radius:state.radius, stroke:state.stroke, face:state.face,
     cam:{...state.cam}, bgL:state.bgL, satDrift:state.satDrift,
-    /* the pose of the three faders. Restored to the panel, deliberately NOT re-applied to
-       the picture — see the note at MACRO_MAP. */
-    macro:{...state.macro},
+    /* 🔴 Пад НЕ СОХРАНЯЛСЯ (аудит логики, баг 2), и это худший класс отказа для
+       живого инструмента: MSPEED множит каждый клок, рейт транспорта и приход слоя,
+       то есть пад правит КАРТИНКУ, а не позу панели. Сцену снимали на быстром паде,
+       грузили на медленном — и она приезжала другой, молча, без единого способа
+       узнать, каким был темп при записи. Сохранялась при этом поза макро, которая
+       якобы вела ту же ось: панель показывала положение, которого не было никогда.
+       Теперь сохраняется сам инструмент — обе оси и хаос. */
+    motion:{...state.motion},
     post:{...state.post}, echo:{...state.echo}, kaleido:{...state.kaleido}, phys:{...state.phys},
     stops:state.stops.map(s=>({...s})),
     formation:{...state.formation},
@@ -4093,7 +4031,7 @@ const DEFAULT_SCENE=(()=>{ try{ return JSON.parse(JSON.stringify({
     shapes:{...state.shapes}, assetW:state.assetW, assetTint:state.assetTint,
     camW:state.camW, cam2:{...state.cam2}, mixSeed:state.mixSeed,
     count:state.count, size:state.size, radius:state.radius, stroke:state.stroke, face:state.face,
-    cam:{...state.cam}, bgL:state.bgL, satDrift:state.satDrift, macro:{...state.macro},
+    cam:{...state.cam}, bgL:state.bgL, satDrift:state.satDrift, motion:{...state.motion},
     post:{...state.post}, echo:{...state.echo}, kaleido:{...state.kaleido}, phys:{...state.phys},
     stops:state.stops.map(x=>({...x})), formation:{...state.formation} })); }
   catch(_){ return {}; } })();
@@ -4131,10 +4069,16 @@ function applyScene(sc){
      breathing chroma (2026-07-18). The depth means the same thing on the same 0..1 range,
      so an old scene carries straight over. Key renamed, never deleted from the reader. */
   if(sc.satDrift==null && sc.hueDrift!=null) state.satDrift=sc.hueDrift;
-  /* the macro pose. A scene saved before the macros existed has none, and the neutral
-     middle is the honest answer for it: the picture it restores was built without them,
-     so no fader can claim to have put it there. */
-  state.macro=m({energy:0.5,density:0.5,chaos:0.5}, sc.macro);
+  /* Инструмент характера. Сцена старше пада его не несёт — и нейтраль для неё
+     честный ответ: картинку, которую она восстанавливает, собирали без пада, значит
+     никакой темп не вправе заявлять, что это он её таким сделал.
+     Нейтраль — центр по осям и НОЛЬ по хаосу: у множителя нейтраль это ноль. */
+  state.motion=m({x:0.5,y:0.5,speed:1,chaos:0}, sc.motion);
+  /* сцены, записанные при макро (до 2026-07-19), несут `sc.macro`. Он больше ничем
+     не управляет, и молча тащить его в панель было бы враньём — читаем только то,
+     что относилось к оси характера, остальное осознанно теряем вместе с макро. */
+  if(!sc.motion && sc.macro && typeof sc.macro.chaos==='number')
+    state.motion.chaos=clamp((sc.macro.chaos-0.5)*2,0,1);
   if(Array.isArray(sc.stops)&&sc.stops.length>=2) state.stops=sc.stops.map(s=>({...s}));
   if(Array.isArray(sc.layers)){
     layers=[]; uid=0;
@@ -4385,7 +4329,7 @@ function syncAllScrubs(){
        booted, while the drag moved a different one */
     persp:state.cam.persp, zoom:state.cam.zoom, tilt:state.cam.tilt, spin:state.cam.spin,
     /* the macro faders are panel pose: a scene recall must move them to where they sat */
-    mEnergy:state.macro.energy, mDensity:state.macro.density, mChaos:state.macro.chaos,
+    mSpeed:state.motion.speed, mChar:state.motion.y, mChaos:state.motion.chaos,
     kSectors:state.kaleido.sectors, kRoll:state.kaleido.roll, kRate:state.kaleido.rate,
     camW:state.camW,
     camLayer:state.cam2.layer, camOver:state.cam2.over, camMirror:state.cam2.mirror,
@@ -4926,7 +4870,7 @@ const footDefault=()=>setFoot('Info');
     return null;
   };
   const show=e=>{
-    const el=e.target.closest('label,button,select,input,.scrub,legend,.lname'); if(!el)return;
+    const el=e.target.closest('label,button,select,input,.scrub,legend,.lname,.mpad'); if(!el)return;
     const lit=el.dataset&&el.dataset.desc;
     const k=keyOf(el);
     /* `prog.key` first, then the bare key: the dictionary was written when the axis family
@@ -4976,7 +4920,7 @@ const footDefault=()=>setFoot('Info');
     look:'<path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/>',   /* lucide eye */
     scenes:'<path d="m12.296 3.464 3.02 3.956"/><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3z"/><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m6.18 5.276 3.1 3.899"/>'   /* lucide clapperboard */
   };
-  const wrap=d=>'<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+d+'</svg>';
+  const wrap=d=>'<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+d+'</svg>';
   document.querySelectorAll('#panel legend,#rightcol legend').forEach(l=>{
     if(l.querySelector('svg'))return;
     const key=l.textContent.trim().toLowerCase().split(/[\s·&]+/)[0];
@@ -5350,13 +5294,8 @@ function seedFonts(list){
 const FALLBACK_FONTS=['Inter','Helvetica Neue','Arial','Avenir Next','Futura','Georgia',
   'Times New Roman','Courier New','Menlo','SF Pro Display','Impact','Verdana'];
 seedFonts(FALLBACK_FONTS.filter(f=>document.fonts.check('12px "'+f+'"')));
-/* the three. `onCommit` carries the rebuild targets so the crowd is re-dealt once, on
-   release, instead of on every pixel of the drag. */
-for(const [slot,name] of [['mEnergy','energy'],['mDensity','density'],['mChaos','chaos']])
-  mount(slot,{min:0,max:1,step:0.01,value:state.macro[name],
-    label:name[0].toUpperCase()+name.slice(1), allowExtend:false,
-    onInput:v=>{ applyMacro(name,v,false); macroLive(name); },
-    onCommit:v=>{ applyMacro(name,v,true); macroLive(null); }});
+/* Три макро-фейдера сняты (A12) — их место занял один инструмент, смонтированный
+   вместе с падом ниже. Причины разобраны в комментарии над разметкой #gMotion. */
 /* ── Motion Pad · виджет (A8.3 · Н3) ─────────────────────────────────────────────
    Перенос из Mesh — Skeleton.html :1112-1153, той же формы. Отличия ровно два, оба
    намеренные:
@@ -5369,18 +5308,36 @@ for(const [slot,name] of [['mEnergy','energy'],['mDensity','density'],['mChaos',
   const cINK=CS.getPropertyValue('--ink').trim(), cMUT=CS.getPropertyValue('--muted').trim(),
         cACC=CS.getPropertyValue('--accent-live').trim(), cLINE=CS.getPropertyValue('--line').trim(),
         cBG=CS.getPropertyValue('--paper').trim();
+  /* запрос слушается, а не читается один раз: настройку меняют на ходу, и панель,
+     узнавшая о ней только при загрузке, врёт до перезапуска */
+  const REDUCED=matchMedia('(prefers-reduced-motion: reduce)');
   const padEl=$('#mpad'), padC=$('#mpadc'), prevC=$('#mprevc');
   if(!padEl||!padC||!prevC){ console.error('Motion Pad: нет разметки #mpad/#mpadc/#mprevc'); return; }
   const pc=padC.getContext('2d'), rc=prevC.getContext('2d');
   const cl=v=>v<0?0:v>1?1:v;
   /* DPR ограничен двойкой, и подгонка повторяется через 90мс: на момент запуска
      скрипта панель ещё не разложена, и первый getBoundingClientRect даёт нули. */
-  function fit(cv){ const dpr=Math.min(devicePixelRatio||1,2), r=cv.getBoundingClientRect();
+  /* 🔴 Пад НАСМЕРТЬ ломался ресайзом при скрытом UI (аудит канона, B1).
+     `noui` вешает панели `display:none`, рект становится 0×0 — и прежний fit()
+     покорно записывал буфер 1×1 и PD={0,0}. Обратно уже не чинилось: таймер на
+     90мс давно отработал, а `plot()` схлопывался в 1px, растянутый на 248.
+     Клик после этого считался с масштабом ×248 и всегда падал в угол.
+     Сценарий — не редкий: H, растянуть окно на проектор, H. То есть ровно то,
+     что делают перед выступлением.
+     Нулевой рект больше не принимается: держим прежний размер и ждём реального. */
+  function fit(cv,prev){ const r=cv.getBoundingClientRect();
+    if(!r.width||!r.height) return prev||{w:0,h:0};
+    const dpr=Math.min(devicePixelRatio||1,2);
     cv.width=Math.max(1,r.width*dpr); cv.height=Math.max(1,r.height*dpr);
     cv.getContext('2d').setTransform(dpr,0,0,dpr,0,0); return {w:r.width,h:r.height}; }
   let PD=fit(padC), RD=fit(prevC), phase=0, lastM=performance.now();
-  addEventListener('resize',()=>{ PD=fit(padC); RD=fit(prevC); });
-  setTimeout(()=>{ PD=fit(padC); RD=fit(prevC); },90);
+  const refit=()=>{ PD=fit(padC,PD); RD=fit(prevC,RD); padDirty=true; };
+  addEventListener('resize',refit);
+  /* ResizeObserver вместо таймера на 90мс: он срабатывает и на первую раскладку,
+     и на возврат из `noui`, и на съехавшую ширину от появившегося скроллбара —
+     то есть на все случаи, ради которых таймер и ставился, но без угадывания */
+  if(window.ResizeObserver){ const ro=new ResizeObserver(refit); ro.observe(padEl); ro.observe(prevC); }
+  else setTimeout(refit,90);
   const cur=()=>motionResolve(state.motion.x,state.motion.y);
 
   /* ── ОДНА система координат ────────────────────────────────────────────────
@@ -5411,7 +5368,12 @@ for(const [slot,name] of [['mEnergy','energy'],['mDensity','density'],['mChaos',
     pc.lineJoin='round'; pc.lineCap='round'; pc.beginPath();
     for(let i=0;i<=64;i++){ const t=i/64, xx=R.x0+t*R.pw, yy=(R.y0+R.ph)-c.ease(t)*R.ph;
       i?pc.lineTo(xx,yy):pc.moveTo(xx,yy); } pc.stroke(); pc.globalAlpha=1;
-    const px=R.x0+state.motion.x*R.pw, py=(R.y0+R.ph)-state.motion.y*R.ph;
+    /* S4 · рендерное сопротивление: значение уже зажато в 0..1, но рука, ушедшая за
+       край, видит, как точка ЛЕНИВО подаётся следом и упирается — «дальше некуда»,
+       а не «контрол умер». Кривая — общая с скрабами (`resist`), не вторая своя. */
+    const ox=over.x?Math.sign(over.x)*Math.min(8,resist(Math.abs(over.x))):0;
+    const oy=over.y?Math.sign(over.y)*Math.min(8,resist(Math.abs(over.y))):0;
+    const px=R.x0+state.motion.x*R.pw+ox, py=(R.y0+R.ph)-state.motion.y*R.ph-oy;
     /* крестовина — только по полю построения, чтобы не резать подписи в полях */
     pc.strokeStyle=cINK; pc.globalAlpha=.20; pc.beginPath();
     pc.moveTo(px,R.y0); pc.lineTo(px,R.y0+R.ph);
@@ -5419,10 +5381,13 @@ for(const [slot,name] of [['mEnergy','energy'],['mDensity','density'],['mChaos',
     /* 🔒 хендл — КРУГ. Поехал эллипсом — сломана пропорция бокса, а не эта строка.
        Тёмная подложка под ним: точка садится на кривую своего же цвета и без неё
        сливается с ней ровно в том положении, где на неё смотрят. */
+    /* S6 · хендл подтверждает, что его держат: значение отзывается мгновенно, но
+       физического «взял» не было — палец на объекте, а объект не реагирует. */
+    const R_OUT=drag?8.5:7, R_INK=drag?6.6:5.5, R_DOT=drag?3:2.4;
     pc.fillStyle=cBG; pc.globalAlpha=.9;
-    pc.beginPath(); pc.arc(px,py,7,0,Math.PI*2); pc.fill(); pc.globalAlpha=1;
-    pc.fillStyle=cINK; pc.beginPath(); pc.arc(px,py,5.5,0,Math.PI*2); pc.fill();
-    pc.fillStyle=cACC; pc.beginPath(); pc.arc(px,py,2.4,0,Math.PI*2); pc.fill(); }
+    pc.beginPath(); pc.arc(px,py,R_OUT,0,Math.PI*2); pc.fill(); pc.globalAlpha=1;
+    pc.fillStyle=cINK; pc.beginPath(); pc.arc(px,py,R_INK,0,Math.PI*2); pc.fill();
+    pc.fillStyle=cACC; pc.beginPath(); pc.arc(px,py,R_DOT,0,Math.PI*2); pc.fill(); }
 
   /* Превью: два бегунка по одной дистанции — ровный ход и ход через кривую.
      Разница между ними и ЕСТЬ характер, который иначе объясняешь словами.
@@ -5437,6 +5402,19 @@ for(const [slot,name] of [['mEnergy','energy'],['mDensity','density'],['mChaos',
     /* засечки старта и финиша — дорожка получает начало и конец, а не растворяется */
     rc.strokeStyle=cLINE;
     for(const x of [x0,x1]){ rc.beginPath(); rc.moveTo(x,y0-4); rc.lineTo(x,y0+4); rc.stroke(); }
+    /* 🔴 S3 · reduced-motion. Цикл превью — 1.35/(0.6·MSPEED), то есть от 1.4с до
+       4.7с: медленный конец собственного диапазона садится ровно в полосу «медленные
+       петли около 0.2 Гц», которую канон велит не крутить. Гасить нечего — превью
+       ОБЪЯСНЯЕТ, а не украшает, поэтому вместо движения показываем то же сравнение
+       СТОЯЩИМ: цепочка выборок вдоль дорожки. Где точки гуще — там ход медленнее,
+       и характер виден без единого пикселя движения. */
+    if(REDUCED.matches){
+      for(let i=0;i<=10;i++){ const t=i/10;
+        rc.fillStyle=cMUT; rc.globalAlpha=.30;
+        rc.beginPath(); rc.arc(x0+t*span,y0,1.8,0,Math.PI*2); rc.fill();
+        rc.fillStyle=cACC; rc.globalAlpha=.85;
+        rc.beginPath(); rc.arc(x0+c.ease(t)*span,y0,2.6,0,Math.PI*2); rc.fill(); }
+      rc.globalAlpha=1; return; }
     phase+=dt*motionSpeed()*0.6; if(phase>1.35)phase-=1.35; const p=cl(phase);
     /* ghost — ровный ход, эталон. Полупрозрачный и меньше: он для сравнения */
     rc.fillStyle=cMUT; rc.globalAlpha=.5;
@@ -5447,21 +5425,57 @@ for(const [slot,name] of [['mEnergy','energy'],['mDensity','density'],['mChaos',
     rc.fillStyle=cACC; rc.beginPath(); rc.arc(ix,y0,4,0,Math.PI*2); rc.fill(); }
 
   function commit(){ state.motion.speed=+motionSpeed().toFixed(2);
-    if(SCRUBS.mSpeed) SCRUBS.mSpeed.set(state.motion.speed); drawPad(); }
+    /* S11 · та же защита, что в цикле: без неё перетаскивание пада переписывало
+       значение под ОТКРЫТЫМ редактором числа — один писатель, два разных правила */
+    if(SCRUBS.mSpeed && !SCRUBS.mSpeed.isEditing()) SCRUBS.mSpeed.set(state.motion.speed);
+    if(SCRUBS.mChar && !SCRUBS.mChar.isEditing()) SCRUBS.mChar.set(+state.motion.y.toFixed(2));
+    padDirty=true; drawPad(); }
   /* по ПОЛЮ ПОСТРОЕНИЯ, а не по боксу: иначе точка встаёт не под курсор, и в углах
      промах равен всей рамке — тыкаешь в SLOW, а получаешь 0.1/0.1 */
   function fromEvt(e){ const r=padEl.getBoundingClientRect(), R=plot();
     const sx=r.width/Math.max(1,PD.w), sy=r.height/Math.max(1,PD.h);
     return { x:(e.clientX-r.left-R.x0*sx)/(R.pw*sx),
              y:1-(e.clientY-r.top-R.y0*sy)/(R.ph*sy) }; }
-  let drag=false;
-  padEl.addEventListener('pointerdown',e=>{ drag=true; padEl.setPointerCapture(e.pointerId);
-    const p=fromEvt(e); state.motion.x=cl(p.x); state.motion.y=cl(p.y); commit();
+  let drag=false, grab=null, padDirty=true, lastDraw='';
+  const over={x:0,y:0};          /* перелёт за край, в пикселях — только для рендера */
+  /* 🔴 Поля с подписями были ЖИВОЙ ЗОНОЙ (аудит apple-design, S2).
+     Хит-область — весь бокс, а координаты считаются по полю построения, поэтому
+     тычок в рамку давал значение за диапазоном, а clamp вбивал его в угол. Итог:
+     клик по слову SLOW — по всем признакам подписи: капитель, --muted,
+     pointer-events:none — мгновенно переписывал ГЛОБАЛЬНЫЙ темп и изинг сцены.
+     Ни хода, ни порога, ни отмены. Рамка теперь глухая: небольшой допуск оставлен,
+     чтобы край поля прощал промах на пиксель, но зона подписей уже мертва. */
+  /* допуск ~3px, а не «на глаз»: рамка 17px в нормированных единицах это 0.08, и
+     щедрый допуск 0.06 покрывал её почти целиком — зона подписей оставалась живой */
+  const EDGE=0.015;
+  const inPlot=p=>p.x>=-EDGE && p.x<=1+EDGE && p.y>=-EDGE && p.y<=1+EDGE;
+
+  padEl.addEventListener('pointerdown',e=>{
+    const p=fromEvt(e); if(!inPlot(p)) return;
+    drag=true; try{ padEl.setPointerCapture(e.pointerId); }catch(_){}
+    e.preventDefault(); padEl.focus();
+    /* Хватать, а не телепортировать (S1). Если жмут ПО точке — запоминаем сдвиг и
+       ведём её 1:1 от того места, за которое взяли: канон прямого манипулирования
+       прямо называет прыжок к курсору тем, что рушит иллюзию. Жмут мимо — это
+       осознанный бросок «поставь характер сюда», он остаётся мгновенным. */
+    const R=plot(), near=Math.hypot((p.x-state.motion.x)*R.pw,(p.y-state.motion.y)*R.ph)<=14;
+    grab = near ? { dx:state.motion.x-p.x, dy:state.motion.y-p.y } : null;
+    if(!near){ state.motion.x=cl(p.x); state.motion.y=cl(p.y); }
+    commit();
     setFoot('character · X speed, Y easing — applies to behaviour, not to any one layer'); });
-  padEl.addEventListener('pointermove',e=>{ if(drag){ const p=fromEvt(e);
-    state.motion.x=cl(p.x); state.motion.y=cl(p.y); commit(); } });
-  padEl.addEventListener('pointerup',()=>drag=false);
-  padEl.addEventListener('pointercancel',()=>drag=false);
+
+  padEl.addEventListener('pointermove',e=>{ if(!drag)return; const p=fromEvt(e);
+    state.motion.x=cl(p.x+(grab?grab.dx:0)); state.motion.y=cl(p.y+(grab?grab.dy:0));
+    /* сопротивление на границе — РЕНДЕРНОЕ, значение честно клампится (S4).
+       Соседние скрабы этой панели уже пружинят у края; пад замирал намертво, и
+       внутри одного филдсета жили два разных ответа на «дальше некуда». */
+    const RR=plot();
+    over.x=(p.x<0?p.x:p.x>1?p.x-1:0)*RR.pw; over.y=(p.y<0?p.y:p.y>1?p.y-1:0)*RR.ph;
+    commit(); });
+  const endDrag=()=>{ drag=false; grab=null; over.x=over.y=0; drawPad(); };
+  padEl.addEventListener('pointerup',endDrag);
+  padEl.addEventListener('pointercancel',endDrag);
+  padEl.addEventListener('lostpointercapture',endDrag);
   /* клавиатура: пад — контрол, а не картинка, и должен браться с Tab */
   padEl.addEventListener('keydown',e=>{ const S=e.shiftKey?0.1:0.02; let hit=true;
     if(e.key==='ArrowLeft') state.motion.x=cl(state.motion.x-S);
@@ -5471,21 +5485,69 @@ for(const [slot,name] of [['mEnergy','energy'],['mDensity','density'],['mChaos',
     else hit=false;
     if(hit){ e.preventDefault(); commit(); } });
 
-  /* Speed-ряд ведёт ту же точку обратным ходом — иначе ползунок и пад воюют */
-  mount('mSpeed',{ min:0.45, max:1.7, step:0.01, value:1, label:'Speed', allowExtend:false,
+  /* 🔴 Ряд Speed ВОЕВАЛ с падом (аудит логики, баг 1).
+     Он писал ЗАПРОШЕННОЕ значение, а цикл пада через кадр записывал ДОСТИГНУТОЕ —
+     и они пинали число туда-сюда всё перетаскивание. Причина глубже защиты
+     `isEditing()`: та закрывает только открытый редактор числа, а состояние драга
+     у скраба живёт отдельно, так что в момент, который и ломался, защиты не было.
+
+     Настоящая причина — шкала врала. Достижимая скорость зависит от Y:
+       Y=0   → 0.48 … 1.65      Y=0.5 → 0.61 … 1.39      Y=1 → 0.74 … 1.13
+     а ряд объявлял 0.45…1.7 всегда. При Y=1 две трети хода вели в кламп, то есть
+     ползунок ехал, а сцена стояла.
+     Теперь ряд объявляет то, что достижимо хоть где-то, и пишет ДОСТИГНУТОЕ: у
+     потолка число останавливается раньше пальца — видно, что упёрлись в характер,
+     и никто ни с кем не спорит. */
+  /* allowExtend:false осознанно: значение ПРОИЗВОДНОЕ и математически ограничено
+     четырьмя архетипами. Расширить диапазон здесь — соврать: движок всё равно не
+     выдаст больше, чем даёт бленд углов. Это единственное законное основание для
+     флага (канон, закон 1), и оно записано, чтобы флаг не разошёлся по панели
+     «по образцу». */
+  mount('mSpeed',{ min:0.48, max:1.65, step:0.01, value:1, label:'Speed', allowExtend:false,
     onInput:v=>{ state.motion.x=speedToX(v*MOTION_NEUTRAL,state.motion.y);
-                 state.motion.speed=+v.toFixed(2); drawPad(); } });
+                 const got=+motionSpeed().toFixed(2);
+                 state.motion.speed=got;
+                 if(SCRUBS.mSpeed && Math.abs(SCRUBS.mSpeed.get()-got)>0.005) SCRUBS.mSpeed.set(got);
+                 padDirty=true; drawPad(); } });
+
+  /* 🔴 У оси Y НЕ БЫЛО ЧИСЛА (аудит канона, B2) — прямой анти-паттерн 8.
+     `motion.y` живая величина: она уходит в сцену и правит кривые приходов, но
+     прочитать, напечатать и воспроизвести её было нечем, а слова soft/raw по углам
+     — это подпись, а не показание. Теперь у пада оба его числа. */
+  mount('mChar',{ min:0, max:1, step:0.01, value:0.5, label:'Arrival', allowExtend:false,
+    onInput:v=>{ state.motion.y=cl(v); padDirty=true; commit(); } });
+
+  /* Хаос — вторая рука инструмента. Ноль = ровно то, что настроено руками, поэтому
+     он паркуется в НОЛЬ, а не в середину: у множителя нейтраль одна. */
+  mount('mChaos',{ min:0, max:1, step:0.01, value:0, label:'Chaos', allowExtend:false,
+    onInput:v=>{ state.motion.chaos=cl(v); padDirty=true; } });
 
   /* Число держится за пад в САМОМ цикле, а не только в commit(). commit срабатывает
      на руку — драг и клавиши, — но точка приезжает и другими путями: загрузка сцены,
      а завтра макро или маппинг. Каждый такой путь пришлось бы помнить и дёргать
      руками, и ровно один забытый вызов даёт «ползунок показывает 1.00, а сцена
      летит» — то есть панель, которой нельзя верить. Дешевле сверять раз в кадр. */
+  /* 🔴 S5 · луп рисовал безусловно — и продолжал рисовать при скрытом UI, то есть
+     ровно в перформанс-режиме (`noui`), где кадр сцены дороже всего, и в фоновой
+     вкладке. Сверка ЗНАЧЕНИЯ раз в кадр остаётся (она дешёвая и держит панель
+     честной), а вот перерисовка — только когда есть что показать и кому. */
+  const padHidden=()=>document.hidden||document.body.classList.contains('noui');
   (function ml(now){ const dt=Math.min((now-lastM)/1000,0.05); lastM=now;
     const live=+motionSpeed().toFixed(2);
     if(live!==state.motion.speed){ state.motion.speed=live;
       if(SCRUBS.mSpeed && !SCRUBS.mSpeed.isEditing()) SCRUBS.mSpeed.set(live); }
-    drawPad(); drawPrev(dt); requestAnimationFrame(ml); })(performance.now());
+    if(!padHidden()){
+      const sig=state.motion.x+'|'+state.motion.y+'|'+drag+'|'+over.x+'|'+over.y;
+      const changed=padDirty||sig!==lastDraw;
+      if(changed){ lastDraw=sig; padDirty=false; drawPad(); }
+      /* превью при reduced-motion статично — его хватает перерисовать вместе с
+         падом; в обычном режиме оно живёт своим ходом и просит кадр каждый раз */
+      if(!REDUCED.matches) drawPrev(dt); else if(changed) drawPrev(dt);
+    }
+    requestAnimationFrame(ml); })(performance.now());
+  /* вернулись на экран — перерисовать один раз, иначе канвас держит старый кадр */
+  document.addEventListener('visibilitychange',()=>{ padDirty=true; });
+  REDUCED.addEventListener('change',()=>{ padDirty=true; });
   commit();
 })();
 
@@ -5495,17 +5557,8 @@ for(const [slot,name] of [['mEnergy','energy'],['mDensity','density'],['mChaos',
    macro's own note warns about, so the answer is the live riser the panel already has:
    `setLive` paints where a value currently IS without touching the DOM around it. Same
    mechanism the rack uses to show a driven parameter. */
-function macroLive(name){
-  const L=activeLayer(); if(!L) return;
-  const touched=name ? new Set((MACRO_MAP[name]||[]).map(t=>t.k)) : null;
-  const ps=paramsOf(L);
-  for(const key in CARD_SCRUBS){
-    const sc=CARD_SCRUBS[key]; if(!sc||!sc.setLive) continue;
-    if(!touched || !touched.has(key)){ sc.setLive(null); continue; }
-    const p=ps.find(x=>x.key===key);
-    sc.setLive(p?p.get():null);
-  }
-}
+/* macroLive снят вместе с макро: он подсвечивал ползунки, ставшие устаревшими
+   во время протяжки фейдера. Множителю это не нужно — он ничего не устаревляет. */
 mount('logoAvoid',{min:0,max:2,step:0.01,value:state.logoAvoid,label:'Logo as void',
   onInput:v=>state.logoAvoid=v});
 mount('logoScale',{min:0.5,max:8,step:0.05,value:state.logoScale,label:'Logo size',
@@ -5797,7 +5850,9 @@ function paintDraws(draws,t,sizeMul){
       /* own tilt, drifting slowly, plus a lean into travel when Face heading is up */
       /* 0.12 measured 1.72°/s — present in the code, invisible to the eye. 0.72 gives
          10.3°/s, which reads as a slow deliberate turn. */
-      const own=(pv.roll + t*pv.spin*0.72)*LK.varTilt;
+      /* хаос доводит разброс наклонов до максимума — тела перестают читаться
+         как один объект, повёрнутый N раз (A12) */
+      const own=(pv.roll + t*pv.spin*0.72)*chaosTo(LK.varTilt,1,motionChaos());
       let rot = own + (LK.face>0.03 ? Math.atan2(hy,hx)*LK.face : 0);
       /* ── the suprematist toggle ─────────────────────────────────────────────
          Snap every body's angle to a fixed division of the circle and the same field
@@ -5834,7 +5889,7 @@ function paintDraws(draws,t,sizeMul){
       /* 0.72, matching the billboard branch. They disagreed by 6×, so a body oscillating
          around the LOD threshold visibly snapped between 1.7°/s and 10.3°/s each time it
          crossed — one rate, one look. */
-      const ownR=(pv.roll+t*pv.spin*0.72)*LK.varTilt;
+      const ownR=(pv.roll+t*pv.spin*0.72)*chaosTo(LK.varTilt,1,motionChaos());
       const ca=Math.cos(ownR), sa=Math.sin(ownR);
       const rr={x:rgt.x*ca+up.x*sa, y:rgt.y*ca+up.y*sa, z:rgt.z*ca+up.z*sa};
       const uu={x:-rgt.x*sa+up.x*ca, y:-rgt.y*sa+up.y*ca, z:-rgt.z*sa+up.z*ca};
@@ -6177,13 +6232,17 @@ function frame(){
       /* every body answers the layout at its OWN rate. `pd.lane` is the body's seeded
          −1..1 coordinate, so the spread is stable per body rather than a per-frame
          jitter — a property of the object, the way a heavier shape lags a lighter one. */
-      const vary=LP.vary==null?0:LP.vary;
-      /* Motion Pad · X (A8.3): третий адресат из плана — транспорт. Пад на «fast»
-         должен делать доводку резче, а не только гнать клоки: иначе сцена ускоряется,
-         а тела доезжают до цели с прежней ленцой, и темп читается как рассинхрон.
-         Множится РЕЙТ, а не сам шаг: k=1−exp(−dt·rate) остаётся устойчивым при
-         любом dt, и на просадке кадров пружина не перелетает. */
-      const kRate=LP.follow*MSPEED*(1+vary*((b.pd&&b.pd.lane)||0));
+      /* 🔴 Здесь раньше ДРАЛИСЬ хаос и пад (замер: chaos писал follow в 0, пад
+         множил ноль — ось X молча теряла работу, и по панели этого не было видно).
+         Теперь у них разные роли на одном числе, и они не спорят:
+           пад  — КАК БЫСТРО тело доезжает до цели (множит рейт),
+           хаос — НАСКОЛЬКО ОНО ВООБЩЕ ДЕРЖИТСЯ за цель (тянет рейт к нулю).
+         Порядок важен: хаос применяется последним, потому что «отпустить формацию»
+         должно побеждать любую скорость — на полном хаосе тела не держит ничто. */
+      const CH=motionChaos();
+      const vary=CH ? chaosTo(LP.vary==null?0:LP.vary, 0.6, CH) : (LP.vary==null?0:LP.vary);
+      const follow=CH ? chaosTo(LP.follow, 0, CH) : LP.follow;
+      const kRate=follow*MSPEED*(1+vary*((b.pd&&b.pd.lane)||0));
       /* no floor: `hold formation` at 0 has to mean NO pull, or a layer can never be let
          go to drift freely — a clamp here made every body creep toward its target and
          broke the «one layer's forces stay inside that layer» gate */
@@ -6336,7 +6395,7 @@ frame();
 window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), layers:()=>layers, scrubs:SCRUBS,
   /* the stored bases of every driven path — the gate asks whether a hand edit reached
      them, because reaching the parameter alone lasts exactly one frame */
-  bases:()=>BASES, applyMacro, setLead, leadEmphasis,
+  bases:()=>BASES, setLead, leadEmphasis,
   /* how many pixels the scene is actually lighting. The eye's own question, and the only
      honest way to ask «did that change the picture» of an effect that claims to reshape
      things rather than recolour them. */

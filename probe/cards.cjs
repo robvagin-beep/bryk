@@ -170,69 +170,60 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
           ', around base ' + base);
     }
 
-    /* ── MACRO: three knobs that each move a handful of things ─────────────────
-       The bar is «at least five parameters», because a macro that moves one is a slider
-       with a grander name. It is also the one control allowed to overrule a card by hand,
-       so what it must NOT do is keep overruling: it writes while it is moved and then
-       stops, or every card slider it covers becomes mysteriously dead. */
-    B.layers().slice().forEach(L => B.removeLayer(L.id));
-    const M1 = B.addLayer('pat-cloud'); await sleep(300);
-    /* no rack rows for this one: a seeded row restores its base at the foot of every
-       frame, so «did the macro write» and «did the drive put it back» would be the same
-       measurement. The seam between hand and rack has its own check above. */
-    M1.matrix.length = 0; B.bases().clear();
-    /* the auto spin advances `cam.yaw` on its own between the two reads, and every macro
-       was being credited with it — all three counts were one higher than the map declares */
-    B.state.cam.spin = 0;
-    const snapAll = () => { const o = {}; for (const p of B.paramsOf(M1)) o[p.key] = p.get(); return o; };
-    for (const macro of ['energy', 'density', 'chaos']) {
-      const lo = (B.applyMacro(macro, 0.05, true), await sleep(250), snapAll());
-      const hi = (B.applyMacro(macro, 0.95, true), await sleep(250), snapAll());
-      const moved = Object.keys(lo).filter(k => Math.abs((lo[k] || 0) - (hi[k] || 0)) > 1e-6);
-      put(macro + ' moves at least five things', moved.length >= 5,
-          moved.length + ': ' + moved.join(' '));
-    }
-    /* ── a macro nobody moved changes nothing ────────────────────────────────
-       The absolute version destroyed the boot standby on FIRST TOUCH: committing a fader
-       at its parked position — which is what typing a number does, no drag required —
-       re-dealt the crowd, quadrupled `follow`, pulled `swirl` down out of the range Rob
-       had deliberately set it above, and took 47% of the lit pixels off the screen. There
-       is no undo, and the scene it wrecked is the one the app opens into. */
-    B.scene.apply(B.scene.capture());   /* a known picture to touch */
-    await sleep(600);
-    const L0 = B.layers()[0];
-    L0.phys.swirl = 0.85;               /* above the working maximum, exactly as he tuned it */
-    const shot = () => ({ count: L0.count, follow: +L0.phys.follow.toFixed(4),
-                          swirl: +L0.phys.swirl.toFixed(4), size: +L0.look.size.toFixed(3) });
-    const untouched = shot();
-    for (const mk of ['energy', 'density', 'chaos']) B.applyMacro(mk, B.state.macro[mk], true);
-    await sleep(500);
-    const touched = shot();
-    put('a macro committed where it sits changes nothing',
-        JSON.stringify(untouched) === JSON.stringify(touched),
-        JSON.stringify(untouched) + ' → ' + JSON.stringify(touched));
-    /* and a value the hand put outside the working range is not confiscated */
-    B.applyMacro('chaos', B.state.macro.chaos + 0.1, true); await sleep(400);
-    put('a hand-set value above the working range survives a macro move',
-        L0.phys.swirl > 0.6, 'swirl ' + L0.phys.swirl.toFixed(3));
+    /* ── ХАРАКТЕР: один инструмент вместо трёх макро (A12) ────────────────────
+       Прежде здесь стояло девять проверок на макро: «двигает ли пять параметров»,
+       «не затирает ли руку», «переживает ли значение выше рабочего диапазона»,
+       «не переутверждает ли себя». Все девять существовали потому, что макро ПИСАЛИ
+       в параметры слоёв — каждая закрывала свой способ затереть настроенную сцену.
 
-    /* it writes when moved, and then it is quiet */
-    B.applyMacro('energy', 0.5, true); await sleep(200);
-    const held = B.paramsOf(M1).find(p => p.key === 'size');
-    held.set(77); await sleep(600);
-    put('a macro does not keep re-asserting itself over the hand',
-        Math.abs(held.get() - 77) < 1e-6, 'size held at ' + held.get());
-    /* the pose travels with the scene, the picture is not re-derived from it */
-    B.state.macro.energy = 0.23; B.state.macro.chaos = 0.81;
+       Писателя больше нет, и вместе с ним нет всего этого класса вопросов. Остаётся
+       ровно один, зато главный, и он сильнее любого из девяти: ХАОС ВИДЕН НА ТЕЛАХ
+       И НЕ ОСТАВЛЯЕТ СЛЕДА В СЛОЕ. Если он что-то напишет — проверка покраснеет. */
+    B.layers().slice().forEach(L => B.removeLayer(L.id));
+    const M1 = B.addLayer('pat-burst'); await sleep(400);
+    M1.matrix.length = 0; B.bases().clear(); B.state.cam.spin = 0;
+
+    const spread = () => { const b = M1.bodies.slice(0, 300);
+      const d = b.map(q => Math.hypot(q.x, q.y));
+      const m = d.reduce((a, v) => a + v, 0) / d.length;
+      return Math.sqrt(d.reduce((a, v) => a + (v - m) ** 2, 0) / d.length); };
+    const layerShot = () => JSON.stringify({ follow: M1.phys.follow, swirl: M1.phys.swirl,
+      flock: M1.phys.flock, vary: M1.phys.vary, tilt: B.state.varTilt,
+      size: M1.look.size, count: M1.count, scale: M1.look.scale });
+
+    B.state.motion.chaos = 0; await sleep(900);
+    const calmSpread = spread(), calmLayer = layerShot();
+    B.state.motion.chaos = 1; await sleep(1500);
+    const wildSpread = spread(), wildLayer = layerShot();
+    B.state.motion.chaos = 0; await sleep(1500);
+    const backSpread = spread(), backLayer = layerShot();
+
+    put('хаос отпускает формацию — это видно на телах',
+        wildSpread > calmSpread * 1.15,
+        'разброс ' + calmSpread.toFixed(3) + ' → ' + wildSpread.toFixed(3));
+    put('и ничего не пишет в слой: параметры те же до, во время и после',
+        calmLayer === wildLayer && calmLayer === backLayer);
+    put('отпустил — и сцена вернулась ровно туда, где была',
+        Math.abs(backSpread - calmSpread) / calmSpread < 0.08,
+        calmSpread.toFixed(3) + ' → ' + backSpread.toFixed(3));
+    put('ноль — это нейтраль, а не середина хода',
+        (B.state.motion.chaos = 0, await sleep(500), Math.abs(spread() - calmSpread) / calmSpread < 0.08));
+
+    /* инструмент едет со сценой целиком — обе оси пада И хаос.
+       Раньше сохранялась поза макро, а пад не сохранялся вовсе: сцена приезжала
+       с чужим темпом, и панель показывала положение, которого никогда не было. */
+    B.state.motion.x = 0.23; B.state.motion.y = 0.81; B.state.motion.chaos = 0.42;
     const msnap = B.scene.capture();
-    B.state.macro.energy = 0.5; B.state.macro.chaos = 0.5;
+    B.state.motion.x = 0.5; B.state.motion.y = 0.5; B.state.motion.chaos = 0;
     B.scene.apply(msnap); await sleep(600);
-    put('a scene recalls where the macro faders sat',
-        Math.abs(B.state.macro.energy - 0.23) < 1e-6 && Math.abs(B.state.macro.chaos - 0.81) < 1e-6,
-        'energy ' + B.state.macro.energy + ' · chaos ' + B.state.macro.chaos);
-    put('a scene from before the macros existed loads at neutral',
-        (B.scene.apply({ v:1, layers:[{prog:'grid'}] }), await sleep(400),
-         B.state.macro.energy === 0.5), 'energy ' + B.state.macro.energy);
+    put('сцена помнит характер целиком — обе оси и хаос',
+        Math.abs(B.state.motion.x - 0.23) < 1e-6 && Math.abs(B.state.motion.y - 0.81) < 1e-6 &&
+        Math.abs(B.state.motion.chaos - 0.42) < 1e-6,
+        'x ' + B.state.motion.x + ' · y ' + B.state.motion.y + ' · chaos ' + B.state.motion.chaos);
+    put('сцена старше пада грузится в нейтраль, а не в чужой темп',
+        (B.scene.apply({ v:1, layers:[{prog:'pat-burst'}] }), await sleep(400),
+         B.state.motion.x === 0.5 && B.state.motion.chaos === 0),
+        'x ' + B.state.motion.x + ' · chaos ' + B.state.motion.chaos);
 
     /* ── LEAD: all layers stay alive, one is read as the front ──────────────────
        A3.2. Not mute and not opacity: nothing is removed, the rest sit back. The
