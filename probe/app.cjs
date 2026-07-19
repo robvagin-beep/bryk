@@ -463,6 +463,70 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      just pushed has not been clamped yet this tick */
   ok('nothing exceeds terminal speed', iso.vmax <= 7, 'peak ' + iso.vmax.toFixed(2) + ' u/s (cap 6)');
 
+  /* ── the four words · scale · spacing · density · size ────────────────────────
+     Rob named this vocabulary himself (2026-07-19). Each knob has to do its OWN job and
+     nothing else, or we are back to `size` secretly meaning lane pitch. */
+  const vocab = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const B = window.__bryk;
+    B.layers().slice().forEach(L => B.removeLayer(L.id));
+    const L = B.addLayer('flow');
+    Object.assign(L.phys, { on: 1, follow: 14, damp: 0.9, collide: 0, swirl: 0,
+      gravity: 0, attract: 0, flock: 0 });
+    L.count = 240; L.opacity = 1;
+    const settle = async () => { B.setCount(240); await sleep(1100); };
+    /* half-extent of the settled field, in world units */
+    const extent = () => { const b = B.bodiesOf(L);
+      return { x: Math.max(...b.map(p => Math.abs(p.x))), y: Math.max(...b.map(p => Math.abs(p.y))) }; };
+    /* mean distance to the nearest neighbour — the honest measure of «air» */
+    const pitch = () => { const b = B.bodiesOf(L).slice(0, 90); let s = 0;
+      for (const p of b) { let m = Infinity;
+        for (const q of b) if (q !== p) m = Math.min(m, Math.hypot(q.x - p.x, q.y - p.y));
+        s += m; }
+      return s / b.length; };
+
+    L.look.scale = 1; L.look.spacing = 1; L.params.spread = 1; L.params.axes = 6;
+    await settle();
+    const base = extent(), basePitch = pitch();
+
+    /* 1 · fill: at spread 1 the outer lanes must reach the frame edge. The old fan divided
+       itself by the lane count and topped out at 69% of the half-frame at ANY setting. */
+    const vy = 1.6 * 1;                       /* viewport half-height in world at 1440×900 */
+    const reachRatio = base.y / vy;
+
+    /* 2 · scale moves the whole composition, and only that */
+    L.look.scale = 0.5; await sleep(1100);
+    const small = extent();
+    L.look.scale = 1; await sleep(1100);
+
+    /* 3 · spacing opens the air without changing the crowd */
+    const n0 = B.bodiesOf(L).length;
+    L.look.spacing = 2; await sleep(1200);
+    const wide = pitch(), n1 = B.bodiesOf(L).length;
+    L.look.spacing = 1; await sleep(600);
+
+    /* 4 · size range is a hierarchy with a stable centre: turning it up must spread the
+       calibres apart WITHOUT the whole field growing or shrinking (geometric mean 1) */
+    const mult = r => B.bodiesOf(L).map(b => B.sizeMult(b.pd.size, r));
+    const stat = a => { const lo = Math.min(...a), hi = Math.max(...a);
+      const gm = Math.exp(a.reduce((s, v) => s + Math.log(v), 0) / a.length);
+      return { ratio: hi / lo, gm }; };
+    const flat = stat(mult(0)), spread = stat(mult(1));
+
+    return { reachRatio, shrink: small.y / base.y, basePitch, wide, n0, n1,
+             flatRatio: flat.ratio, spreadRatio: spread.ratio, spreadGm: spread.gm };
+  });
+  ok('axis fills the frame to the edge', vocab.reachRatio > 0.85 && vocab.reachRatio < 1.25,
+     'outer lane at ' + (vocab.reachRatio * 100).toFixed(0) + '% of the half-frame');
+  ok('scale resizes the whole composition', Math.abs(vocab.shrink - 0.5) < 0.12,
+     'scale 0.5 → extent ×' + vocab.shrink.toFixed(2));
+  ok('spacing opens the air, not the crowd', vocab.wide > vocab.basePitch * 1.4 && vocab.n1 === vocab.n0,
+     'pitch ' + vocab.basePitch.toFixed(3) + ' → ' + vocab.wide.toFixed(3) + ' at the same ' + vocab.n1 + ' bodies');
+  ok('size range builds a hierarchy around a stable centre',
+     vocab.flatRatio < 1.001 && vocab.spreadRatio > 3 && Math.abs(vocab.spreadGm - 1) < 0.15,
+     'range 0 → ×' + vocab.flatRatio.toFixed(2) + ' · range 1 → ×' + vocab.spreadRatio.toFixed(1) +
+     ' (mean ' + vocab.spreadGm.toFixed(2) + ')');
+
   /* the engine section runs for minutes after the boot snapshot; an exception thrown in
      it used to be printed by nobody and counted by nobody */
   ok('console clean through the whole run', errors.length === bootErrs,

@@ -1349,6 +1349,30 @@ function baseParticle(i,seed){
     /* every body is its OWN object: personal calibre and personal tilt, so a field of
        them never reads as one shape stamped N times at one angle */
     size:0.55+r()*1.25, roll:(r()*2-1)*Math.PI, spin:(r()*2-1)*0.5 }; }
+/* ── size hierarchy ──────────────────────────────────────────────────────────────
+   Rob, 2026-07-19: «частички должны быть в диапазоне и большие и мелкие, так чтобы они
+   интересно комбинировались» — and A3.3 names the shape of it: «несколько КРУПНЫХ
+   доминант + рой мелких, как у Малевича».
+
+   `pv.size` is uniform in [0.55, 1.8], and a uniform draw gives a field of middling
+   bodies: no dominants, no swarm, everything within a factor of three of everything else.
+   A suprematist composition is not that — it is log-spaced, most of the mass small and a
+   handful genuinely large.
+
+   So the uniform draw is recovered and re-shaped through a power curve: u^2.2 pushes the
+   bulk toward the small end and leaves a thin tail of dominants. LO/HI are chosen so the
+   GEOMETRIC MEAN is exactly 1 — turning the range up spreads the field apart without the
+   whole scene growing or shrinking, which is what makes it usable live:
+       0.6875·ln(0.56) + 0.3125·ln(3.6) = 0
+   The spread rides in the exponent, so `range` 0 collapses every body to the same calibre
+   and 1 gives the full 6.4× hierarchy — a geometric interpolation, never a negative size. */
+const SZ_LO=0.56, SZ_HI=3.6, SZ_BIAS=2.2;
+function sizeMult(pvSize,range){
+  if(!(range>0)) return 1;
+  const u=clamp((pvSize-0.55)/1.25,0,1);
+  const m=SZ_LO*Math.pow(SZ_HI/SZ_LO,Math.pow(u,SZ_BIAS));
+  return Math.pow(m,clamp(range,0,1));
+}
 /* minimal polyhedra for the `form` pattern (particle-dance keeps a larger table) */
 /* FORMS — carried over whole from particle-dance-builder:238-256. BRYK shipped two of the
    eight (octa, cube) with hardcoded edges, so `form` had almost nothing to be a variety of.
@@ -1529,11 +1553,29 @@ function axisTarget(i,N,t,P,ctx){
   const vx=ctx.vx, vy=ctx.vy;
   const reach=Math.abs(ct)*vx+Math.abs(st)*vy+0.6;      // half visible path + overshoot
   const perpReach=Math.abs(st)*vx+Math.abs(ct)*vy;
-  const step=Math.max(0.09,(P.gap==null?1:P.gap)*0.5*(state.size/100));  // density
+  /* PITCH follows the body's own calibre. This read a frozen global (`state.size`, stuck
+     at 16 and unreachable from the panel since the look moved per layer), so growing the
+     bodies left the lanes exactly where they were and the field collapsed into itself —
+     Rob: «тело растёт, дорожки не расходятся, всё налазит». `spacing` is the air knob on
+     top of it, so calibre and air are two separate decisions instead of one tangled one. */
+  const step=Math.max(0.045,(P.gap==null?1:P.gap)*(ctx.spacing||1)*0.5*(ctx.size/100));
   const loop=Math.max(perLane*step, 2*reach+2*step);    // wrap seam lives off-screen
   const off=t*(P.speed==null?1:P.speed)*0.5;
-  let c=(inLane*step-off)%loop; c=((c%loop)+loop)%loop; c-=loop/2;
-  const laneOff=axes>1?(lane-(axes-1)/2)*(perpReach*1.5/axes):0;
+  /* CASCADE. Each lane starts at its own phase, so neighbouring lanes are offset in time
+     instead of marching in a rank — this is what makes a fall read as a cascade and a
+     grid read as a wave. Waterfall used to be a whole separate function whose only real
+     idea was this one line; folded in here, it arrives with bend, angle, plane tilt and
+     the size falloff that the standalone copy silently ignored. */
+  const stag=(P.stagger||0)*hash01(lane*7.13+1)*loop;
+  let c=(inLane*step-off+stag)%loop; c=((c%loop)+loop)%loop; c-=loop/2;
+  /* FILL. `perpReach*1.5/axes` divided the fan by the lane count, so the more lanes you
+     asked for the narrower each one's share became: four lanes reached 56% of the half
+     frame, twelve reached 69%, and NO setting ever touched the edge. Rob: «оно сугубо всё
+     отображает в центре viewport, дай размножить до краёв, не масштабируя потопом».
+     Now the outer lanes land exactly on ±perpReach·spread — spread 1 is edge to edge. */
+  const laneOff=axes>1
+    ? (lane-(axes-1)/2)*(2*perpReach*(P.spread==null?1:P.spread)/(axes-1))
+    : 0;
   const bendAt=x=>(P.bend||0)*Math.sin((x/reach)*Math.PI*(P.bendFreq||1));
   const dc=0.02, across=laneOff+bendAt(c), across2=laneOff+bendAt(c+dc);
   const p1x=ct*c-st*across,       p1y=st*c+ct*across;
@@ -1548,30 +1590,26 @@ function axisTarget(i,N,t,P,ctx){
            skip:Math.abs(c)>reach+0.5, order:-Math.abs(c),
            heading:{x:hx,y:hy,z:hz} };
 }
-/* WATERFALL — its own thing, not the generic axis (shuffler :237–252): columns of
-   bodies falling, staggered and overlapping, entering above and leaving below. */
-function waterfallTarget(i,N,t,P,ctx){
-  const vx=ctx.vx, vy=ctx.vy;
-  const cols=Math.max(1,Math.round(P.axes||3));
-  const col=i%cols, idx=Math.floor(i/cols), per=Math.max(1,Math.ceil(N/cols));
-  const step=Math.max(0.12,(P.gap==null?1:P.gap)*0.62*(state.size/100));
-  const loop=Math.max(per*step, 2*vy+2*step);
-  const colPhase=((col*0.41)%1), off=t*(P.speed==null?1:P.speed)*0.55+colPhase*loop;
-  let c=(idx*step+off)%loop; c=((c%loop)+loop)%loop;
-  const y=(vy+step)-c;
-  const colX=(col-(cols-1)/2)*(vx*1.7/cols), jit=Math.sin(idx*12.9+col*4.7)*0.06;
-  const sc=1-(P.scaleGrad||0)*0.5*clamp(Math.abs(y)/vy,0,1);
-  return { x:colX+jit, y:y, z:0, scale:sc, alpha:clamp((vy+0.45-Math.abs(y))/0.5,0,1),
-           skip:Math.abs(y)>vy+0.55, order:-Math.abs(y) };
-}
+/* WATERFALL — folded into the axis engine, 2026-07-19. Rob: «waterfall вообще хуйня».
+   He was right, and the audit said why: the standalone copy declared angle, bend, bend
+   freq, plane tilt, transport speed and spin in its card and read NONE of them — six live
+   sliders wired to nothing, on a preset whose whole promise is variety. It also carried
+   the same edge bug as the axis fan (`vx*1.7/cols` never reaching the frame edge) and the
+   same frozen `state.size` pitch.
+   Everything it actually had that the axis engine did not is one idea — per-column phase
+   offset — and that is now `stagger` up there, available to every axis preset. So the
+   duplicate is gone and Waterfall becomes what the file always claimed the family was:
+   one engine, four seeds. It gains bend, angle, tilt and falloff by arriving home. */
 
 const AXIS_PARAMS=[
-  {key:'axes',      label:'lanes',        min:1,  max:12,  step:1,    def:1},
+  {key:'axes',      label:'lanes',        min:1,  max:16,  step:1,    def:4},
+  {key:'spread',    label:'fill · to edge',min:0, max:1.3, step:0.01, def:1},
   {key:'angle',     label:'angle',        min:0,  max:360, step:1,    def:0},
-  {key:'gap',       label:'gap · density',min:0.1,max:3,   step:0.01, def:0.9},
-  {key:'speed',     label:'speed',        min:-3, max:3,   step:0.01, def:0.62},
+  {key:'gap',       label:'gap along lane',min:0.1,max:2,  step:0.01, def:0.9},
+  {key:'stagger',   label:'cascade',      min:0,  max:1,   step:0.01, def:0},
+  {key:'speed',     label:'speed',        min:-2, max:2,   step:0.01, def:0.62},
   {key:'bend',      label:'bend',         min:-1.5,max:1.5,step:0.01, def:0},
-  {key:'bendFreq',  label:'bend freq',    min:0.5,max:6,   step:0.1,  def:1},
+  {key:'bendFreq',  label:'bend freq',    min:0.5,max:3,   step:0.05, def:1},
   {key:'scaleGrad', label:'size falloff', min:0,  max:1,   step:0.01, def:0.18},
   {key:'tilt3d',    label:'plane tilt',   min:-1.5,max:1.5,step:0.01, def:0}
 ];
@@ -1617,7 +1655,7 @@ const SCENE_PARAMS=[
   {key:'sceneSpeed', label:'transport speed', min:-3, max:3, step:0.01, def:1},
   {key:'spin',  label:'spin',  min:0,  max:2,  step:0.01, def:0.4}
 ];
-const AXIS_KEYS_ALL=['axes','angle','gap','scaleGrad','bend','bendFreq','tilt3d','speed','sceneSpeed'];
+const AXIS_KEYS_ALL=['axes','spread','angle','gap','stagger','scaleGrad','bend','bendFreq','tilt3d','speed','sceneSpeed'];
 
 /* LAYOUTS — carried over identifier for identifier from image-shuffler:253-327.
    Signature adapted: the shuffler passes one `C` bag, we pass (i,N,t,P,ctx) where P is the
@@ -1705,18 +1743,23 @@ const LAYOUTS={
    the controls then stay live to tweak. This is what makes sine-wave and zigzag presets
    rather than programs: same engine, different seed. */
 const STYLE_PRESETS={
-  'flow':      {axes:3, angle:0, bend:0,    bendFreq:1, gap:0.42,  scaleGrad:0.18, tilt3d:0},
-  'waterfall': {axes:6, angle:0, bend:0,    bendFreq:1, gap:0.40, scaleGrad:0.15, tilt3d:0},
-  'sine-wave': {axes:3, angle:0, bend:0.55, bendFreq:2, gap:0.46,  scaleGrad:0.1,  tilt3d:0},
-  'zigzag':    {axes:3, angle:0, bend:0.6,  bendFreq:3, gap:0.46,  scaleGrad:0.1,  tilt3d:0}
+  'flow':      {axes:5, spread:1,    angle:0,  bend:0,    bendFreq:1, gap:0.42, stagger:0,    scaleGrad:0.18, tilt3d:0},
+  /* a fall reads as a cascade only when the columns are out of phase with each other —
+     that stagger IS the preset, and it is the one thing the old standalone had */
+  'waterfall': {axes:7, spread:1,    angle:90, bend:0,    bendFreq:1, gap:0.40, stagger:0.85, scaleGrad:0.15, tilt3d:0.25, speed:0.75},
+  'sine-wave': {axes:5, spread:1,    angle:0,  bend:0.55, bendFreq:2, gap:0.46, stagger:0.3,  scaleGrad:0.1,  tilt3d:0},
+  'zigzag':    {axes:5, spread:0.95, angle:0,  bend:0.6,  bendFreq:3, gap:0.46, stagger:0.5,  scaleGrad:0.1,  tilt3d:0}
 };
 /* STYLE_AXIS — shuffler :336-341. WHICH keys each preset shows. Waterfall showing eight
-   sliders while reading four was exactly the cost of not having this. */
+   sliders while reading four was exactly the cost of not having this — and then it grew
+   the same wound again from the other side: its own standalone target ignored six of the
+   keys it listed. Every axis preset now runs the same engine, so every one of them can
+   honestly show the whole set. */
 const STYLE_AXIS={
   'flow':      AXIS_KEYS_ALL,
-  'sine-wave': ['angle','gap','scaleGrad','bend','bendFreq','tilt3d','speed','sceneSpeed'],
-  'zigzag':    ['angle','gap','scaleGrad','bend','bendFreq','tilt3d','speed','sceneSpeed'],
-  'waterfall': ['axes','gap','scaleGrad','speed','sceneSpeed']
+  'sine-wave': AXIS_KEYS_ALL,
+  'zigzag':    AXIS_KEYS_ALL,
+  'waterfall': AXIS_KEYS_ALL
 };
 
 const P_ = (id,src,group,label,desc,params,keys,seed,target,drive)=>
@@ -1729,7 +1772,7 @@ const PRESETS=[
      AXIS_PARAMS.concat(SCENE_PARAMS), STYLE_AXIS['flow'], STYLE_PRESETS['flow'], axisTarget, 'bend'),
   P_('waterfall','image-shuffler:237-252','axis','Waterfall',
      'Frames fall in several columns, staggered and overlapping — a continuous cascade',
-     AXIS_PARAMS.concat(SCENE_PARAMS), STYLE_AXIS['waterfall'], STYLE_PRESETS['waterfall'], waterfallTarget, 'gap'),
+     AXIS_PARAMS.concat(SCENE_PARAMS), STYLE_AXIS['waterfall'], STYLE_PRESETS['waterfall'], axisTarget, 'stagger'),
   P_('sine-wave','image-shuffler:255+329','axis','Sine Wave',
      'Frames ride a curved sine axis — a flow preset',
      AXIS_PARAMS.concat(SCENE_PARAMS), STYLE_AXIS['sine-wave'], STYLE_PRESETS['sine-wave'], axisTarget, 'bend'),
@@ -2087,12 +2130,31 @@ const DEF_SHAPES=()=>({ tri:1, wedge:1, circle:1, asset:1 });
    stands — but how a layer DRESSES the bodies it claims is its own business. These are
    per-layer overrides of the pool's look; `count` stays global because a body cannot
    exist for one layer and not another. */
+/* ── the four words ──────────────────────────────────────────────────────────────
+   Rob, 2026-07-19, naming the vocabulary himself: «должно быть density — насколько они
+   плотные. Потом spacing — насколько у них есть пространство. Плюс scale — соотношение
+   каркаса. А size — размер каждой частички».
+   Four concepts, four knobs, no overlap between them:
+
+     density  how MANY bodies              → `count` (one per layer, the crowd)
+     scale    how BIG the composition is   → multiplies every target position
+     spacing  how much AIR between them    → multiplies a layout's internal pitch
+     size     how big ONE body is          → calibre
+
+   They were tangled before: `size` meant calibre in the renderer AND lane pitch in the
+   axis engine (through a frozen global), so growing the bodies did not move the lanes
+   apart and the field turned to mush — «все налазят друг на друга».
+
+   Keys are NOT renamed even where the label changes (`varSize` still says varSize).
+   Renaming a key on one side only is what killed ten presets this morning. */
 const LOOK_PARAMS=[
-  {key:'size',    label:'size',           min:2,  max:160, step:1,    def:16},
+  {key:'size',    label:'size · one body',min:4,  max:48,  step:0.5,  def:16},
+  {key:'scale',   label:'scale · frame',  min:0.2,max:2,   step:0.01, def:1},
+  {key:'spacing', label:'spacing · air',  min:0.3,max:2.5, step:0.01, def:1},
+  {key:'varSize', label:'size range',     min:0,  max:1,   step:0.01, def:0.7},
   {key:'radius',  label:'picture radius', min:0,  max:50,  step:1,    def:14},
   {key:'stroke',  label:'outline only',   min:0,  max:1,   step:1,    def:0},
   {key:'face',    label:'face heading',   min:0,  max:1,   step:0.01, def:0},
-  {key:'varSize', label:'size variation', min:0,  max:1,   step:0.01, def:0.7},
   {key:'varTilt', label:'tilt variation', min:0,  max:1,   step:0.01, def:1},
   {key:'tint',    label:'asset tint',     min:0,  max:1,   step:0.01, def:0.55}
 ];
@@ -3930,7 +3992,7 @@ function paintDraws(draws,t,sizeMul){
     const img=bank[b.tex]||bank[0]||textures[0]; if(!img)continue;
     const pv=b.pd||{size:1,roll:0,spin:0};
     const LK=lookOf(b);
-    const calibre=lerp(1,pv.size,LK.varSize)*(LK.size??state.size);   /* 0 = every body identical */
+    const calibre=sizeMult(pv.size,LK.varSize)*(LK.size??16);
     const sc=size*P.k/220*(d.scale==null?1:d.scale)*calibre;
     const alpha=clamp(0.35+P.k*0.35,0,1)*(d.alpha==null?1:d.alpha);
     const px = sc*2.2;                       /* on-screen size of this body */
@@ -4123,15 +4185,21 @@ function frame(){
        another layer's behaviour over the same body — there is no shared body any more,
        and since A3.1 there is no shared force set either */
     stepPhysics(dt,t,f,L);
-    const LP=L.phys;
+    const LP=L.phys, LKL=L.look, LSC=(LKL.scale==null?1:LKL.scale);
 
     const sizeMul = P.sizeScale ? P.sizeScale(N,L.params) : 1;
     const draws=[];
     for(let i=0;i<N;i++){
       const b=arr[i];
       const tg=P.target(i,N,t,L.params,{variant:L.variant,seed:L.seed,vx:vxw,vy:vyw,
+        /* the layer's own calibre and air, so a layout can space itself against the
+           bodies it is actually placing instead of against a frozen global */
+        size:LKL.size, spacing:LKL.spacing,
         rnd:k=>hash01(k+L.seed)});               /* shuffler C.rnd */
-      let tx=tg.x, ty=tg.y, tz=tg.z;
+      /* SCALE is universal: it multiplies the target every layout returns, so all 28 of
+         them gain «how big is this composition» without one of them knowing about it.
+         A layout stays a pure placement formula; framing is the layer's business. */
+      let tx=tg.x*LSC, ty=tg.y*LSC, tz=tg.z*LSC;
 
       b.px=b.x; b.py=b.y; b.pz=b.z;
       /* the transport to the target is the layer's own too (A3.2 register «транспорт к
@@ -4224,7 +4292,7 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
   /* two different tables, two different names: the object the hand turns is MANNERS,
      the ported reference set is MANNER_PRESET. One key for both let a gate go green on
      the table the UI does not use. */
-  mannerPresets:()=>MANNER_PRESET, bodiesOf:L=>L.bodies,
+  mannerPresets:()=>MANNER_PRESET, bodiesOf:L=>L.bodies, sizeMult,
   /* watch what the ENGINE receives, not what the panel draws */
   /* clear on ENABLE only: clearing on disable wiped the very log the caller was about to
      read, so the gate saw «0 frames» and reported a dead drive on a live one */
