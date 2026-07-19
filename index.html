@@ -2371,12 +2371,23 @@ const LOOK_PARAMS=[
   {key:'spacing', label:'spacing · air',  min:0.3,max:2.5, step:0.01, def:1},
   {key:'varSize', label:'size range',     min:0,  max:1,   step:0.01, def:0.7, hard:1},
   {key:'radius',  label:'picture radius', min:0,  max:50,  step:1,    def:14},
-  {key:'stroke',  label:'outline only',   min:0,  max:1,   step:1,    def:0,  hard:1},
+  {key:'stroke',  label:'outline only',   min:0,  max:1,   step:1,    def:0,  hard:1, mod:'no'},   /* a toggle. Two states are a strobe, not a modulation */
   {key:'face',    label:'face heading',   min:0,  max:1,   step:0.01, def:0},
   {key:'varTilt', label:'tilt variation', min:0,  max:1,   step:0.01, def:1,  hard:1},
+  /* ── which of these is worth putting a beat on ────────────────────────────────
+     Rob, on the mapping picker: «вариации бессмысленные». The list was everything
+     `paramsOf` returns, in declaration order, so a knob that re-deals the whole crowd sat
+     next to one that breathes. Four things make a target worth offering, and a parameter
+     that fails any one of them is noise on a fader:
+       · continuous      — a stepped value flickers between states instead of moving
+       · not a rebuild   — re-seeding the field on an envelope is a stutter, not a motion
+       · visible in <300ms — slower than that and the ear stops connecting it to the sound
+       · musically readable — you must be able to say what you will SEE when it hits
+     `mod:'no'` is that verdict, written next to the parameter rather than in a side table,
+     because a side table is how `speed`/`sceneSpeed` and `logo`/`mark` went stale. */
   /* 0 = free rotation. 2..24 snaps every body to that many angles around the circle —
      the switch between «debris drifting» and «a composition that agrees with itself». */
-  {key:'angles',  label:'angle snap',     min:0,  max:24,  step:1,    def:0,  hard:1},
+  {key:'angles',  label:'angle snap',     min:0,  max:24,  step:1,    def:0,  hard:1, mod:'no'},   /* a REGISTER, not a motion: it switches free drift to a grid. Hand or move, never an envelope */
   /* ── draw the relationships, not the objects (Reas, Process Compendium) ───────
      A line between two bodies that are close enough. The visible work becomes the
      structure BETWEEN things rather than the things, and a field of a few hundred bodies
@@ -2392,9 +2403,9 @@ const LOOK_PARAMS=[
   /* Sub-frame blur: N stamps along the travel at 1/N alpha, shutter 0.5 (the 180° rule).
      Fast bodies stop reading as a stutter of stamps. Cost is linear in N, so it is a
      small integer and it is off by default. */
-  {key:'smear',   label:'motion blur',    min:0,  max:4,   step:1,    def:0,  hard:1},
-  {key:'linkDist',label:'link reach',     min:0.05,max:1.2,step:0.01, def:0.34, hard:1},
-  {key:'tint',    label:'asset tint',     min:0,  max:1,   step:0.01, def:0.55, hard:1}
+  {key:'smear',   label:'motion blur',    min:0,  max:4,   step:1,    def:0,  hard:1, mod:'no'},   /* integer stamp count: driven, it flickers between 2 and 3 stamps */
+  {key:'linkDist',label:'link reach',     min:0.05,max:1.2,step:0.01, def:0.34, hard:1, mod:'no'}, /* re-wires WHICH pairs are neighbours: the web jumps rather than breathes. Drive `links` instead */
+  {key:'tint',    label:'asset tint',     min:0,  max:1,   step:0.01, def:0.55, hard:1, mod:'no'}  /* rebuilds the texture bank on every change — a rebuild on an envelope */
 ];
 const DEF_LOOK=()=>{ const o={}; for(const d of LOOK_PARAMS) o[d.key]=d.def; return o; };
 /* what the body actually wears: its owning layer's look, falling back to the pool's */
@@ -2531,7 +2542,10 @@ function paramsOf(L){
        the shared pool is gone: how much of this layer you see. `share` is retired — it
        existed only to stop two layers averaging one body, and there is no shared body. */
     { key:'w', label:'opacity', min:0, max:1, step:0.01, get:()=>L.opacity, set:v=>L.opacity=v },
-    { key:'count', label:'count', min:20, max:2000, step:1,
+    /* `count` rebuilds the whole crowd, so on a continuous envelope it is a stutter, not a
+       motion — but it IS musical at structural points («the field doubles on the drop»).
+       Offered, and offered honestly: the picker says it needs a gate. */
+    { key:'count', label:'count', min:20, max:2000, step:1, mod:'gate',
       get:()=>L.count, set:v=>{ L.count=Math.round(v); rebuildLayer(L); } },
     /* the LOOK belongs here too. It was rendered into the card by a parallel path and
        never entered paramsOf, so `applyMatrix` could not find `size` at all — the row was
@@ -2591,8 +2605,13 @@ const GLOBAL_PARAMS = [
   { key:'cam.persp',   label:'perspective', min:0,  max:1.2, step:0.01, get:()=>state.cam.persp, set:v=>state.cam.persp=v },
   { key:'cam.zoom',    label:'zoom',        min:0.4,max:2.4, step:0.01, get:()=>state.cam.zoom,  set:v=>state.cam.zoom=v },
   { key:'cam.tilt',    label:'tilt',        min:-1, max:1,   step:0.01, get:()=>state.cam.tilt,  set:v=>state.cam.tilt=v },
-  { key:'cam.yaw',     label:'yaw',         min:-3.2,max:3.2,step:0.01, get:()=>state.cam.yaw,   set:v=>state.cam.yaw=v },
-  { key:'face',        label:'face heading',min:0,  max:1,   step:0.01, get:()=>state.face,      set:v=>state.face=v },
+  { key:'cam.yaw',     label:'yaw',         min:-3.2,max:3.2,step:0.01, get:()=>state.cam.yaw,   set:v=>state.cam.yaw=v, mod:'slow' },
+  /* `face` was declared HERE as well as in LOOK_PARAMS, and paramsOf lists the layer's
+     look first, so every lookup — the rack, the macro map, the scrub sync — resolved to
+     `L.look.face` and this one answered to nothing. The renderer reads the layer's, which
+     is the correct owner: two layers may honestly want different heading. Third twin of
+     the same disease as `size` and `count`, and the comment two lines up already names the
+     rule it breaks. One concept, one field, one owner. */
   { key:'satDrift',    label:'shimmer',     min:0,  max:1,   step:0.01, get:()=>state.satDrift,  set:v=>state.satDrift=v },
   /* Everything that moved to the right column has to be REACHABLE from the rack, or the
      move was cosmetic. Before this, physics sat in the left column AND could not be given
@@ -2604,6 +2623,15 @@ const GLOBAL_PARAMS = [
      nothing. One concept, one field, one owner. */
   { key:'logoAvoid',    label:'logo as void',min:0,max:2, step:0.01, get:()=>state.logoAvoid,    set:v=>state.logoAvoid=v },
   { key:'cam.spin',     label:'auto spin',min:-0.5,max:0.5,step:0.005,get:()=>state.cam.spin,    set:v=>state.cam.spin=v },
+  /* The echo tunnel was reachable by hand and unreachable by the music — five knobs that
+     make the most psychedelic thing in the app and not one of them could be given a beat.
+     `amount` and `zoom` are the drama (the tunnel opens on a drop and closes after it);
+     `hue` is what separates psychedelia from a plain tail (A5.6) and it belongs on the
+     slow end of the spectrum, not the kick. */
+  { key:'echo.amount', label:'echo · tunnel',  min:0,   max:1,     step:0.01,  get:()=>state.echo.amount, set:v=>state.echo.amount=v },
+  { key:'echo.zoom',   label:'echo · zoom',    min:0.97,max:1.03,  step:0.001, get:()=>state.echo.zoom,   set:v=>state.echo.zoom=v },
+  { key:'echo.rot',    label:'echo · turn',    min:-0.06,max:0.06, step:0.001, get:()=>state.echo.rot,    set:v=>state.echo.rot=v },
+  { key:'echo.hue',    label:'echo · hue roll',min:0,   max:12,    step:0.1,   get:()=>state.echo.hue,    set:v=>state.echo.hue=v },
   /* `count` lives on the layer (paramsOf) since bodies stopped being shared. Keeping a
      global twin put the same key in a card twice and made the rack address the wrong one. */
 ];
@@ -2630,7 +2658,7 @@ const PHYS_PARAMS = [
   { key:'phys.follow',  f:'follow',  label:'follow',      min:0,   max:10,   step:0.05 , hard:1 },
   /* push = overlap · collide · dt · 9. At 1.5 a contact resolves in two frames. */
   { key:'phys.collide', f:'collide', label:'collide',     min:0,   max:1.5,  step:0.01 , hard:1 },
-  { key:'phys.radius',  f:'radius',  label:'body radius', min:0.02,max:0.4,  step:0.005, hard:1 },
+  { key:'phys.radius',  f:'radius',  label:'body radius', min:0.02,max:0.4,  step:0.005, hard:1, mod:'no' },   /* the collision geometry itself: driven, contacts chatter */
   /* curl amplitude is ~1.3, so swirl 0.25 ≈ 3 u/s — a body drifting across the frame in
      about a second. That is the top of «drift», and drift is what this force is for. */
   { key:'phys.swirl',   f:'swirl',   label:'swirl',       min:0,   max:0.6,  step:0.005, hard:1 },
@@ -3534,12 +3562,23 @@ const MAP_GROUPS=[
     ['links',    'web between neighbours'],
     ['streak',   'motion streaks'],
     ['satDrift', 'colour shimmer'],
+    ['face',     'bodies turn to face their travel'],
+    ['phys.vary','lag spread — how unevenly they answer'],
     ['phys.gravity','fall']]],
+  /* The tunnel is the loudest thing in the app and had no way in from the music. Its own
+     group, because on a drop you reach for these together. */
+  ['ECHO · the tunnel', [
+    ['echo.amount','tunnel opens'],
+    ['echo.zoom',  'how fast it rushes'],
+    ['echo.rot',   'the turn inside it'],
+    ['echo.hue',   'colour rolls through the tail']]],
   ['VIEW', [
     ['cam.persp','depth opens out'],
     ['cam.zoom', 'zoom'],
     ['cam.tilt', 'tilt'],
-    ['cam.yaw',  'turn']]]
+    ['cam.yaw',  'turn — slow signals only, the auto spin already turns it']]],
+  ['STRUCTURE · on the bar, not the beat', [
+    ['count',    'the crowd doubles — needs a gate, it re-deals the field']]]
 ];
 /* Build the picker from the groups, keeping only what THIS layer actually has — a
    pattern preset has no `lanes`, a formation has no `twist`, and offering a target the
@@ -3547,15 +3586,23 @@ const MAP_GROUPS=[
 function mapOptions(L){
   const have=new Set(paramsOf(L).map(p=>p.key));
   const out=[]; let n=0;
+  const barred=new Set(paramsOf(L).filter(p=>p.mod==='no').map(p=>p.key));
   for(const [title,items] of MAP_GROUPS){
-    const live=items.filter(([k])=>have.has(k));
+    /* a group may not re-admit what a declaration barred — otherwise the verdict and the
+       menu are two sources of truth again, and the menu is the one people read */
+    const live=items.filter(([k])=>have.has(k)&&!barred.has(k));
     if(!live.length)continue;
     out.push(['--g'+(n++), title]);
     for(const [k,label] of live) out.push([k,label]);
   }
-  /* anything the layer declares that no group claims — the preset's own oddities */
+  /* Anything the layer declares that no group claims — the preset's own oddities. This
+     tail used to be the whole unfiltered remainder, which is where «вариации
+     бессмысленные» actually lived: the groups above read well and then the list went on
+     with body radius, motion blur, outline toggle and asset tint. A parameter earns a
+     place here by passing the four tests written at LOOK_PARAMS; the ones that fail say so
+     on their own declaration. */
   const claimed=new Set(MAP_GROUPS.flatMap(([,it])=>it.map(([k])=>k)));
-  const rest=paramsOf(L).filter(p=>!claimed.has(p.key));
+  const rest=paramsOf(L).filter(p=>!claimed.has(p.key) && p.mod!=='no');
   if(rest.length){ out.push(['--gz','this preset']);
     for(const p of rest) out.push([p.key,p.label]); }
   return out;
@@ -3573,7 +3620,14 @@ function buildMatrix(){
     hd.appendChild(mkSel(mapOptions(activeLayer()),r.path,v=>{
       /* the base is keyed layer::path, so deleting by path alone never matched and the
          old target kept a stale base behind it */
-      BASES.delete(activeLayer().id+'::'+r.path); r.path=v; }));
+      BASES.delete(activeLayer().id+'::'+r.path); r.path=v;
+      /* A rebuild target on a continuous envelope is a stutter — the crowd is re-dealt
+         every frame the number moves. `mod:'gate'` says so on the declaration, and the row
+         acts on it instead of leaving the discovery to the dance floor: the curve snaps to
+         `gate`, which fires at a threshold instead of following. Changeable afterwards —
+         this sets a sane start, it does not lock the row. */
+      const tgt=paramsOf(activeLayer()).find(x=>x.key===v);
+      if(tgt&&tgt.mod==='gate'&&r.curve!=='gate'){ r.curve='gate'; buildMatrix(); } }));
     const del=document.createElement('button'); del.className='mtgl x'; del.textContent='✕';
     del.title='Remove row';
     del.addEventListener('click',()=>{ matrix.splice(i,1); BASES.clear(); buildMatrix(); });
@@ -5068,6 +5122,8 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
      contaminate whatever it measures next. The panel's ✕ still animates. */
   removeLayer:id=>removeLayer(id,true), removeSlow:id=>removeLayer(id),
   activeLayer:()=>activeLayer(), paramsOf:L=>paramsOf(L||activeLayer()),
+  /* what the picker OFFERS, as against what the engine can reach — the gate holds both */
+  mapOptions:L=>mapOptions(L||activeLayer()),
   input:()=>curInput, armed:()=>armed, ramp:()=>RAMP, textures:()=>textures,
   formation:(n,frame)=>buildFormation(n,frame), fps:()=>fpsShown, quads:()=>lastQuads, quadBudget:80,
   cam:()=>CAM, camTick:()=>camTick(), rebuildTex:()=>rebuildTextures(),

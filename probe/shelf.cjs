@@ -279,6 +279,37 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
         Object.keys(M).length === Object.keys(SRC).length &&
         Object.keys(SRC).every(k => M[k]), Object.keys(M).join(','));
 
+    /* ── the mapping picker is CURATED, not a dump of everything addressable ────
+       Rob: «вариации бессмысленные». Two halves to hold: what is offered must be worth
+       hearing, and what the engine can reach must not silently shrink to what the menu
+       shows — the rack, scenes and macros all address parameters the picker never lists
+       (that is the difference between a vocabulary and a menu). */
+    const Lm = B.onlyProg('pat-cloud'); await s(300);
+    const opts = B.mapOptions(Lm).filter(([k]) => !k.startsWith('--')).map(([k]) => k);
+    const all = B.paramsOf(Lm);
+    const barred = all.filter(p => p.mod === 'no').map(p => p.key);
+    put('nothing barred as a bad target is offered as one',
+        barred.every(k => !opts.includes(k)), barred.join(',') || 'none barred');
+    /* the four the audit named by hand, each for a different reason: a register, an
+       integer stamp count, a toggle, and a rebuild of the texture bank */
+    put('the four the audit named are gone from the picker',
+        ['angles','smear','stroke','tint'].every(k => !opts.includes(k)),
+        ['angles','smear','stroke','tint'].filter(k => opts.includes(k)).join(',') || 'all four gone');
+    put('the core targets are all still reachable',
+        ['w','size','scale','spacing','phys.swirl','phys.attract','links','streak',
+         'cam.persp','cam.zoom','satDrift','echo.amount','echo.hue'].every(k => opts.includes(k)),
+        ['w','size','scale','spacing','phys.swirl','phys.attract','links','streak',
+         'cam.persp','cam.zoom','satDrift','echo.amount','echo.hue'].filter(k => !opts.includes(k)).join(',') || 'all present');
+    put('a barred parameter is still driveable by a scene or a macro',
+        barred.every(k => all.some(p => p.key === k)),
+        'the vocabulary is ' + all.length + ' wide, the menu offers ' + opts.length);
+    /* one owner per concept: the twins are what made a drive reach nothing */
+    const vocab = all.map(p => p.key), twins = vocab.filter((k,i) => vocab.indexOf(k) !== i);
+    put('no parameter is declared twice', twins.length === 0, twins.join(',') || vocab.length + ' unique');
+    /* a rebuild target must arrive gated, not following an envelope */
+    const gated = all.filter(p => p.mod === 'gate').map(p => p.key);
+    put('rebuild targets are marked so the row can gate them', gated.includes('count'), gated.join(','));
+
     /* ── the polyhedron bank: eight shapes, eight silhouettes ─────────────── */
     const F = B.onlyProg('pat-form'); B.setCount(240);
     /* Silence the forces before measuring a SHAPE. The standby carries swirl and flock, so
