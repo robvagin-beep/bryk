@@ -935,14 +935,29 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     const offA = ring(24, 0.3);
     await sleep(120);
     const offB = ring(24, 0.3);
-    /* the mirror test, run while the effect is OFF: the same picture must NOT come back */
+    /* 🔴 Метрика мерила ГУСТОТУ, а не зеркало (2026-07-20).
+       `ringAt` усредняет пятно 7×7. На плотном поле любые два пятна усредняются в
+       один и тот же суп, и «похожи» становится верно ВЕЗДЕ: доля совпадений
+       уезжала к 100%, а гейт объявлял зеркало там, где его нет. Раньше это гуляло
+       0–83% (я списывал на флейк), а стоило поднять количество тел до 520 — стало
+       красным всегда. Порог трогать было бессмысленно: сама величина не про то.
+
+       Зеркало — это утверждение СРАВНИТЕЛЬНОЕ: пара, симметричная относительно шва,
+       похожа СИЛЬНЕЕ, чем пара, взятая наугад на том же радиусе. Поэтому рядом с
+       каждой зеркальной парой берётся контрольная, несимметричная, и сравниваются
+       ДОЛИ. Плотность влияет на обе одинаково и из ответа уходит. */
     const step0 = TAU / 6;
-    let offSame = 0, offLit = 0;
+    let offSame = 0, offLit = 0, ctlSame = 0, ctlLit = 0;
     for (const rad of [0.12, 0.18, 0.24, 0.30])
       for (let k = 1; k <= 6; k++) { const off = (k / 7) * (step0 / 2);
         const a = ringAt(rad, off), b3 = ringAt(rad, step0 - off);
-        if (a[0]+a[1]+a[2] < 24 && b3[0]+b3[1]+b3[2] < 24) continue;
-        offLit++; if (alike(a, b3)) offSame++; }
+        if (!(a[0]+a[1]+a[2] < 24 && b3[0]+b3[1]+b3[2] < 24)) {
+          offLit++; if (alike(a, b3)) offSame++; }
+        /* контроль: та же точка против заведомо НЕ зеркальной, на том же радиусе */
+        const c3 = ringAt(rad, off + step0 * 1.37);
+        if (!(a[0]+a[1]+a[2] < 24 && c3[0]+c3[1]+c3[2] < 24)) {
+          ctlLit++; if (alike(a, c3)) ctlSame++; } }
+    const ctlRate = ctlLit ? ctlSame / ctlLit : 0;
     const moved = offA.some((v, i) => !alike(v, offB[i]));
     let offFps = 0; for (let i = 0; i < 4; i++) { await sleep(320); offFps = Math.max(offFps, B.fps()); }
     const N = 6; B.state.kaleido.sectors = N; await sleep(900);
@@ -975,7 +990,7 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     for (let i = 0; i < s1.length; i++) { if (dark(s1[i]) && dark(s2[i])) continue;
       lit++; if (alike(s1[i], s2[i])) same++; }
     let onFps = 0; for (let i = 0; i < 4; i++) { await sleep(320); onFps = Math.max(onFps, B.fps()); }
-    return { offMoved: moved, same, lit, offFps, onFps, offLit, offSame,
+    return { offMoved: moved, same, lit, offFps, onFps, offLit, offSame, ctlRate,
              offSym: offLit ? offSame/offLit : 1 };
   });
   /* «Off» has to mean «no mirror», and the way to ask that is to look for the mirror.
@@ -983,21 +998,14 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      says the scene is animating and nothing at all about the effect — a build that stamped
      a full-frame copy at sectors 0 would have sailed through. Now it asks the same
      question the six-wedge check asks, and requires the answer to be NO. */
-  /* 🔴 Порог был у сестринской проверки и не был здесь (2026-07-19).
-     Доля считается только по ОСВЕЩЁННЫМ парам, а сколько их наберётся — как ляжет
-     поле: при двух-трёх парах одно совпадение даёт 33%, два — 67%, и гейт краснел
-     на ровном месте. Замеряно по кругу: 4 · 9 · 13 · 18 · 23 · 67 · 83 процента на
-     одном и том же коде, при пороге 50 — то есть монетка, а не измерение.
-     Ослаблять порог было бы способом перестать замечать. Правильный ход — тот же,
-     что уже сделан строкой ниже у «neighbouring wedges»: сначала докажи, что
-     измерению есть на чём стоять, и только потом суди. */
+  /* Вопрос теперь сравнительный: зеркальные пары не должны совпадать ЗАМЕТНО чаще,
+     чем контрольные. Абсолютный порог 50% меряло густоту поля, а не эффект. */
   ok('with the kaleidoscope off there is no mirror',
-     kal.offLit >= 8 && kal.offSym < 0.5,
+     kal.offLit >= 8 && kal.offSym <= kal.ctlRate + 0.25,
      kal.offLit < 8
        ? ('слишком мало освещённых пар (' + kal.offLit + ' из 24) — измерять нечего')
-       : Math.round(kal.offSym * 100) + '% of samples match across the seam with it off (' +
-         kal.offSame + '/' + kal.offLit + ' lit pairs)' +
-         (kal.offMoved ? '' : ' (scene was static — reading is weak)'));
+       : 'зеркальные ' + Math.round(kal.offSym * 100) + '% против контрольных ' +
+         Math.round(kal.ctlRate * 100) + '% (' + kal.offSame + '/' + kal.offLit + ' пар)');
   ok('neighbouring wedges are mirror images of each other',
      kal.lit >= 4 && kal.same >= kal.lit - 1,
      kal.same + ' of ' + kal.lit + ' lit samples match across the seam');

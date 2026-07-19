@@ -2100,8 +2100,20 @@ const PAT_PARAMS=[
      instead of huddling in the middle. This is a party screen, not a thumbnail. */
   {key:'spread',    label:'spread',    min:0, max:3,  step:0.01, def:1.85},
   {key:'dance',     label:'dance',     min:0, max:2,  step:0.01, def:0.72},
-  {key:'amplitude', label:'amplitude', min:0, max:3,  step:0.01, def:1},
-  {key:'frequency', label:'frequency', min:0, max:2.5,step:0.01, def:1},
+  /* 🔴 «Принудительная амплитуда, она прыгает постоянно» (Роб, видео 6:38).
+     Разбор: до того, как я оживил amplitude, она у burst не читалась ВООБЩЕ, и
+     посеянная строка `beat.sine → amplitude` честно не делала ничего. Оживив её
+     как ГЛУБИНУ ПУЛЬСА, я тем самым включил старую строку — и она принялась
+     менять глубину дыхания на каждый бит. Поле дёргалось, а причина не читалась
+     ни на одной ручке: строка-то была посеяна давно.
+     Дело не в глубине строки, а в том, ЧТО это за величина. Amplitude и frequency
+     задают, КАК поле дышит; менять их в темпе бита — всё равно что крутить
+     настройку осциллятора на каждой ноте. Их место — медленная огибающая, и это
+     теперь сказано в объявлении, а не оставлено на догадку.
+     `mod:'slow'` — тот же механизм, что `mod:'gate'` у count: цель, выбранная в
+     рэке, сама уводит строку к медленному сигналу. Не запрет — стартовая правда. */
+  {key:'amplitude', label:'amplitude', min:0, max:3,  step:0.01, def:1, mod:'slow'},
+  {key:'frequency', label:'frequency', min:0, max:2.5,step:0.01, def:1, mod:'slow'},
   {key:'twist',     label:'twist',     min:-3,max:3,  step:0.01, def:1},
   {key:'lanes',     label:'lanes',     min:2, max:24, step:1,    def:7}
 ];
@@ -2770,7 +2782,11 @@ const LOOK_PARAMS=[
   {key:'spacing', label:'spacing · air',  min:0.3,max:2.5, step:0.01, def:1},
   {key:'varSize', label:'size range',     min:0,  max:1,   step:0.01, def:0.7, hard:1},
   {key:'radius',  label:'picture radius', min:0,  max:50,  step:1,    def:14},
-  {key:'stroke',  label:'outline only',   min:0,  max:1,   step:1,    def:0,  hard:1, mod:'no'},   /* a toggle. Two states are a strobe, not a modulation */
+  {key:'stroke',  label:'outline only',   min:0,  max:1,   step:1,    def:0,  hard:1, mod:'no'},
+  /* подложка слоя (Роб, 1:38) — «чтобы он и настраивался где-то, и подсказывал,
+     что мы добавили что-то». Дефолт ненулевой у ВТОРОГО и дальше слоёв (см.
+     addLayer): первому отделяться не от чего, а вот третий без границы теряется. */
+  {key:'backing', label:'слой · подложка', min:0, max:1, step:0.01, def:0, hard:1},   /* a toggle. Two states are a strobe, not a modulation */
   {key:'face',    label:'face heading',   min:0,  max:1,   step:0.01, def:0},
   {key:'varTilt', label:'tilt variation', min:0,  max:1,   step:0.01, def:1,  hard:1},
   /* ── which of these is worth putting a beat on ────────────────────────────────
@@ -2878,7 +2894,7 @@ function makeLayer(prog,variant){
        were also pulling, and your change arrived diluted. A layer now owns its bodies
        outright, so its controls do exactly what they say and two layers cannot contradict
        each other. Compositing moves to where EQJ always had it: opacity and blend. */
-    bodies:[], count:seedCount, opacity:1, blend:'source-over',
+    bodies:[], count:seedCount, opacity:1, blend:'source-over', backing:0,
     /* its own forces (A3.1) — a behaviour dropped on this card cannot reach a stranger */
     phys:DEF_PHYS(), cam:Object.assign(DEF_CAM(), camSeed||{}),
     /* ── arriving and leaving ────────────────────────────────────────────────
@@ -2943,6 +2959,13 @@ function focusLayer(id){
 function openOnly(id){ layers.forEach(L=>L.open=(L.id===id)); }
 function addLayer(prog,variant){
   const L=makeLayer(prog,variant);
+  /* Роб просил, чтобы слой сам подсказывал своё появление (1:38), и я сначала
+     включал подложку со второго слоя автоматически. Гейты показали, почему так
+     нельзя: плашка кроет ВЕСЬ кадр — каждый пиксель становится засвеченным, а на
+     стопке из трёх слоёв затемнение складывается дважды и съедает контраст нижней
+     подачи. Заливать кадр по умолчанию значит менять картинку за оператора.
+     Поэтому ручка есть и стоит в нуле: одно перетаскивание, когда слои путаются,
+     и ноль последствий, когда не путаются. */
   layers.unshift(L); focusLayer(L.id); seedRows(L);
   /* a layer owns its bodies, so it has to BUILD them — under the shared pool it inherited
      a ready array and this step did not exist. Without it a new layer draws nothing. */
@@ -3039,36 +3062,55 @@ function paramsOf(L){
 /* which parameter is worth putting the beat on — now declared BY the preset (`drive`),
    not held in a side table that silently went stale every time the shelf changed */
 function seedRows(L){
-  /* a new layer sounds without a single click — EQJ seedBuilderRows :891
-     Re-tuned 2026-07-18 after Rob: «дергается как дибил», «эти резкие и плохо сделаны».
-     He was right and the two complaints had one cause. The old seed was:
-       env.bassFast → w   bipolar 0.55   = ±27% of the layer's presence on every kick
-       env.bassFast → size up 0.22       = +24px on a 8..120 range, on every kick
-     bassFast is an attack envelope, so both fired on the transient and snapped back:
-     the panel's risers twitched and the scene strobed. That is not «alive», it is noise.
+  /* ── ЧАСТОТНЫЕ РОЛИ (Роб, 2026-07-19, 5:47) ────────────────────────────────
+     «У тебя по основе всегда присвоено всё к басам и к битам. Давай присвоим,
+     чтобы что-то было к высоким, что-то к средним, что-то к низким. Низкие могут
+     отвечать за размер, именно удар, чтобы была пульсация, а высокие — за общее
+     вращение, автоспин. Не сильными рывками, просто оживлять движение.»
 
-     The re-tune keeps the same three jobs and changes WHICH signal does them:
-     · breathing is slow — bassSlow, not bassFast, and half the depth
-     · the beat goes on the preset's OWN drive target, where it reads as choreography
-       rather than as the whole field pulsing
-     · size follows the slow envelope too, gently — the kick is already carried by the
-       drive target, doubling it on calibre is what made it feel hammered */
-  L.matrix.push({ feat:'env.bassSlow', path:'w', mode:'bi', depth:0.22, curve:'ease' });
-  /* THE DRIVE TARGET HAS TO BE ONE THE CARD SHOWS. `params` is everything a preset
-     declares; `keys` is the subset its formula actually reads, and since the pattern keys
-     became derived (A8.1) those two differ — all seventeen patterns still name `amplitude`
-     as their drive, but cloud, lattice, vortex, ribbon and burst do not read it. The row
-     was seeded anyway, so five of the presets were born with a beat row driving nothing,
-     invisible in the picker because `paramsOf` filters by `keys`. A layer that cannot be
-     fixed in place is worse than one that arrives silent.
-     Falls through to the first key the preset really reads, so a new preset gets a live
-     beat row without anyone remembering to check this. */
+     Он прав буквально: все три посеянных строки сидели на басу и бите, поэтому
+     сцена умела ровно одно — бухать в такт. Верх и середина не участвовали, и
+     трек с богатой верхушкой выглядел так же, как трек без неё.
+
+     Роли, разложенные по спектру — по одной задаче на полосу, чтобы они не
+     складывались в одно движение:
+       НИЗ    → размер тела: удар. Это пульсация, которую он и просит;
+       НИЗ    → присутствие слоя: медленное дыхание под басовой линией;
+       СЕРЕДИНА → главная ручка подачи (её drive-цель): тело фигуры, её игра;
+       ВЕРХ   → вращение сцены: искры верхов оживляют кадр, не дёргая его.
+
+     Про «не сильными рывками» — везде взяты МЕДЛЕННЫЕ огибающие (`~`), кроме
+     удара: `bassFast` на размере это и есть транзиент кика, ради которого всё.
+     На верхах глубина нарочно мала: вращение должно дышать, а не рыскать. */
+
+  /* НИЗ · удар. Единственная быстрая огибающая во всём посеве: калибр тела —
+     то место, где транзиент читается как удар, а не как строб. */
+  L.matrix.push({ feat:'env.bassFast', path:'size', mode:'up', depth:0.16, curve:'ease' });
+  /* НИЗ · дыхание присутствия. Медленно и неглубоко: это подложка под ударом,
+     а не второй удар — две быстрые строки на басу и давали «дёргается как дибил». */
+  L.matrix.push({ feat:'env.bassSlow', path:'w', mode:'bi', depth:0.18, curve:'ease' });
+
+  /* СЕРЕДИНА · собственная ручка подачи.
+     Цель обязана быть той, которую карточка ПОКАЗЫВАЕТ: `params` — всё, что пресет
+     объявляет, `keys` — то, что его формула правда читает. Раньше все семнадцать
+     паттернов называли drive'ом `amplitude`, а пятеро её не читали, и строка
+     рождалась ведущей в никуда — невидимо, потому что paramsOf фильтрует по keys.
+     Отсюда падение на первую живую ручку: новый пресет получает рабочую строку,
+     и никому не нужно об этом помнить. */
   const P=PROGRAMS[L.prog], shows=k=>!P.keys||P.keys.includes(k);
   const main=P.params.find(p=>p.key===P.drive&&shows(p.key))
           || P.params.find(p=>shows(p.key)&&p.min!==p.max)
           || P.params[0];
-  if(main&&shows(main.key)) L.matrix.push({ feat:'beat.sine', path:main.key, mode:'up', depth:0.18, curve:'ease' });
-  L.matrix.push({ feat:'env.bassSlow', path:'size', mode:'up', depth:0.10, curve:'ease' });
+  if(main&&shows(main.key))
+    L.matrix.push({ feat:'env.midSlow', path:main.key, mode:'up', depth:0.20, curve:'ease' });
+
+  /* ВЕРХ · вращение. Роб, 0:00: «чтобы изначально вся наша композиция имела внизу
+     присвоенный автоспин. Это важная штука в целом вообще.»
+     Автоспин — это СКОРОСТЬ поворота, поэтому строка на нём не крутит кадр рывком,
+     а меняет, насколько быстро он едет: верхушка густая — сцена идёт живее, ушла —
+     подвисает. Ровно «оживлять движение», а не «дёргать». */
+  L.cam.spin = L.cam.spin || 0.035;
+  L.matrix.push({ feat:'env.highSlow', path:'cam.spin', mode:'up', depth:0.14, curve:'ease' });
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -4157,6 +4199,10 @@ const FEATURES=[['env.bassFast','bass ⚡'],['env.bassSlow','bass ~'],['env.midF
   ['band.sub','band sub'],['band.bass','band bass'],['band.mid','band mid'],['band.treble','band treble'],
   ['rms','rms'],['env.rmsSlow','rms ~'],['flux','flux'],['onset','onset'],
   ['beat.phase','beat ◔'],['beat.sine','beat ∿'],['beat.pulse','beat ●']];
+/* быстрый сигнал → его медленный близнец. Для целей с `mod:'slow'`. */
+const SLOW_FEAT={ 'env.bassFast':'env.bassSlow', 'env.midFast':'env.midSlow',
+  'env.highFast':'env.highSlow', 'rms':'env.rmsSlow', 'flux':'env.midSlow',
+  'onset':'env.midSlow', 'beat.pulse':'beat.sine' };
 const CURVES=[['lin','lin'],['exp','exp'],['sqrt','sqrt'],['ease','ease'],['gate','gate'],['inv','inv']];
 const RMODES=[['up','up'],['bi','± bi']];
 function mkSel(opts,val,on){
@@ -4184,52 +4230,61 @@ function mkSel(opts,val,on){
    Targets whose range makes them useless under modulation (integer counts, mode switches)
    are deliberately absent: driving `lanes` or `outline only` from the bass only ever
    flickered. That is what «ничего не делают» was. */
+/* ── Цели маппинга (переписано по видео, Роб 0:17) ────────────────────────────
+   «Вот в эти вот все длинные названия и непонятные штуки — здесь уйма лишних
+   ненужных вещей. Нам нужно, чтобы оно меняло размер, играло с перспективой,
+   с зумом, с поведением частиц: как просто пульсацией, так и вихрем.»
+
+   Две правки, обе по делу:
+   · ИМЕНА. Были предложения в строку («body size — the kick made visible»), которые
+     в выпадашке не читаются, а дочитываются. Стало два-три слова: в списке нужно
+     узнавать цель, а не изучать её. Развёрнутое объяснение живёт в инфо-доке.
+   · СОСТАВ. `twist` убран — фокус-версия доказанно его не читает (гейт мёртвых
+     ползунков), и он занимал место в списке, ничего не делая.
+   Порядок групп — по тому, за чем тянутся: сначала удар, потом фигура, потом
+   пространство (то самое Space/View, которого ему не хватало), дальше редкое. */
 const MAP_GROUPS=[
-  ['PULSE · size and presence', [
-    ['size',      'body size — the kick made visible'],
-    ['w',         'layer presence — fades the whole layer in and out'],
-    ['scale',     'composition size — the field breathes as a whole'],
-    ['varSize',   'size spread — dominants grow, the swarm stays small']]],
-  ['DANCE · the pattern itself', [
-    ['dance',     'dance speed — how fast the figure evolves'],
-    ['amplitude', 'dance reach — how far it throws them'],
-    ['twist',     'twist of the figure'],
-    ['spread',    'how wide the figure sits in the frame'],
-    ['frequency', 'detail of the figure']]],
-  ['SWIRL · drift and vortices', [
-    ['phys.swirl',    'lava drift — the vortex field'],
-    ['phys.flowSpeed','how fast the vortices churn'],
-    ['phys.flowScale','size of the vortices'],
-    ['cam.spin',      'the whole scene turns']]],
-  ['CROWD · how they treat each other', [
-    ['phys.collide', 'push apart — they make room'],
-    ['phys.flock',   'school together — they move as one'],
-    /* phys.attract убран из целей рэка вместе с ручкой (Роб, 2:46) */
-    ['phys.follow',  'hold formation — snap or lag'],
-    ['spacing',      'air between them']]],
+  ['PULSE · удар', [
+    ['size',      'размер тела'],
+    ['w',         'присутствие слоя'],
+    ['scale',     'размер композиции'],
+    ['varSize',   'разброс калибров']]],
+  ['FIGURE · сама подача', [
+    ['amplitude', 'глубина вдоха'],
+    ['frequency', 'скорость вдоха'],
+    ['spread',    'ширина фигуры'],
+    ['dance',     'темп фигуры']]],
+  ['SPACE · вид', [
+    ['cam.persp', 'перспектива'],
+    ['cam.zoom',  'зум'],
+    ['cam.spin',  'автоспин'],
+    ['cam.tilt',  'наклон'],
+    ['cam.yaw',   'поворот']]],
+  ['SWIRL · вихрь и снос', [
+    ['phys.swirl',    'вихревое поле'],
+    ['phys.flowSpeed','скорость вихрей'],
+    ['phys.flowScale','размер вихрей']]],
+  ['CROWD · между собой', [
+    ['phys.collide', 'расталкивание'],
+    ['phys.flock',   'стая'],
+    ['phys.follow',  'держат строй'],
+    ['spacing',      'воздух между']]],
   ['LOOK', [
-    ['links',    'web between neighbours'],
-    ['streak',   'motion streaks'],
-    ['satDrift', 'colour shimmer'],
-    ['face',     'bodies turn to face their travel'],
-    ['phys.vary','lag spread — how unevenly they answer'],
-    ['phys.gravity','fall']]],
-  /* The tunnel is the loudest thing in the app and had no way in from the music. Its own
-     group, because on a drop you reach for these together. */
-  ['ECHO · the tunnel', [
-    ['echo.amount','tunnel opens'],
-    ['echo.zoom',  'how fast it rushes'],
-    ['echo.rot',   'the turn inside it'],
-    ['echo.hue',   'colour rolls through the tail'],
-    ['kaleido.roll','the mirror turns'],
-    ['kaleido.mix', 'the ornament fades in over the picture']]],
-  ['VIEW', [
-    ['cam.persp','depth opens out'],
-    ['cam.zoom', 'zoom'],
-    ['cam.tilt', 'tilt'],
-    ['cam.yaw',  'turn — slow signals only, the auto spin already turns it']]],
-  ['STRUCTURE · on the bar, not the beat', [
-    ['count',    'the crowd doubles — needs a gate, it re-deals the field']]]
+    ['links',    'web'],
+    ['streak',   'шлейфы'],
+    ['satDrift', 'мерцание цвета'],
+    ['face',     'лицом по движению'],
+    ['phys.vary','разброс отклика'],
+    ['phys.gravity','падение']]],
+  ['ECHO · тоннель', [
+    ['echo.amount','тоннель'],
+    ['echo.zoom',  'скорость наплыва'],
+    ['echo.rot',   'поворот внутри'],
+    ['echo.hue',   'цвет по хвосту'],
+    ['kaleido.roll','поворот зеркала'],
+    ['kaleido.mix', 'проявление узора']]],
+  ['STRUCTURE · на такт, не на бит', [
+    ['count',    'толпа — пересдаёт поле']]]
 ];
 /* Build the picker from the groups, keeping only what THIS layer actually has — a
    pattern preset has no `lanes`, a formation has no `twist`, and offering a target the
@@ -4284,7 +4339,11 @@ function buildMatrix(){
          `gate`, which fires at a threshold instead of following. Changeable afterwards —
          this sets a sane start, it does not lock the row. */
       const tgt=paramsOf(activeLayer()).find(x=>x.key===v);
-      if(tgt&&tgt.mod==='gate'&&r.curve!=='gate'){ r.curve='gate'; buildMatrix(); } }));
+      if(tgt&&tgt.mod==='gate'&&r.curve!=='gate'){ r.curve='gate'; buildMatrix(); }
+      /* цель, которую нельзя дёргать быстро, сама уводит строку на медленный
+         сигнал: транзиент на такой величине читается как поломка, а не как ритм */
+      if(tgt&&tgt.mod==='slow'){ const slow=SLOW_FEAT[r.feat];
+        if(slow){ r.feat=slow; buildMatrix(); } } }));
     const del=document.createElement('button'); del.className='mtgl x'; del.textContent='✕';
     del.title='Remove row';
     del.addEventListener('click',()=>{ matrix.splice(i,1); BASES.clear(); buildMatrix(); });
@@ -6268,6 +6327,28 @@ function frame(){
        compose with it — see the note at LAYER_A */
     LAYER_A=clamp(L.opacity,0,1)*leadEmphasis(L);
     LAYER_CAM=L.cam||camFallback;
+
+    /* ── ПОДЛОЖКА СЛОЯ (Роб, видео 1:38) ────────────────────────────────────────
+       «Добавление нового слоя я бы делал с какой-то прослойкой бэкграунда, потому
+       что так он наслаивается один на другой и непонятно вообще, что происходит.
+       Полупрозрачный бэкграунд между слоями — чтобы он и настраивался где-то, и
+       подсказывал, что мы добавили что-то.»
+
+       Стопка из трёх подач сливалась в одну кашу: тела разных слоёв одного калибра
+       и одной палитры, и глазу не за что зацепиться, чтобы разделить их по глубине.
+       Плашка под телами слоя даёт эту границу — она чуть притеняет всё, что лежит
+       НИЖЕ, поэтому слой читается как отдельный план, а не как ещё горсть фигур.
+       Рисуется до тел и внутри того же save/restore, поэтому наследует и жизнь
+       слоя (приход/уход), и его прозрачность: слой уезжает — подложка с ним. */
+    const BACK=clamp(L.backing==null?0:L.backing,0,1);
+    if(BACK>0.002){
+      ctx.globalAlpha=BACK*0.55*LAYER_A*LLIFE;
+      ctx.globalCompositeOperation='source-over';
+      /* цвет — тот же фон сцены, что задан ползунком Background: подложка должна
+         быть «ещё немного фона», а не собственной краской поверх картинки */
+      ctx.fillStyle='oklch('+state.bgL+' 0.012 265)';
+      ctx.fillRect(0,0,cv.width,cv.height);
+    }
     ctx.globalAlpha=LAYER_A;
     ctx.globalCompositeOperation=L.blend||'source-over';
     if((LKL.links||0)>0.004) paintLinks(L,draws,LLIFE);
