@@ -284,17 +284,17 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
 .mpad canvas{position:absolute;inset:0;width:100%;height:100%;border:1px solid var(--line);
   border-radius:var(--r-mid);background:var(--paper)}
 .mpad:focus-visible{outline:2px solid var(--accent-live);outline-offset:2px}
-/* Подписи живут в ПОЛЯХ, а не на поле кривой. Раньше они стояли в 7px от края,
-   то есть внутри области построения: RAW садился ровно на верхний конец кривой,
-   SLOW — на нижний, и оба читались как часть графика. Теперь поле построения
-   отступает на MPAD_M (см. drawPad), а подписи занимают освободившуюся рамку. */
+/* Подписи лежат ПОВЕРХ клетки, в самых её углах, и не отнимают у неё площадь:
+   отдай им поля — и край поля построения нарисуется вторым прямоугольником
+   внутри первого (Роб: «квадратик внутри квадрата»). Читаемость на линиях
+   держит тень цветом фона, а не вырезанная под них рамка.
+   Стоят там же, где значение, которое называют: угол пада = угол графика,
+   поэтому клик по слову SLOW честно ставит 0/0 — подпись и есть это место. */
 .mcn{position:absolute;font-size:var(--fz-s);letter-spacing:.08em;color:var(--muted);
-  text-transform:uppercase;pointer-events:none;user-select:none;line-height:1}
-.mcn.nw{left:3px;top:3px}.mcn.ne{right:3px;top:3px}
-.mcn.sw{left:3px;bottom:3px}.mcn.se{right:3px;bottom:3px}
-.mprev{position:relative;height:26px;background:var(--paper);
-  border:1px solid var(--line);border-radius:var(--r-mid);overflow:hidden;margin-top:var(--sp-1)}
-.mprev canvas{position:absolute;inset:0;width:100%;height:100%}
+  text-transform:uppercase;pointer-events:none;user-select:none;line-height:1;
+  text-shadow:0 0 4px var(--paper),0 0 4px var(--paper),0 0 2px var(--paper)}
+.mcn.nw{left:5px;top:5px}.mcn.ne{right:5px;top:5px}
+.mcn.sw{left:5px;bottom:5px}.mcn.se{right:5px;bottom:5px}
 
 /* ═══ layer stack — EQJ .lrow grammar ═══ */
 #addLayerBar{margin-bottom:var(--sp-2)}
@@ -355,7 +355,9 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
 .crow .xdel{padding:0;height:20px;line-height:1;font-size:var(--fz-l);
   background:var(--tint);border:1px solid transparent;border-radius:var(--r-ctl);
   color:var(--muted);cursor:pointer}
-#ramp{display:block;width:100%;height:20px;border:1px solid var(--line);
+/* Полоса-превью палитры снята (Роб, 8:31: «не понимаю, для чего здесь
+   градиентная полоса, её убрать надо»). Сама рампа осталась — её читает движок,
+   показывать её отдельной плашкой было нечего. */
   border-radius:var(--r-ctl);margin:var(--sp-2) 0 0}
 
 /* ═══ corner ═══ */
@@ -470,7 +472,6 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
         <span class="mcn nw">soft</span><span class="mcn ne">raw</span>
         <span class="mcn sw">slow</span><span class="mcn se">fast</span>
       </div>
-      <div class="mprev"><canvas id="mprevc"></canvas></div>
       <div class="row"><label>Speed</label><span data-mnt="mSpeed"></span></div>
       <div class="row"><label>Arrival</label><span data-mnt="mChar"></span></div>
       <div class="row"><label>Chaos</label><span data-mnt="mChaos"></span></div>
@@ -669,25 +670,17 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
     </fieldset>
 
 
-    <fieldset id="gMoves"><legend>Moves</legend>
-      <div class="seg wrap">
-        <button class="btn" data-move="magnet" title="Build-up sucks in, the drop throws out (1)">MAGNET</button>
-        <button class="btn" data-move="gather" title="Chaos, then a hard snap to the grid (2)">GATHER</button>
-        <button class="btn" data-move="crowd" title="Camera to full frame for two bars (3)">CROWD</button>
-        <button class="btn" data-move="snap" title="Freeze into the grid and release (4)">SNAP</button>
-      </div>
-      <div class="row" style="margin-top:var(--sp-2)"><label title="Everything you fire lands on the music, not on your reaction time">Quantise</label>
-        <select id="quantSel" class="tinSelect" aria-label="Quantise">
-          <option value="off">off — instant</option><option value="beat">beat</option>
-          <option value="bar" selected>bar</option><option value="phrase">phrase</option>
-        </select></div>
-      <div class="row"><label title="Re-deal the body mix every bar">Auto-randomise</label><span data-mnt="autoRoll"></span></div>
-    </fieldset>
+    <!-- Панель Moves снята (Роб, 2026-07-20, скриншотом: «удали эту панель»).
+         Приёмы остались на клавишах Q · G · E · R — и это их основной путь, а не
+         остаток: по плану приёмы и задуманы как то, что работает при СКРЫТОМ UI,
+         когда панели нет вообще. Панель была их видимым зеркалом, не источником.
+         Quantise остаётся на своём музыкальном дефолте (bar): всё, что запускаешь
+         клавишей, по-прежнему приземляется на такт, а не на скорость реакции.
+         Auto-randomise снят вместе с панелью — единственный его орган был здесь. -->
 
     <fieldset id="gLook"><legend>Look</legend>
       <div id="stops"></div>
       <button class="btn wide" id="addStop" style="margin-top:var(--sp-1)">+ colour</button>
-      <canvas id="ramp" aria-label="Palette ramp"></canvas>
       <div class="row"><label>Background</label><span data-mnt="bgL"></span></div>
       <div class="row"><label title="Spectral brightness breathes the palette saturation. Hue never moves">Colour shimmer</label><span data-mnt="satDrift"></span></div>
       <!-- The echo tunnel: MilkDrop's depth, applied to the finished frame rather than to
@@ -1093,12 +1086,10 @@ function buildRamp(){
 }
 const rampAt = t => RAMP[Math.round(clamp(t,0,1)*255)];
 
-const rampCv=$('#ramp');
-function drawRamp(){
-  const g=rampCv.getContext('2d'), w=rampCv.width=rampCv.clientWidth*2, h=rampCv.height=40;
-  if(!w)return;
-  for(let x=0;x<w;x++){ g.fillStyle=rampAt(x/(w-1)); g.fillRect(x,0,1,h); }
-}
+/* Холст полосы удалён вместе с ней; функция остаётся пустышкой, потому что её
+   зовут два места (пересборка палитры и ресайз), и вырезать её ради одной строки
+   значит трогать оба ради ничего. Вернётся полоса — вернётся и тело. */
+function drawRamp(){}
 function buildStops(){
   const host=$('#stops'); host.innerHTML='';
   const st=normStops();
@@ -4213,7 +4204,7 @@ const MAP_GROUPS=[
   ['CROWD · how they treat each other', [
     ['phys.collide', 'push apart — they make room'],
     ['phys.flock',   'school together — they move as one'],
-    ['phys.attract', 'gather to the centre'],
+    /* phys.attract убран из целей рэка вместе с ручкой (Роб, 2:46) */
     ['phys.follow',  'hold formation — snap or lag'],
     ['spacing',      'air between them']]],
   ['LOOK', [
@@ -4642,14 +4633,12 @@ renderShelf();
    focus moves. Two fixed selects in the right column could only ever address whoever
    happened to be focused, without saying so. */
 
-/* ── moves · quantise · scenes · rack ── */
-document.querySelector('#gMoves .seg').addEventListener('click',e=>{
-  const b=e.target.closest('[data-move]'); if(b) triggerMove(b.dataset.move);
-});
-$('#quantSel').addEventListener('change',e=>{ QUANT=e.target.value;
-  setStatus('quantise · '+QUANT,'idle'); });
-let autoRoll=0;
-mount('autoRoll',{min:0,max:1,step:1,value:0,label:'Auto-randomise on bar',onInput:v=>autoRoll=v});
+/* ── scenes · rack ── */
+/* Кнопки приёмов, селектор Quantise и тумблер Auto-randomise жили в снятой панели.
+   Их слушатели удалены здесь же: querySelector по исчезнувшему узлу — это null и
+   падение на загрузке, а `mount` в отсутствующий слот шумит в консоль. Орган ушёл —
+   уходит и проводка к нему. */
+let autoRoll=0;   /* читается в кадре; органа больше нет, поэтому всегда 0 */
 
 buildBanks();
 $('#saveBtn').addEventListener('click',()=>{ saveMode=!saveMode; buildBanks();
@@ -5098,7 +5087,11 @@ const MOTION_ROWS=[
   {key:'phys.damp',     label:'lava · viscosity'},
   {key:'phys.vary',     label:'lava · lag spread'},
   {key:'phys.collide',  label:'avoid each other'},
-  {key:'phys.attract',  label:'gather to centre'},
+  /* «gather to centre» снят с карточки (Роб, 2026-07-19, 2:46: «убери вообще это
+     значение… она ломает очень много форм, совершенно нигде не нужна, ни в одной
+     настройке»). Сила остаётся в движке и по умолчанию равна нулю — её ещё дёргает
+     приём MAGNET на клавише Q, где притяжение к центру и есть весь смысл жеста.
+     Ручки нет: как параметр, который крутят руками, она себя не оправдала. */
   {key:'phys.follow',   label:'hold formation'},
   {key:'phys.flock',    label:'move together'},
   {key:'phys.gravity',  label:'fall'}
@@ -5311,9 +5304,9 @@ seedFonts(FALLBACK_FONTS.filter(f=>document.fonts.check('12px "'+f+'"')));
   /* запрос слушается, а не читается один раз: настройку меняют на ходу, и панель,
      узнавшая о ней только при загрузке, врёт до перезапуска */
   const REDUCED=matchMedia('(prefers-reduced-motion: reduce)');
-  const padEl=$('#mpad'), padC=$('#mpadc'), prevC=$('#mprevc');
-  if(!padEl||!padC||!prevC){ console.error('Motion Pad: нет разметки #mpad/#mpadc/#mprevc'); return; }
-  const pc=padC.getContext('2d'), rc=prevC.getContext('2d');
+  const padEl=$('#mpad'), padC=$('#mpadc');
+  if(!padEl||!padC){ console.error('Motion Pad: нет разметки #mpad/#mpadc'); return; }
+  const pc=padC.getContext('2d');
   const cl=v=>v<0?0:v>1?1:v;
   /* DPR ограничен двойкой, и подгонка повторяется через 90мс: на момент запуска
      скрипта панель ещё не разложена, и первый getBoundingClientRect даёт нули. */
@@ -5330,34 +5323,39 @@ seedFonts(FALLBACK_FONTS.filter(f=>document.fonts.check('12px "'+f+'"')));
     const dpr=Math.min(devicePixelRatio||1,2);
     cv.width=Math.max(1,r.width*dpr); cv.height=Math.max(1,r.height*dpr);
     cv.getContext('2d').setTransform(dpr,0,0,dpr,0,0); return {w:r.width,h:r.height}; }
-  let PD=fit(padC), RD=fit(prevC), phase=0, lastM=performance.now();
-  const refit=()=>{ PD=fit(padC,PD); RD=fit(prevC,RD); padDirty=true; };
+  let PD=fit(padC), lastM=performance.now();
+  const refit=()=>{ PD=fit(padC,PD); padDirty=true; };
   addEventListener('resize',refit);
   /* ResizeObserver вместо таймера на 90мс: он срабатывает и на первую раскладку,
      и на возврат из `noui`, и на съехавшую ширину от появившегося скроллбара —
      то есть на все случаи, ради которых таймер и ставился, но без угадывания */
-  if(window.ResizeObserver){ const ro=new ResizeObserver(refit); ro.observe(padEl); ro.observe(prevC); }
+  if(window.ResizeObserver){ const ro=new ResizeObserver(refit); ro.observe(padEl); }
   else setTimeout(refit,90);
   const cur=()=>motionResolve(state.motion.x,state.motion.y);
 
-  /* ── ОДНА система координат ────────────────────────────────────────────────
-     Было две, и отсюда шло ощущение кривизны: сетка и точка-хендл мерились по
-     всему боксу, а кривая и её диагональ — по вкладышу в 13px. Кривая висела
-     внутри собственной сетки, её концы не приходили ни в угол, ни в узел, а
-     хендл в углу пада не совпадал с углом графика, хотя означал ровно его.
-     Теперь всё — сетка, диагональ, кривая, крестовина, хендл и попадание
-     указателя — живёт в ОДНОМ прямоугольнике построения, а поля отданы
-     подписям. `MPAD_M` — единственное место, где эта рамка задаётся. */
-  const MPAD_M=17;
-  const plot=()=>{ const {w,h}=PD;
-    return { x0:MPAD_M, y0:MPAD_M, pw:Math.max(1,w-2*MPAD_M), ph:Math.max(1,h-2*MPAD_M) }; };
+  /* ── ОДНА КЛЕТКА НА ВЕСЬ БОКС (Роб, 2026-07-19, 3:33) ──────────────────────
+     «Ты сделал его квадратик внутри квадрата… сделай единую вёрстку клетки
+     внутри. И он всё равно спрыгивает не из угла, а вот туда.»
+
+     Он прав, и это моя же прошлая правка. Разводя две системы координат, я свёл
+     их — но свёл на ВКЛАДЫШЕ в 17px: поле построения стало меньше рамки, и его
+     край нарисовался вторым прямоугольником внутри первого. Хендл при этом
+     доезжал до угла ПОЛЯ, а не до угла пада, поэтому и «спрыгивает не из угла».
+
+     Теперь клетка одна и занимает весь бокс: сетка, диагональ, кривая, крестовина
+     и хендл считаются от края до края. Угол пада = угол графика = 0/0. Подписи
+     переехали ПОВЕРХ поля, в самые углы — они не отнимают площадь и потому не
+     создают второй рамки. */
+  const plot=()=>({ x0:0, y0:0, pw:Math.max(1,PD.w), ph:Math.max(1,PD.h) });
 
   function drawPad(){ const {w,h}=PD, c=cur(), R=plot(); pc.clearRect(0,0,w,h);
-    /* сетка — четверти ПОЛЯ ПОСТРОЕНИЯ, поэтому концы кривой садятся в его углы */
+    /* Только ВНУТРЕННИЕ линии: внешнюю рамку рисует бордер канваса, и дублировать
+       её штрихом значило бы снова получить прямоугольник в прямоугольнике —
+       ровно то, на что Роб и показал. Одна рамка, четыре четверти внутри. */
     pc.strokeStyle=cLINE; pc.lineWidth=1; pc.globalAlpha=.55;
-    for(let i=0;i<=4;i++){ const gx=R.x0+R.pw*i/4, gy=R.y0+R.ph*i/4;
-      pc.beginPath(); pc.moveTo(gx,R.y0); pc.lineTo(gx,R.y0+R.ph); pc.stroke();
-      pc.beginPath(); pc.moveTo(R.x0,gy); pc.lineTo(R.x0+R.pw,gy); pc.stroke(); }
+    for(let i=1;i<4;i++){ const gx=Math.round(R.pw*i/4)+.5, gy=Math.round(R.ph*i/4)+.5;
+      pc.beginPath(); pc.moveTo(gx,0); pc.lineTo(gx,R.ph); pc.stroke();
+      pc.beginPath(); pc.moveTo(0,gy); pc.lineTo(R.pw,gy); pc.stroke(); }
     pc.globalAlpha=1;
     /* диагональ «без характера»: линейный ход, с которым сравнивается кривая */
     pc.strokeStyle=cINK; pc.globalAlpha=.13; pc.setLineDash([3,4]); pc.beginPath();
@@ -5373,7 +5371,7 @@ seedFonts(FALLBACK_FONTS.filter(f=>document.fonts.check('12px "'+f+'"')));
        а не «контрол умер». Кривая — общая с скрабами (`resist`), не вторая своя. */
     const ox=over.x?Math.sign(over.x)*Math.min(8,resist(Math.abs(over.x))):0;
     const oy=over.y?Math.sign(over.y)*Math.min(8,resist(Math.abs(over.y))):0;
-    const px=R.x0+state.motion.x*R.pw+ox, py=(R.y0+R.ph)-state.motion.y*R.ph-oy;
+    let px=R.x0+state.motion.x*R.pw+ox, py=(R.y0+R.ph)-state.motion.y*R.ph-oy;
     /* крестовина — только по полю построения, чтобы не резать подписи в полях */
     pc.strokeStyle=cINK; pc.globalAlpha=.20; pc.beginPath();
     pc.moveTo(px,R.y0); pc.lineTo(px,R.y0+R.ph);
@@ -5381,6 +5379,22 @@ seedFonts(FALLBACK_FONTS.filter(f=>document.fonts.check('12px "'+f+'"')));
     /* 🔒 хендл — КРУГ. Поехал эллипсом — сломана пропорция бокса, а не эта строка.
        Тёмная подложка под ним: точка садится на кривую своего же цвета и без неё
        сливается с ней ровно в том положении, где на неё смотрят. */
+    /* ХАОС ВИДЕН НА ПАДЕ (Роб, 3:57: «если добавляем chaos, она начинает тоже
+       немножечко дрыгаться, потому что мы показываем допустимое отхождение от
+       сетки»). Точка не прыгает — она ДЫШИТ вокруг своего места радиусом, равным
+       хаосу: на нуле стоит намертво, на единице гуляет заметно. Это тот же
+       разброс, который хаос даёт телам на сцене, показанный на самом регуляторе,
+       поэтому ручка и картинка говорят одно и то же.
+       Дрожание — от времени, а не от кадра: на просадке фпс оно не ускорится. */
+    const CH=motionChaos();
+    if(CH>0.001){
+      /* ореол допустимого отхождения — он есть в обоих режимах и сам по себе
+         показывает величину хаоса, даже когда точка стоять обязана */
+      pc.strokeStyle=cACC; pc.globalAlpha=.22; pc.lineWidth=1;
+      pc.beginPath(); pc.arc(px,py,7+CH*9,0,Math.PI*2); pc.stroke(); pc.globalAlpha=1;
+      if(!REDUCED.matches){ const tt=performance.now()/1000, amp=CH*7;
+        px+=(Math.sin(tt*5.1)+Math.sin(tt*8.7)*0.6)*amp*0.5;
+        py+=(Math.cos(tt*4.3)+Math.cos(tt*7.9)*0.6)*amp*0.5; } }
     /* S6 · хендл подтверждает, что его держат: значение отзывается мгновенно, но
        физического «взял» не было — палец на объекте, а объект не реагирует. */
     const R_OUT=drag?8.5:7, R_INK=drag?6.6:5.5, R_DOT=drag?3:2.4;
@@ -5389,41 +5403,10 @@ seedFonts(FALLBACK_FONTS.filter(f=>document.fonts.check('12px "'+f+'"')));
     pc.fillStyle=cINK; pc.beginPath(); pc.arc(px,py,R_INK,0,Math.PI*2); pc.fill();
     pc.fillStyle=cACC; pc.beginPath(); pc.arc(px,py,R_DOT,0,Math.PI*2); pc.fill(); }
 
-  /* Превью: два бегунка по одной дистанции — ровный ход и ход через кривую.
-     Разница между ними и ЕСТЬ характер, который иначе объясняешь словами.
-     Прежняя версия читалась как недоделка: голая рамка, две точки без дорожки и
-     без общего края с падом. Теперь — одна дорожка на обоих (они идут по одному
-     пути, в этом весь смысл сравнения), тот же отступ MPAD_M, что у поля пада,
-     и ghost позади ink, а не под ним на отдельной полке. */
-  function drawPrev(dt){ const {w,h}=RD, c=cur(); rc.clearRect(0,0,w,h);
-    const y0=Math.round(h/2)+.5, x0=MPAD_M, x1=w-MPAD_M, span=Math.max(1,x1-x0);
-    rc.strokeStyle=cLINE; rc.lineWidth=1; rc.globalAlpha=.8;
-    rc.beginPath(); rc.moveTo(x0,y0); rc.lineTo(x1,y0); rc.stroke(); rc.globalAlpha=1;
-    /* засечки старта и финиша — дорожка получает начало и конец, а не растворяется */
-    rc.strokeStyle=cLINE;
-    for(const x of [x0,x1]){ rc.beginPath(); rc.moveTo(x,y0-4); rc.lineTo(x,y0+4); rc.stroke(); }
-    /* 🔴 S3 · reduced-motion. Цикл превью — 1.35/(0.6·MSPEED), то есть от 1.4с до
-       4.7с: медленный конец собственного диапазона садится ровно в полосу «медленные
-       петли около 0.2 Гц», которую канон велит не крутить. Гасить нечего — превью
-       ОБЪЯСНЯЕТ, а не украшает, поэтому вместо движения показываем то же сравнение
-       СТОЯЩИМ: цепочка выборок вдоль дорожки. Где точки гуще — там ход медленнее,
-       и характер виден без единого пикселя движения. */
-    if(REDUCED.matches){
-      for(let i=0;i<=10;i++){ const t=i/10;
-        rc.fillStyle=cMUT; rc.globalAlpha=.30;
-        rc.beginPath(); rc.arc(x0+t*span,y0,1.8,0,Math.PI*2); rc.fill();
-        rc.fillStyle=cACC; rc.globalAlpha=.85;
-        rc.beginPath(); rc.arc(x0+c.ease(t)*span,y0,2.6,0,Math.PI*2); rc.fill(); }
-      rc.globalAlpha=1; return; }
-    phase+=dt*motionSpeed()*0.6; if(phase>1.35)phase-=1.35; const p=cl(phase);
-    /* ghost — ровный ход, эталон. Полупрозрачный и меньше: он для сравнения */
-    rc.fillStyle=cMUT; rc.globalAlpha=.5;
-    rc.beginPath(); rc.arc(x0+p*span,y0,2.6,0,Math.PI*2); rc.fill(); rc.globalAlpha=1;
-    /* ink — ход через кривую, то, что реально делает сцена */
-    const ix=x0+c.ease(p)*span;
-    rc.fillStyle=cBG; rc.beginPath(); rc.arc(ix,y0,5.6,0,Math.PI*2); rc.fill();
-    rc.fillStyle=cACC; rc.beginPath(); rc.arc(ix,y0,4,0,Math.PI*2); rc.fill(); }
-
+  /* Бегущая полоска снята (Роб, 2026-07-19, 3:52: «она отвлекает только»).
+     Я поставил её как «объяснение характера в движении», но объяснять было уже
+     нечем: кривая изинга нарисована на самом паде и говорит то же самое, стоя.
+     Осталась одна бесконечно ползающая точка в углу глаза во время сета. */
   function commit(){ state.motion.speed=+motionSpeed().toFixed(2);
     /* S11 · та же защита, что в цикле: без неё перетаскивание пада переписывало
        значение под ОТКРЫТЫМ редактором числа — один писатель, два разных правила */
@@ -5438,15 +5421,11 @@ seedFonts(FALLBACK_FONTS.filter(f=>document.fonts.check('12px "'+f+'"')));
              y:1-(e.clientY-r.top-R.y0*sy)/(R.ph*sy) }; }
   let drag=false, grab=null, padDirty=true, lastDraw='';
   const over={x:0,y:0};          /* перелёт за край, в пикселях — только для рендера */
-  /* 🔴 Поля с подписями были ЖИВОЙ ЗОНОЙ (аудит apple-design, S2).
-     Хит-область — весь бокс, а координаты считаются по полю построения, поэтому
-     тычок в рамку давал значение за диапазоном, а clamp вбивал его в угол. Итог:
-     клик по слову SLOW — по всем признакам подписи: капитель, --muted,
-     pointer-events:none — мгновенно переписывал ГЛОБАЛЬНЫЙ темп и изинг сцены.
-     Ни хода, ни порога, ни отмены. Рамка теперь глухая: небольшой допуск оставлен,
-     чтобы край поля прощал промах на пиксель, но зона подписей уже мертва. */
-  /* допуск ~3px, а не «на глаз»: рамка 17px в нормированных единицах это 0.08, и
-     щедрый допуск 0.06 покрывал её почти целиком — зона подписей оставалась живой */
+  /* Раньше здесь стояла глухая рамка: поле построения было меньше бокса, и тычок
+     в поля давал значение за диапазоном, а clamp вбивал его в угол — клик по
+     подписи молча переписывал темп сцены. С единой клеткой проблема снялась сама:
+     подпись стоит РОВНО в том углу, который называет, поэтому клик по слову SLOW
+     честно даёт 0/0. Допуск оставлен на промах в пиксель по краю. */
   const EDGE=0.015;
   const inPlot=p=>p.x>=-EDGE && p.x<=1+EDGE && p.y>=-EDGE && p.y<=1+EDGE;
 
@@ -5537,12 +5516,17 @@ seedFonts(FALLBACK_FONTS.filter(f=>document.fonts.check('12px "'+f+'"')));
     if(live!==state.motion.speed){ state.motion.speed=live;
       if(SCRUBS.mSpeed && !SCRUBS.mSpeed.isEditing()) SCRUBS.mSpeed.set(live); }
     if(!padHidden()){
-      const sig=state.motion.x+'|'+state.motion.y+'|'+drag+'|'+over.x+'|'+over.y;
-      const changed=padDirty||sig!==lastDraw;
+      const sig=state.motion.x+'|'+state.motion.y+'|'+drag+'|'+over.x+'|'+over.y+
+                '|'+state.motion.chaos;
+      /* дыхание хаоса живёт во времени, а не в значении, поэтому при ненулевом
+         хаосе кадр нужен каждый раз — «изменилось» его не поймает.
+         При reduced-motion дрожать нельзя: показываем хаос радиусом ореола (drawPad
+         рисует его от того же CH), но точка стоит. */
+      const breathing=state.motion.chaos>0.001 && !REDUCED.matches;
+      const changed=padDirty||sig!==lastDraw||breathing;
       if(changed){ lastDraw=sig; padDirty=false; drawPad(); }
       /* превью при reduced-motion статично — его хватает перерисовать вместе с
          падом; в обычном режиме оно живёт своим ходом и просит кадр каждый раз */
-      if(!REDUCED.matches) drawPrev(dt); else if(changed) drawPrev(dt);
     }
     requestAnimationFrame(ml); })(performance.now());
   /* вернулись на экран — перерисовать один раз, иначе канвас держит старый кадр */
@@ -6340,7 +6324,10 @@ buildRamp(); buildStops(); rebuildPool(); rebuildTextures();
      and below ~2.5 the eye stops resolving objects and reads a raster. That is the «сетка»
      Rob saw, and it is a perception threshold, not a physics bug. 140 bodies at 40 puts
      the ratio at 2.54 and the median body at 9.5 px with dominants at 38. */
-  L.count=140; L.opacity=1; L.blend='source-over';
+  /* Роб, 1:25: «изначальное количество частиц… ты даёшь там 100, надо хотя бы
+     500. И чтобы они себя вели так ликвидно, по-живому». 140 читались как эскиз
+     подачи, а не как поле. */
+  L.count=520; L.opacity=1; L.blend='source-over';
   Object.assign(L.look,{ size:40, scale:1.13, spacing:1, varSize:0.9,
                          radius:14, stroke:0, face:0, varTilt:1, tint:0.55 });
   /* re-tuned by Rob against the smoothed engine (`bryk-scene (3).json`, 2026-07-19):
