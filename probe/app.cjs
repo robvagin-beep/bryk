@@ -948,15 +948,25 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
        ДОЛИ. Плотность влияет на обе одинаково и из ответа уходит. */
     const step0 = TAU / 6;
     let offSame = 0, offLit = 0, ctlSame = 0, ctlLit = 0;
-    for (const rad of [0.12, 0.18, 0.24, 0.30])
-      for (let k = 1; k <= 6; k++) { const off = (k / 7) * (step0 / 2);
+    /* Выборки, а не запас. На 24 парах стандартное отклонение доли около 0.11, то
+       есть две доли расходятся на ±0.3 просто от случая — любой запас внутри этого
+       коридора превращает гейт в монетку. Ослаблять порог было бы способом
+       перестать замечать; правильный ход — набрать доказательств: 8 радиусов ×
+       10 углов дают 80 пар и вдвое более узкий коридор. */
+    for (const rad of [0.10, 0.14, 0.18, 0.22, 0.26, 0.30, 0.34, 0.38])
+      for (let k = 1; k <= 10; k++) { const off = (k / 11) * (step0 / 2);
         const a = ringAt(rad, off), b3 = ringAt(rad, step0 - off);
         if (!(a[0]+a[1]+a[2] < 24 && b3[0]+b3[1]+b3[2] < 24)) {
           offLit++; if (alike(a, b3)) offSame++; }
-        /* контроль: та же точка против заведомо НЕ зеркальной, на том же радиусе */
-        const c3 = ringAt(rad, off + step0 * 1.37);
-        if (!(a[0]+a[1]+a[2] < 24 && c3[0]+c3[1]+c3[2] < 24)) {
-          ctlLit++; if (alike(a, c3)) ctlSame++; } }
+        /* Контроль обязан отличаться от зеркальной пары ТОЛЬКО зеркальностью.
+           Первая версия брала точку в 82° — а зеркальные пары стоят в 8..52° друг
+           от друга, и близкие углы похожи сами по себе, без всякого зеркала.
+           Сравнение выходило нечестным в свою пользу. Теперь контрольная пара
+           разнесена на ТУ ЖЕ угловую базу, просто в стороне от шва. */
+        const gap = Math.abs((step0 - off) - off);
+        const c1 = ringAt(rad, off + step0 * 2.4), c2 = ringAt(rad, off + step0 * 2.4 + gap);
+        if (!(c1[0]+c1[1]+c1[2] < 24 && c2[0]+c2[1]+c2[2] < 24)) {
+          ctlLit++; if (alike(c1, c2)) ctlSame++; } }
     const ctlRate = ctlLit ? ctlSame / ctlLit : 0;
     const moved = offA.some((v, i) => !alike(v, offB[i]));
     let offFps = 0; for (let i = 0; i < 4; i++) { await sleep(320); offFps = Math.max(offFps, B.fps()); }
@@ -1001,9 +1011,9 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   /* Вопрос теперь сравнительный: зеркальные пары не должны совпадать ЗАМЕТНО чаще,
      чем контрольные. Абсолютный порог 50% меряло густоту поля, а не эффект. */
   ok('with the kaleidoscope off there is no mirror',
-     kal.offLit >= 8 && kal.offSym <= kal.ctlRate + 0.25,
+     kal.offLit >= 24 && kal.offSym <= kal.ctlRate + 0.22,
      kal.offLit < 8
-       ? ('слишком мало освещённых пар (' + kal.offLit + ' из 24) — измерять нечего')
+       ? ('слишком мало освещённых пар (' + kal.offLit + ' из 80) — измерять нечего')
        : 'зеркальные ' + Math.round(kal.offSym * 100) + '% против контрольных ' +
          Math.round(kal.ctlRate * 100) + '% (' + kal.offSame + '/' + kal.offLit + ' пар)');
   ok('neighbouring wedges are mirror images of each other',
@@ -1043,6 +1053,46 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   ok('every view axis is offered to the rack', view.offered.length >= 5, view.offered.join(' '));
   ok('a rack row on auto spin turns the scene', view.idle < 0.01 && view.driven > 0.1,
      'idle ' + view.idle.toFixed(3) + ' → driven ' + view.driven.toFixed(3) + ' rad');
+
+  /* ── НАВЁЛСЯ — ВИДНО, ЧТО РУЧКА ДЕЛАЕТ (Роб, видео 8:05) ──────────────────────
+     «Возможно ли, чтобы ты наводишь — и появляется вертикальная чёрточка, которая
+     показывает motion, что именно эта штука делает.»
+     Гейт держит обе половины утверждения, потому что порознь они ничего не стоят:
+     ведомая ручка обязана ДЫШАТЬ под курсором, а спокойная — СТОЯТЬ. Риска,
+     дрожащая у всех подряд, врёт ровно так же, как не появляющаяся ни у кого.
+     Первая версия читала p.get() и стояла всегда: у ведомого параметра поле между
+     кадрами держит базу, а не то, что видно на экране. */
+  const hoverR = await page.evaluate(async () => {
+    const r = []; const put = (n, c, e) => r.push([n, !!c, e == null ? '' : String(e)]);
+    const s = ms => new Promise(f => setTimeout(f, ms));
+    /* Условия ставим сами: к этому месту прогон успевает очистить матрицы, и «риска
+       не дышит» означало бы «её нечему двигать», а не дефект. Свежий слой со своим
+       посевом — то состояние, в котором оператор и наводится на ручку. */
+    const B2 = window.__bryk;
+    B2.layers().slice().forEach(x => B2.removeLayer(x.id));
+    const LL = B2.addLayer('pat-burst'); await s(700);
+    LL.matrix.length = 0;
+    LL.matrix.push({ feat:'env.bassFast', path:'size', mode:'up', depth:0.5, curve:'lin' });
+    await s(600);
+    const pick = re => { for (const row of document.querySelectorAll('#focusBody .row')) {
+        const lb = row.querySelector('label'); if (lb && re.test(lb.textContent)) return row; }
+      return null; };
+    const moves = async re => { const row = pick(re); if (!row) return null;
+      const live = row.querySelector('.slive'); if (!live) return null;
+      row.dispatchEvent(new PointerEvent('pointerenter', { bubbles: true }));
+      await s(100); const pos = [];
+      for (let i = 0; i < 18; i++) { pos.push(live.style.left); await s(70); }
+      row.dispatchEvent(new PointerEvent('pointerleave', { bubbles: true }));
+      return new Set(pos).size; };
+    const driven = await moves(/size · one body/i);
+    const still  = await moves(/spacing/i);
+    put('наведение оживляет риску у ведомой ручки', driven !== null && driven > 3,
+        driven + ' разных позиций');
+    put('...и у спокойной она стоит, а не дрожит', still !== null && still <= 2,
+        still + ' позиций');
+    return r;
+  });
+  for (const [n, p, e] of hoverR) ok(n, p, e);
 
   /* ── Motion Pad (A8.3 · Н3) ───────────────────────────────────────────────────
      Пад ломался ДВАЖДЫ и одинаково: кто-то ужимал его по высоте, бокс переставал

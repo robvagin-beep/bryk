@@ -3300,6 +3300,7 @@ const _UNUSED_SEED = [
   { feat:'flux',         path:'face',      mode:'up', depth:0.55, curve:'sqrt' }
 ];
 const BASES = new Map();
+const DRIVEN_NOW=new Map();   /* layerId::key → значение, живое в этом кадре */
 function applyMatrix(f){
   /* Walk the rows of EVERY VISIBLE layer, not one global list: drive must reach the
      whole stack at once (EQJ states this principle at :559). Deviations still SUM per
@@ -3328,9 +3329,16 @@ function applyMatrix(f){
   };
   for(const L of layers) if(layerVisible(L)) take(L.matrix,L);
   const live=new Set();
+  /* Что параметр показывает ПРЯМО СЕЙЧАС — отдельно от того, что в нём хранится.
+     Модуляция откатывается к базе в конце каждого кадра, поэтому прочитать живое
+     значение из самого поля нельзя: между кадрами там всегда база. Раньше это
+     знание было заперто внутри applyMatrix и раздавалось только скрабам правой
+     колонки; карточке слоя оно нужно ровно так же (наведение, Роб 8:05). */
+  DRIVEN_NOW.clear();
   for(const [,s2] of acc){
     const v=clamp(s2.base+s2.sum,s2.p.min,s2.p.max);
     s2.p.set(v);
+    DRIVEN_NOW.set((s2.layerId||'')+'::'+s2.key, v);
     /* a layer's own params live under `w_<id>` / the layer card, not in SCRUB_FOR */
     const name = s2.key==='w' ? ('w_'+(s2.layerId||'')) : SCRUB_FOR[s2.key];
     const sc=SCRUBS[name];
@@ -5221,6 +5229,39 @@ function renderFocus(){
     const s2=(p.min===0&&p.max===1&&p.step===1) ? mountToggle(null,cfg,sl) : mkScrub(cfg);
     if(s2.el.parentNode!==sl) sl.appendChild(s2.el);
     CARD_SCRUBS[p.key]=s2;
+    /* ── НАВЁЛСЯ — ВИДИШЬ, ЧТО ЭТА РУЧКА ДЕЛАЕТ (Роб, видео 8:05) ───────────────
+       «Если определённая настройка влияет на какое-то движение и именно она
+       важная, то возможно ли, либо постоянно, либо при наведении, чтобы ты
+       наводишь — и появляется эта вертикальная чёрточка, которая показывает
+       motion, что именно эта штука делает. Мне было бы это очень в тему, потому
+       что очень большое количество настроек, которые непонятно к чему и зачем.»
+
+       Риска уже существовала, но только для строк, которые крутит рэк, — то есть
+       ровно там, где и так понятно, что параметр живой. Наведение включает её для
+       ЛЮБОЙ ручки и показывает ИСТИННОЕ текущее значение, читаемое из движка
+       каждый кадр. Стоит ручка мёртво — риска стоит; дышит под музыкой, макро или
+       приёмом — риска дышит вместе с ней.
+
+       Это отвечает не «какой у параметра диапазон», а «что он делает ПРЯМО
+       СЕЙЧАС» — единственный вопрос, который нельзя прочитать в подписи.
+       Только за hover-гейтом: на тач-устройстве наведения нет, и запускать там
+       кадровый опрос впустую незачем. */
+    if(s2.setLive && matchMedia('(hover:hover) and (pointer:fine)').matches){
+      let raf=0;
+      const stop=()=>{ if(raf) cancelAnimationFrame(raf); raf=0;
+        /* гасим, только если риску не держит рэк — иначе наведение её бы стирало */
+        if(!BASES.has(L.id+'::'+p.key)) s2.setLive(null); };
+      row.addEventListener('pointerenter',()=>{ if(raf)return;
+        const tick=()=>{ raf=requestAnimationFrame(tick);
+          /* живое значение, если параметр кто-то крутит, иначе — то, что в нём стоит.
+             Чтение p.get() у ведомого параметра вернуло бы базу, и риска стояла бы
+             намертво ровно там, где движение и нужно показать. */
+          const dn=DRIVEN_NOW.get(L.id+'::'+p.key);
+          s2.setLive(dn!=null?dn:p.get()); };
+        tick(); });
+      row.addEventListener('pointerleave',stop);
+      row.addEventListener('pointercancel',stop);
+    }
   } };
 
   /* ── what stays in sight, and what folds away ────────────────────────────────
