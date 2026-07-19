@@ -714,6 +714,39 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      Math.abs(looks.engineCap - looks.cap) < 1,
      'engine ' + Math.round(looks.engineCap) + 'px vs spec ' + Math.round(looks.cap) + 'px');
 
+  /* ── a formation is LEGIBLE, at any crowd ─────────────────────────────────────
+     Rob: «даже при большом количестве каких-то штук я всё равно 100% не добиваюсь».
+     The word was drawn with the layer's calibre while its cell spacing came from the
+     crowd, so at 300 bodies each one was several cells wide, every counter filled in and
+     the word read as a blob — and adding bodies made it worse. The claim is that the ink
+     stays INSIDE the letters: bodies may not cover the holes. Measured as the share of the
+     word's bounding box that is lit — solid letters with no counters run past 60%. */
+  const legible = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const B = window.__bryk, cv = document.getElementById('cv'), g = cv.getContext('2d');
+    const out = {};
+    for (const n of [300, 900]) {
+      const L = B.onlyProg('word'); L.matrix.length = 0; B.setCount(n);
+      Object.assign(L.phys, { swirl:0, flock:0, attract:0, collide:0.3, gravity:0, follow:9, vary:0 });
+      await sleep(2400);
+      const pts = B.formationPoints();
+      const xs = pts.map(q => q[0]), ys = pts.map(q => q[1]);
+      const p0 = B.project({ x: Math.min(...xs), y: Math.max(...ys), z: 0 });
+      const p1 = B.project({ x: Math.max(...xs), y: Math.min(...ys), z: 0 });
+      const x0 = Math.max(0, Math.round(Math.min(p0.x, p1.x))), y0 = Math.max(0, Math.round(Math.min(p0.y, p1.y)));
+      const w = Math.min(cv.width - x0, Math.abs(Math.round(p1.x - p0.x))) || 1;
+      const h = Math.min(cv.height - y0, Math.abs(Math.round(p1.y - p0.y))) || 1;
+      const d = g.getImageData(x0, y0, w, h).data;
+      let lit = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 24) lit++;
+      out[n] = lit / (w * h);
+    }
+    return out;
+  });
+  ok('the word keeps its counters at any crowd',
+     legible[300] < 0.6 && legible[900] < 0.6 && legible[300] > 0.05,
+     'ink fill of the word box: 300 → ' + (legible[300] * 100).toFixed(0) +
+     '% · 900 → ' + (legible[900] * 100).toFixed(0) + '%');
+
   /* ── layer opacity actually fades ─────────────────────────────────────────────
      Rob: «доработай карточкам прозрачность нормально чтоб работала». It did not: the frame
      loop set the layer's alpha and every body then overwrote it with its own, so the

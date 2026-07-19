@@ -2648,7 +2648,24 @@ function makeLayer(prog,variant){
      perspective only shrinks them away from the edges. Every one of the four view controls
      stays on the panel for every layer, so turning the depth back up is one drag. Nothing
      is taken away; the starting pose is simply the one that suits the preset. */
-  const camSeed = P.camSeed || (P.group==='behaviour' ? { persp:0, spin:0, tilt:0, zoom:1 } : null);
+  /* Rob, 2026-07-19: «эти axis и может и behaviours как-то свести в 2d… они доминирующие
+     должны быть в 2d, потому что они классно растекаются именно когда у них нету
+     искажения». Both families open flat: the axis engine draws lanes that read as lanes
+     when they are not foreshortened, and a behaviour's bodies live on a plane. «Некоторым
+     только добавить 3d» is the four view controls, which every layer keeps — this is the
+     pose it starts in, not the pose it is stuck in. */
+  /* The default camera was ALREADY flat for everybody — `DEF_CAM` is persp 0, spin 0 — so
+     seeding «2D» onto axis and behaviours changed nothing at all. What actually made the
+     app read as 3D was the standby scene, applied over the top.
+     The meaningful half is therefore the other one: the two families Rob singled out as
+     the good ones («layouts particles крутые», «сейчас у меня perspective — вот это
+     прикольно») open WITH depth and a slow turn, and the two that read best undistorted
+     («они доминирующие должны быть в 2d, они классно растекаются когда у них нету
+     искажения») stay flat. Formation stays flat too: a word is a word when you can read it.
+     Every layer keeps all four view controls either way. */
+  const DEEP_3D = { persp:0.72, spin:0.03, tilt:0.12, zoom:1 };
+  const camSeed = P.camSeed ||
+    ((P.group==='layout' || P.group==='particles') ? DEEP_3D : null);
   const look=DEF_LOOK();
   /* and their calibre. «swarm pack укладка — зря ты сейчас так крутишь и даёшь такой
      большой size of body, всё получается вообще не считываемым»: at 40px a swarm of 420
@@ -2838,9 +2855,20 @@ function seedRows(L){
      · size follows the slow envelope too, gently — the kick is already carried by the
        drive target, doubling it on calibre is what made it feel hammered */
   L.matrix.push({ feat:'env.bassSlow', path:'w', mode:'bi', depth:0.22, curve:'ease' });
-  const want=PROGRAMS[L.prog].drive;
-  const main=PROGRAMS[L.prog].params.find(p=>p.key===want) || PROGRAMS[L.prog].params[0];
-  if(main) L.matrix.push({ feat:'beat.sine', path:main.key, mode:'up', depth:0.18, curve:'ease' });
+  /* THE DRIVE TARGET HAS TO BE ONE THE CARD SHOWS. `params` is everything a preset
+     declares; `keys` is the subset its formula actually reads, and since the pattern keys
+     became derived (A8.1) those two differ — all seventeen patterns still name `amplitude`
+     as their drive, but cloud, lattice, vortex, ribbon and burst do not read it. The row
+     was seeded anyway, so five of the presets were born with a beat row driving nothing,
+     invisible in the picker because `paramsOf` filters by `keys`. A layer that cannot be
+     fixed in place is worse than one that arrives silent.
+     Falls through to the first key the preset really reads, so a new preset gets a live
+     beat row without anyone remembering to check this. */
+  const P=PROGRAMS[L.prog], shows=k=>!P.keys||P.keys.includes(k);
+  const main=P.params.find(p=>p.key===P.drive&&shows(p.key))
+          || P.params.find(p=>shows(p.key)&&p.min!==p.max)
+          || P.params[0];
+  if(main&&shows(main.key)) L.matrix.push({ feat:'beat.sine', path:main.key, mode:'up', depth:0.18, curve:'ease' });
   L.matrix.push({ feat:'env.bassSlow', path:'size', mode:'up', depth:0.10, curve:'ease' });
 }
 
@@ -3411,7 +3439,12 @@ function tightestCell(L){
   if((L.params.fit??1)<=0) return Infinity;            /* fit 0 = «leave my calibre alone» */
   if(L.prog==='mark'){ buildLogoMask(L.bodies.length,L.params.mode>0.5);
     return (LOGO.spacing||Infinity)*(L.params.scale??1); }
-  buildFormation(L.bodies.length,L.params.mode>0.5);
+  /* THE SAME REACH THE FRAME USES. `buildFormation` caches on its arguments, so calling it
+     here without the reach rebuilt the word at the fallback span and left THAT in the
+     cache — the bodies were then placed on one word while the spacing, the collision
+     radius and now the drawn calibre were computed from another. The frame passes
+     `ctx.vx`, which is `viewportHalf().x`; so does this. */
+  buildFormation(L.bodies.length,L.params.mode>0.5,viewportHalf().x);
   return formSpacing*(L.params.scale??1);
 }
 /* the collision radius a layer's bodies actually stand at, after the formation clamp */
@@ -5326,7 +5359,25 @@ function paintDraws(draws,t,sizeMul){
     const img=bank[b.tex]||bank[0]||textures[0]; if(!img)continue;
     const pv=b.pd||{size:1,roll:0,spin:0};
     const LK=lookOf(b);
-    const calibre=sizeMult(pv.size,LK.varSize)*(LK.size??16);
+    /* ── a formation body is the size of its own cell ───────────────────────────
+       Rob, 2026-07-19: «у тебя нет везде как будто бы проверок в контексте того, как это
+       отображается в самом конце… даже при большом количестве каких-то штук я всё равно
+       100% не добиваюсь». Measured: «BRYK» at 300 bodies and calibre 40 is a solid blob —
+       the cell spacing at that crowd is 0.068 world units and a body is drawn several
+       times wider, so every letter fills in and the counters disappear. More bodies made
+       it worse, not better, which is why cranking density never got him there.
+       `fit` already computed the right number and spent it on the COLLISION radius only.
+       The drawn calibre is what the eye reads, so it follows the cell too: a body is one
+       cell across, letters keep their holes, and the word is legible at 300 as well as at
+       3000. `fit` 0 still means «leave my calibre alone». */
+    let calibre=sizeMult(pv.size,LK.varSize)*(LK.size??16);
+    if(b.L){ const cell=tightestCell(b.L);
+      if(Number.isFinite(cell)){
+        /* `cell` is a world distance and the draw path multiplies calibre by 1/220 of the
+           projection, so 220·cell is the calibre that spans exactly one cell. 0.92 leaves
+           the hairline of background that makes neighbouring bodies read as two. */
+        calibre=Math.min(calibre, cell*220*0.92);
+      } }
     const sc=size*P.k/220*(d.scale==null?1:d.scale)*calibre;
     const alpha=clamp(0.35+P.k*0.35,0,1)*(d.alpha==null?1:d.alpha);
     const px = sc*2.2;                       /* on-screen size of this body */

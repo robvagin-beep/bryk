@@ -316,6 +316,24 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
         Object.keys(M).length === Object.keys(SRC).length &&
         Object.keys(SRC).every(k => M[k]), Object.keys(M).join(','));
 
+    /* ── a new layer is born SOUNDING, on every preset ──────────────────────────
+       `seedRows` puts a beat on the preset's own drive target. That target is named in
+       `params`, but a card only shows `keys`, and once the pattern keys became derived the
+       two stopped agreeing: five of the seventeen were born with a row driving a key their
+       formula does not read — silent, and invisible in the picker, so unfixable in place.
+       Ask it of every preset on the shelf, because the next divergence will not be in the
+       same five. */
+    const mute = [];
+    for (const id of ids) {
+      const L = B.addLayer(id);
+      const shown = new Set(B.paramsOf(L).map(x => x.key));
+      for (const row of L.matrix) if (!shown.has(row.path)) mute.push(id + ' → ' + row.path);
+      B.removeLayer(L.id, true);
+    }
+    await s(200);
+    put('every seeded row drives something the card can reach', mute.length === 0,
+        mute.slice(0, 6).join(' | ') || ids.length + ' presets born sounding');
+
     /* ── the mapping picker is CURATED, not a dump of everything addressable ────
        Rob: «вариации бессмысленные». Two halves to hold: what is offered must be worth
        hearing, and what the engine can reach must not silently shrink to what the menu
