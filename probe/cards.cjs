@@ -42,7 +42,13 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
     const B = window.__bryk, out = [];
     const put = (n, c, e) => out.push([n, !!c, e == null ? '' : String(e)]);
     const openCount = () => B.layers().filter(L => L.open).length;
-    const hosted = id => { const el = document.getElementById(id); return !!(el && el.closest('.lrow')); };
+    /* The card stopped unfolding inline on 2026-07-19: a layer is a ROW (name · opacity ·
+       blend) and its settings are one section under the stack, so the stack no longer
+       jumps when you open one. The extras therefore land in #focusBody, not inside .lrow.
+       What this gate is FOR is unchanged and is the reason it exists at all — the node is
+       MOVED, never re-rendered, so every listener on the text field survives. Only the
+       address changed. */
+    const hosted = id => { const el = document.getElementById(id); return !!(el && el.closest('#focusBody')); };
     const parked = id => { const el = document.getElementById(id); return !!(el && el.closest('#progExtras')); };
     const alive  = id => !!document.getElementById(id);
 

@@ -2014,6 +2014,11 @@ const MANNER_PRESET={
   Flow:{cohesion:0,separation:70,flow:60},     Vortex:{cohesion:0.02,separation:90,flow:40}
 };
 const MANNER_LIST=['Free','Cluster','Disperse','Flock','Flow','Vortex'];
+/* the one translation from «what the slider holds» to «what the step reads», shared by
+   the frame loop and the shelf gate. See the note at the behaviour loop. */
+const behaviourParams=L=>{ const pr={...L.params};
+  if(pr.manner!=null) pr.manner=MANNER_LIST[clamp(Math.round(pr.manner),0,MANNER_LIST.length-1)];
+  return pr; };
 
 const mpTarget=()=>({x:MPW/2,y:MPH/2});
 /* slotsFor :243-248 */
@@ -2123,14 +2128,39 @@ for(const [id,label,desc,drive] of [
    and then buried in a dropdown inside a single card, which inverted Rob's rule that any
    preset choice IS a new layer: nine near-identical formulas got nine buttons while the
    one genuinely varied bank got one. */
-for(const [id,label] of PATTERNS)
+/* WHICH keys each of the seventeen actually reads — asked of the formula, not typed
+   beside it. `patternPoint` is one function with a branch per pattern, and the branches
+   use different subsets: `cloud` reads neither amplitude nor frequency nor twist nor
+   lanes, `spring` reads all four. Listing PAT_PARAMS for all seventeen put four sliders
+   that do nothing on most of the cards — the same defect `keys` was introduced to prevent,
+   arriving through the other door, and precisely the «миллиард ползунков, которые
+   непонятно что делают» Rob is tired of.
+   A hand-written table would fix today and rot at the next pattern: this file has already
+   lost `speed`/`sceneSpeed`, `logo`/`mark` and `wRect` to a rename that only one of two
+   places heard about. So the table is DERIVED — move the key, sample the branch, keep it
+   only if the picture moved. A new pattern gets a correct card for free, and a key that
+   stops being read disappears from the panel by itself. */
+const patReads=(id,key)=>{
+  const base={spread:1,dance:1,count:24,amplitude:1,frequency:1,twist:1,lanes:7,formShape:'cube'};
+  const alt={amplitude:2.4,frequency:2.2,twist:-2.1,lanes:19,spread:2.3,dance:1.7};
+  const sample=o=>{ let s='';
+    for(const t of [0.4,1.9]) for(let i=0;i<10;i++)
+      { const q=patternPoint({id:i,phase:i*0.37,seed:i*13},id,t,{...o,count:10});
+        s+=q.x.toFixed(5)+','+q.y.toFixed(5)+','+q.z.toFixed(5)+';'; }
+    return s; };
+  return sample(base)!==sample({...base,[key]:alt[key]});
+};
+for(const [id,label] of PATTERNS){
+  /* `form` is the one pattern that picks a polyhedron, so it and only it shows the
+     shape control — the rest would carry a slider that does nothing. */
+  const declared = id==='form' ? PAT_PARAMS.concat(FORM_PARAM) : PAT_PARAMS;
+  /* spread and dance are the two every branch honours (the caller scales by spread and
+     integrates dance), so they are asked for once and kept unconditionally. */
+  const shown = declared.filter(d=> d.key==='spread' || d.key==='dance' ||
+                                    d.key==='formShape' || patReads(id,d.key)).map(d=>d.key);
   PRESETS.push(P_('pat-'+id,'particle-dance:patternPoint.'+id,'particles',label,
     'particle-dance · '+label,
-    /* `form` is the one pattern that picks a polyhedron, so it and only it shows the
-       shape control — the rest would carry a slider that does nothing, which is the
-       exact defect `keys` exists to prevent. */
-    id==='form' ? PAT_PARAMS.concat(FORM_PARAM) : PAT_PARAMS,
-    (id==='form' ? PAT_PARAMS.concat(FORM_PARAM) : PAT_PARAMS).map(x=>x.key), {},
+    declared, shown, {},
     (i,N,t,P,ctx)=>{ const b=pool[i]; if(!b||!b.pd)return {x:0,y:0,z:0};
       const q=patternPoint(b.pd, id, t, {...P, spread:1, count:N, seed:ctx.seed,
         /* the integrated phase. Without this the fallback path inside patternPoint takes
@@ -2139,6 +2169,7 @@ for(const [id,label] of PATTERNS)
         formShape:FORM_KEYS[clamp(Math.round(P.formShape||0),0,FORM_KEYS.length-1)]});
       const kx=ctx.vx/1.5*P.spread, ky=ctx.vy/1.5*P.spread;
       return { x:q.x*kx, y:q.y*ky, z:q.z*Math.min(kx,ky) }; }, 'amplitude'));
+}
 
 /* formation stays: it is ours and it is one preset, not two (Motion Primer:195 has ONE
    buildFormation with a source switch and a fill/frame mode — logo was a second copy) */
@@ -2318,7 +2349,11 @@ const DEF_SHAPES=()=>({ tri:1, wedge:1, circle:1, asset:1 });
    Keys are NOT renamed even where the label changes (`varSize` still says varSize).
    Renaming a key on one side only is what killed ten presets this morning. */
 const LOOK_PARAMS=[
-  {key:'size',    label:'size · one body',min:4,  max:48,  step:0.5,  def:16},
+  /* 4…48 was calibrated for 631 bodies at calibre 16. With the crowd down to 140 and the
+     base at 40 — the size the eye actually resolves — an upward drive had 8 px of headroom
+     before the clamp, and the gate measured exactly that. The working zone moved with the
+     crowd; the range follows it. */
+  {key:'size',    label:'size · one body',min:4,  max:96,  step:0.5,  def:40},
   {key:'scale',   label:'scale · frame',  min:0.2,max:2,   step:0.01, def:1},
   {key:'spacing', label:'spacing · air',  min:0.3,max:2.5, step:0.01, def:1},
   {key:'varSize', label:'size range',     min:0,  max:1,   step:0.01, def:0.7, hard:1},
@@ -4426,7 +4461,12 @@ let DRIVEN_WATCH=false; const DRIVEN_LOG={};
    tracks density rather than population — the same reason resolveContacts can afford to
    run over the whole stack. Alpha falls off with distance, so the web thins out toward
    the reach instead of ending on a hard circle. */
+/* A fifth of the short side of the stage. The number is the gate's, deliberately: the
+   claim «no link crosses the frame» and the constant that enforces it must be the same
+   one, or the gate is asking the engine for its own constant again (A4.4). */
+let LINK_PX_CAP=178;
 function paintLinks(L,draws,life){
+  LINK_PX_CAP=W*0.2;
   const R=L.look.linkDist==null?0.22:L.look.linkDist, amt=L.look.links||0;
   const K=Math.max(1,Math.round(L.look.linkMax==null?2:L.look.linkMax));
   if(!(R>0)||draws.length<2)return;
@@ -4440,6 +4480,7 @@ function paintLinks(L,draws,life){
   ctx.save();
   ctx.lineWidth=1;
   ctx.strokeStyle=RAMP[(RAMP.length*0.62)|0]||'#888';
+  const LINK_MAX_PX=W*0.18;
   const seen=new Set();
   /* K NEAREST, not «everything within R». Each body gathers its candidates from the nine
      cells around it, keeps the closest K, and draws only those — so the stroke count is
@@ -4470,7 +4511,16 @@ function paintLinks(L,draws,life){
       const pair=ia<ib ? ia*draws.length+ib : ib*draws.length+ia;
       if(seen.has(pair))continue; seen.add(pair);
       const B2=draws[ib];
-      ctx.globalAlpha=amt*(1-Math.sqrt(near[n].d2)/R)*life*0.75;
+      /* The world-space reach test is necessary and not sufficient. Screen length is
+         world length × base·zoom/z, so the SAME legal pair projects wider the closer it
+         sits to the camera: at persp 0.85 a pair well inside `R` still drew 241px across
+         an 888px stage. Bounding the cause (reach) cannot bound the consequence, so the
+         consequence is bounded here, in pixels, where the eye reads it.
+         Faded, not cut: a hard skip would pop links in and out as the scene spins. */
+      const sdx=B2.P.x-A.P.x, sdy=B2.P.y-A.P.y, slen=Math.hypot(sdx,sdy);
+      if(slen>=LINK_PX_CAP) continue;
+      const near1=1-Math.max(0,(slen-LINK_PX_CAP*0.8)/(LINK_PX_CAP*0.2));
+      ctx.globalAlpha=amt*(1-Math.sqrt(near[n].d2)/R)*life*0.75*near1;
       ctx.beginPath(); ctx.moveTo(A.P.x,A.P.y); ctx.lineTo(B2.P.x,B2.P.y); ctx.stroke();
     }
   }
@@ -4560,7 +4610,9 @@ function paintDraws(draws,t,sizeMul){
          "it banks into its travel", which survives the substitution at this size */
       const hx=b.x-b.px, hy=b.y-b.py;
       /* own tilt, drifting slowly, plus a lean into travel when Face heading is up */
-      const own=(pv.roll + t*pv.spin*0.12)*LK.varTilt;
+      /* 0.12 measured 1.72°/s — present in the code, invisible to the eye. 0.72 gives
+         10.3°/s, which reads as a slow deliberate turn. */
+      const own=(pv.roll + t*pv.spin*0.72)*LK.varTilt;
       let rot = own + (LK.face>0.03 ? Math.atan2(hy,hx)*LK.face : 0);
       /* ── the suprematist toggle ─────────────────────────────────────────────
          Snap every body's angle to a fixed division of the circle and the same field
@@ -4707,14 +4759,20 @@ function frame(){
   /* A preset with its own `step` integrates ITSELF — that is what a Motion Primer
      behaviour is. Its bodies still go through the shared blend afterwards, but their
      position comes from the behaviour, not from a spring to a target. */
+  /* `manner` is a slider on the card and a NAME in the table, so someone has to translate,
+     and there must be exactly one someone. When this lived inline in the loop the shelf
+     gate had to keep its own copy of MANNER_LIST to ask the same question, which is the
+     arrangement that let the applied table and the ported table disagree for a week
+     (A4.4). The copy is a hazard whoever writes it — so the translation is a function, the
+     loop calls it, and the gate calls the same one. A layer's own params are never
+     touched: the slider stays a number, the step sees a name. */
   for(const L of layers){
     const P=PROGRAMS[L.prog]; if(!P||!P.step||!layerVisible(L)||L.opacity<=0.002) continue;
     const mine=L.bodies;
     if(!mine.length) continue;
     let cx=0,cy=0; for(const b of mine){ cx+=b.mx||0; cy+=b.my||0; }
     const ctx={ flock:mine, com:{x:cx/mine.length,y:cy/mine.length} };
-    const pr={...L.params};
-    if(pr.manner!=null) pr.manner=MANNER_LIST[clamp(Math.round(pr.manner),0,5)];
+    const pr=behaviourParams(L);
     const rr=rngFor(L.seed*3+1);
     for(let k=0;k<mine.length;k++){ const b=mine[k];
       if(!Number.isFinite(b.mx)) mpSeedBody(b,k,mine.length,rr,P,L.params);
@@ -4896,16 +4954,28 @@ buildRamp(); buildStops(); rebuildPool(); rebuildTextures();
    pull — and a mod matrix that is silent at rest and comes alive on the first beat. The
    values below are his, carried over verbatim from the export rather than re-derived. */
 (function(){ const L=addLayer('pat-burst');
-  L.count=631; L.opacity=1; L.blend='source-over';
-  Object.assign(L.look,{ size:16, scale:1.13, spacing:1, varSize:0.7,
+  /* 631 bodies at calibre 16 measured 3.8 px each with 6.5 px between them — ratio 1.68,
+     and below ~2.5 the eye stops resolving objects and reads a raster. That is the «сетка»
+     Rob saw, and it is a perception threshold, not a physics bug. 140 bodies at 40 puts
+     the ratio at 2.54 and the median body at 9.5 px with dominants at 38. */
+  L.count=140; L.opacity=1; L.blend='source-over';
+  Object.assign(L.look,{ size:40, scale:1.13, spacing:1, varSize:0.9,
                          radius:14, stroke:0, face:0, varTilt:1, tint:0.55 });
   /* re-tuned by Rob against the smoothed engine (`bryk-scene (3).json`, 2026-07-19):
      «у тебя они не дёргаются» — with the phase integrated he could finally turn the drift
      up. Swirl 0.1 → 0.4 and flock 0 → 0.46 are the standby he actually wants: bodies that
      drift AND school, which is the lava read; a trace of gravity gives the field a down. */
-  Object.assign(L.phys,{ on:1, dim3:0, follow:2.2, collide:0.5, radius:0.13,
-                         swirl:0.4, gravity:0.04, attract:0.01, flock:0.46, damp:0.93 });
-  Object.assign(L.params,{ spread:1.85, dance:0.72, amplitude:1, frequency:1, twist:1, lanes:7 });
+  /* Measured: at follow 2.2 a body sits 3.9 px from its target — there is no inertia, it
+     IS the target. Readable lag starts around follow 1.0 (8.4 px). And the spring was
+     eating the field: raising swirl 0.4 → 1.0 at follow 2.2 moved net travel by 2%, while
+     at follow 0 the same curl field carries bodies 4.0 units/s. Softening the spring is
+     what gives every other force something to act on.
+     flock 0.46 clumps (nnCv 0.73 → 1.05 as it rises); 0.12 is Motion Primer's own `Free`
+     cohesion. flowScale 0.5 measured as fine boiling — 0.18 is the lava. */
+  Object.assign(L.phys,{ on:1, dim3:0, follow:1.0, collide:0.30, radius:0.22,
+                         swirl:0.85, gravity:0.04, attract:0.01, flock:0.12, damp:0.95,
+                         flowScale:0.18, flowSpeed:0.22, vary:0.45 });
+  Object.assign(L.params,{ spread:1.5, dance:0.5, amplitude:1, frequency:1, twist:1, lanes:7 });
   /* his framing, 2026-07-19: «вот эта перспектива нам подходит». Depth is ON now (0.94),
      the scene sits far back (zoom 0.2) and turns slowly by itself — the flat default was
      the right base to build from, not the right place to stop. */
@@ -4920,7 +4990,11 @@ buildRamp(); buildStops(); rebuildPool(); rebuildTextures();
      the mids turn it. One thing per band, and the two big depths are rates, not positions,
      so they read as tempo rather than as a jump (see the integrated clock above). */
   L.matrix=[
-    { feat:'onset',        path:'size',  mode:'bi', depth:1.11,  curve:'ease' },
+    /* `bi` at depth 1.11 measured the size on its FLOOR 76.3% of frames and below base
+       80.8% — the field was permanently crushed and occasionally released, which is the
+       opposite of a pulse. `up` drives from the base upward: measured 16.0…27.0, no clamp.
+       This one row is what «не пульсировали» was. */
+    { feat:'onset',        path:'size',  mode:'up', depth:0.25,  curve:'ease' },
     { feat:'env.bassFast', path:'dance', mode:'up', depth:58.14, curve:'sqrt' },
     { feat:'env.midFast',  path:'twist', mode:'bi', depth:23.45, curve:'ease' }
   ];
@@ -4961,6 +5035,12 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
      the ported reference set is MANNER_PRESET. One key for both let a gate go green on
      the table the UI does not use. */
   mannerPresets:()=>MANNER_PRESET, bodiesOf:L=>L.bodies, sizeMult,
+  /* the gate sweeps behaviour keys by integrating them; it must feed `step` exactly what
+     the frame loop feeds it, or it measures a different engine than the one that runs */
+  behaviourParams, seedBody:mpSeedBody,
+  /* `fit` retunes calibre rather than position, so a probe that samples target points
+     cannot see it. This is the quantity it actually moves. */
+  contactRadius,
   /* the force-set presets, addressed as the engine addresses them: they act on the
      FOCUSED layer. The probe used to drive a <select> by id; the selects are rebuilt per
      focus now, and a gate that reaches for a DOM id tests the markup, not the rule. */

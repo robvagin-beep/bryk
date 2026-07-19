@@ -27,12 +27,134 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
     put('every preset declares which keys it shows',
         ids.every(k=>Array.isArray(bank[k].keys)&&bank[k].keys.length));
 
-    // the dead-slider bug, in the exact place the audit found it
-    const W=B.addLayer('waterfall'); await s(200);
-    const shown=B.paramsOf(W).map(x=>x.key);
-    put('waterfall shows only the keys it reads',
-        !shown.includes('bend')&&!shown.includes('bendFreq')&&!shown.includes('angle')&&!shown.includes('tilt3d'),
-        shown.join(','));
+    /* ── no dead sliders, on ANY preset ──────────────────────────────────────────
+       This used to name waterfall and list four keys it must not show. Both halves aged
+       out: waterfall was folded into the axis engine on 2026-07-19, so it now READS angle,
+       bend, bend freq and tilt — the four the standalone ignored — and the gate went red
+       on the build where the defect was cured.
+       The defect was never «waterfall lists angle». It was «a card shows a slider the
+       engine does not read», and that can grow back on any of the thirty-odd presets, from
+       either side: a key added to the list, or a key dropped from the target. So ask the
+       general question instead — move each declared key and require the preset's own
+       output to move. Two sample times, because `speed` and `stagger` are phase, not
+       position, and are motionless in a single frozen frame. */
+    /* Two kinds of key are invisible to a frozen target sample and neither is a defect:
+       · TRANSPORT — since 2026-07-19 phase ACCUMULATES on `L.clock` (`+= dt·rate`) instead
+         of being read as `t·rate`, which is what stopped the flies (A5.2). The rate
+         therefore never appears inside target(i,N,t,…); it appears in how fast t arrives.
+         Sampling two fixed times cannot see it, so it gets its own live check below.
+       · DEPENDENT — a modifier of a term its preset seeds at zero. `bendFreq` is the
+         frequency of a bend the flow seed does not bend; it is live the moment bend is,
+         and the gate proves that by turning bend on rather than by excusing the key. */
+    const TRANSPORT = new Set(['speed', 'sceneSpeed']);
+    const DEPENDS = { bendFreq: { bend: 0.6 } };
+    const DEAD_OK = {
+      /* honest no-ops, each with its reason. Anything not listed here must move. */
+      'waterfall.angle': 'the fall is vertical by construction; the key is seeded at 90 and kept so the family shares one param list',
+      /* not a no-op — it moves the wrong quantity for this instrument. `fit` retunes body
+         CALIBRE to the mask cell spacing so letters read; positions are untouched by
+         design, and 0 means «leave my size alone». Covered live below. */
+      'word.fit': 'changes body size, not target position', 'mark.fit': 'changes body size, not target position'
+    };
+    const dead = [];
+    for (const id of ids) {
+      const P = bank[id], keys = P.keys || [];
+      const ctx = { variant:0, seed:7, vx:2.84, vy:1.78, rnd:k=>((k*0.618)%1) };
+      /* A behaviour has no target to sample — its keys are read by `step`, which is the
+         whole point of the six of them being forces rather than layouts (A2.1). Asking
+         them the layout question returned «nothing moved» for every force they own, which
+         is the gate describing its own blind spot and calling it a defect. Integrate them
+         instead: same synthetic crowd, same number of steps, two values of the key. */
+      const sample = P.group === 'behaviour'
+        ? raw => {
+            /* SEED with the preset's own init before integrating. Four of these keys —
+               pack spread, orbit spread, magnet float time — are read when a body is
+               placed, not while it moves, so a sweep that only stepped reported them
+               dead. A behaviour is its seeding AND its integration; the gate that judges
+               it has to run both (that pair is what the six-distinct-init check exists to
+               protect in the first place). */
+            const N = 24, bs = [], pr = B.behaviourParams({ params: raw });
+            const rr = (x => () => (x = (x*1664525+1013904223)>>>0) / 4294967296)(7);
+            for (let i=0;i<N;i++){ const b={mx:0,my:0,mvx:0,mvy:0,x:0,y:0,z:0};
+              B.seedBody(b, i, N, rr, P, raw); bs.push(b); }
+            const c = { flock: bs, com: { x: 300, y: 180 } };
+            for (let n=0;n<40;n++) for (const b of bs) P.step(b, 1/60, n/60, pr, c);
+            return bs.map(b => b.mx.toFixed(3)+','+b.my.toFixed(3)).join(' ');
+          }
+        /* Two crowd SIZES, both prime, and two unrelated times. Twelve bodies was an
+           aliasing trap and it caught this gate twice: the spiral winds at
+           `u·TAU·(2+twist·4)`, so at u = k/12 a twist of 1 and a twist of −2 both land
+           every sample on a multiple of π where the sign flip is invisible; and `lanes`
+           enters as `sin(u·TAU·lanes)`, so 7 and 20 are the same curve sampled at k/13
+           because 20 ≡ 7 (mod 13). Both times a live control was reported dead. One prime
+           only moves the collision; two coprime crowd sizes have no shared harmonic to
+           fall into. */
+        : pr => { let s=''; for (const [t,n] of [[0.7,13],[2.3,17]])
+            for (let i=0;i<13;i++){ const q=P.target(i,n,t,pr,ctx);
+              s += [q.x,q.y,q.z,q.scale,q.alpha,q.skip?1:0].map(v=>(+v||0).toFixed(4)).join(','); }
+            return s; };
+      const decl = Object.fromEntries((P.params||[]).map(d=>[d.key,d]));
+      for (const k of keys) {
+        const d = decl[k]; if (!d) { dead.push(id+'.'+k+' (declared in keys, absent from params)'); continue; }
+        if (TRANSPORT.has(k)) continue;
+        const base = { ...P.seed }; for (const q in decl) if (base[q]==null) base[q]=decl[q].def;
+        Object.assign(base, DEPENDS[k] || {});
+        const a = sample(base);
+        /* move it somewhere legal and clearly different, from whichever end has room */
+        const cur = base[k]==null ? d.def : base[k];
+        const to = (cur - d.min) > (d.max - cur) ? d.min + (cur-d.min)*0.25 : cur + (d.max-cur)*0.75;
+        const b = sample({ ...base, [k]: to });
+        if (a === b && !DEAD_OK[id+'.'+k]) dead.push(id+'.'+k+' ('+cur+'→'+(+to.toFixed(3))+')');
+      }
+    }
+    put('every key a card shows actually moves the picture', dead.length===0,
+        dead.slice(0,6).join(' | ') || ids.length+' presets swept');
+
+    /* the transport half, asked of the running app: the rate must move the picture over
+       TIME, and 0 must actually mean still. Both directions matter — a rate that cannot
+       stop is the same defect as one that cannot go. */
+    const T = B.onlyProg('flow'); await s(400);
+    /* How far the crowd travelled, not whether it is byte-identical. `follow` is a spring
+       and a spring settles asymptotically: at damping 0.93 the bodies are still creeping
+       thousandths of a world unit toward their targets two seconds in, so «unchanged»
+       is a test no live field can ever pass. What the transport claims is a RATIO — at
+       rate 0 the picture must be near-still next to the same picture at rate 1.2. */
+    const travel = prev => { let d = 0, now = [];
+      for (const b of T.bodies.slice(0, 40)) now.push(b.x, b.y);
+      if (prev) for (let i = 0; i < now.length; i++) d += Math.abs(now[i] - prev[i]);
+      return { d, now }; };
+    /* Silence the forces first. The standby carries swirl and flock, and a body drifting
+       on lava at transport 0 is the field doing exactly what it was told — the first
+       version of this check read that as «rate 0 does not stop» and would have sent
+       someone hunting a bug in the clock. Hold the bodies on their targets and the only
+       thing left that can move them is the transport. */
+    Object.assign(T.phys, { swirl:0, flock:0, attract:0, gravity:0, collide:0, follow:14, vary:0 });
+    /* And clear the rack. The boot scene is Rob's standby, which carries seven mapping
+       rows; a driven parameter is restored to its base at the foot of every frame, so a
+       probe that writes the parameter by hand is overwritten before the next frame paints
+       and reads it back as «the rate did nothing». Same trap that made the camera look
+       deleted (app.cjs, the view check). */
+    T.matrix.length = 0;
+    Object.assign(T.phys, { swirl:0, flock:0, attract:0, gravity:0, collide:0, follow:14, vary:0 });
+    /* every rate the preset owns, not only the one called `speed`: `spin` turns the whole
+       layout and is transport under another name */
+    T.params.sceneSpeed = 0; T.params.speed = 0; if (T.params.spin != null) T.params.spin = 0;
+    /* the field is still coasting toward its target when the rate is cut; let it arrive */
+    await s(1600); const p0 = travel(null).now; await s(700); const stillD = travel(p0).d;
+    T.params.speed = 1.2;
+    await s(300); const p1 = travel(null).now; await s(700); const runD = travel(p1).d;
+    put('transport at zero holds still, and above zero it travels',
+        runD > stillD * 20 && runD > 1,
+        'travel at 0 → ' + stillD.toFixed(3) + ' · at 1.2 → ' + runD.toFixed(3) +
+        ' (×' + (stillD > 1e-9 ? (runD / stillD).toFixed(0) : '∞') + ')');
+
+    /* the one key excused above, asked the question it actually answers */
+    const Wl = B.onlyProg('word'); await s(500);
+    const calibre = () => B.contactRadius(Wl);
+    Wl.params.fit = 1; await s(400); const fitOn = calibre();
+    Wl.params.fit = 0; await s(400); const fitOff = calibre();
+    put('fit retunes the calibre it claims to', Math.abs(fitOn-fitOff) > 1e-6,
+        'fit 1 → ' + fitOn.toFixed(3) + ' · fit 0 → ' + fitOff.toFixed(3));
 
     // seeds actually land
     const Z=B.addLayer('zigzag'); await s(200);
@@ -82,13 +204,28 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
           .every(k=>keys.includes(k)),
         keys.filter(k=>k.startsWith('phys.')).length+' phys targets');
 
-    // the left column no longer builds animation
+    /* ── which column holds what ──────────────────────────────────────────────
+       This pair used to demand `gPhys` and `gSpace` on the RIGHT. Rob overturned both
+       decisions on 2026-07-19 and the gate was never told: the forces stopped being a
+       fieldset at all (they are rows inside the focused layer's card — a force is a rule
+       for THIS layer's bodies, so it belongs with them), and the view came back to the
+       left because he could not find it under two sections about signal coming in
+       («ты удалил панель ракурсов камеры»). A gate that outlives the decision it encoded
+       measures nothing but its own age.
+       What survives the redesign, and is what actually mattered: the left column is where
+       the picture is built, the right is where the music drives it, and NO parameter is
+       offered by hand in both places at once — two controls over one quantity is the
+       Count contradiction that killed a whole afternoon (A4.3). */
     const leftIds=[...document.querySelectorAll('#panel fieldset')].map(f=>f.id);
-    put('the left column is only figure-building', !leftIds.includes('gPhys')&&!leftIds.includes('gSpace'),
-        leftIds.join(','));
     const rightIds=[...document.querySelectorAll('#rightcol fieldset')].map(f=>f.id);
-    put('forces and space are on the right', rightIds.includes('gPhys')&&rightIds.includes('gSpace'),
-        rightIds.join(','));
+    put('the picture is built on the left', leftIds.includes('gLayers')&&leftIds.includes('gFocus')&&
+        leftIds.includes('gSpace'), leftIds.join(','));
+    put('the music drives from the right', rightIds.includes('gAudio')&&rightIds.includes('gRack')&&
+        rightIds.includes('gScenes')&&!rightIds.includes('gSpace'), rightIds.join(','));
+    const slots=[...document.querySelectorAll('#panel [data-mnt],#rightcol [data-mnt]')]
+      .map(n=>n.getAttribute('data-mnt'));
+    const dupes=slots.filter((k,i)=>slots.indexOf(k)!==i);
+    put('no quantity is offered by hand in two places', dupes.length===0, dupes.join(',')||slots.length+' slots, all unique');
     /* ── Motion Primer behaviours are presets, not slider positions ─────────── */
     const beh = ids.filter(k => bank[k].group === 'behaviour');
     put('the six Motion Primer behaviours are on the shelf', beh.length === 6, beh.join(','));
@@ -144,6 +281,13 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
 
     /* ── the polyhedron bank: eight shapes, eight silhouettes ─────────────── */
     const F = B.onlyProg('pat-form'); B.setCount(240);
+    /* Silence the forces before measuring a SHAPE. The standby carries swirl and flock, so
+       the span of a form depended on where the lava happened to be pushing when the clock
+       ran out: the same eight polyhedra measured 0.46 apart on one run and 0.10 on the
+       next, and the gate flickered red on a build nobody had touched. A flaky gate is
+       worse than no gate — it teaches you to re-run instead of to look. */
+    F.matrix.length = 0;
+    Object.assign(F.phys, { swirl:0, flock:0, attract:0, gravity:0, collide:0, follow:12, vary:0 });
     const spans = [];
     for (let k = 0; k < 8; k++) {
       /* the pool was just rebuilt by setCount and the previous preset was still pulling —
