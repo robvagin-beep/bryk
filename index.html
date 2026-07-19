@@ -228,19 +228,32 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
 .mcard.open .mparams{display:block}
 
 /* the shelf — two levels: category chips, then the members of the one you picked */
-.shelfCats{display:flex;flex-wrap:wrap;gap:var(--sp-0);margin-bottom:var(--sp-1)}
-.chip{display:flex;align-items:baseline;gap:5px;padding:5px 9px;cursor:pointer;
-  background:var(--tint);border:1px solid transparent;border-radius:var(--r-full);
-  font-family:var(--grotesk);font-size:var(--fz-s);letter-spacing:.02em;color:var(--muted)}
-.chip:hover{color:var(--ink)}
-.chip.on{background:var(--tint-card);border-color:var(--accent-live);color:var(--ink)}
-.chip i{font-style:normal;font-size:var(--fz-s);opacity:.65}
-.chip:focus-visible{outline:2px solid var(--accent-live);outline-offset:2px}
-/* two columns: a preset name is short, and one column wasted half the rail and pushed the
-   layer stack below the fold — the thing the shelf exists to feed */
-.shelfList{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-0)}
+/* ── the shelf, two levels ────────────────────────────────────────────────────────
+   Rob, 2026-07-19: «эти пилюли выглядят менее приоритетными, нежели вот эти дальше…
+   нам нужно чтобы вот эти верхние варианты наши были плашками, и дальше у них были
+   вариативы отображения». The first pass had it upside down: the CATEGORY — the decision
+   you make first, and the one that says what kind of thing you are adding — was a small
+   pill, while its members were full plates. Weight has to follow the order you read in.
+   So the category is the plate: full width, a real border, its name in the panel's heading
+   size. Its members sit inside it as light rows — variants of the thing above them, which
+   is what they are. */
+.shelfCats{display:flex;flex-direction:column;gap:var(--sp-0);margin-bottom:var(--sp-1)}
+.plate{border:1px solid var(--line);border-radius:var(--r-mid);background:var(--tint-card);
+  overflow:hidden}
+.plate.on{border-color:var(--accent-live)}
+.plateHead{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-1);
+  width:100%;padding:8px var(--sp-2);cursor:pointer;background:none;border:0;text-align:left}
+.plateHead:hover{background:var(--tint)}
+.plateHead:focus-visible{outline:2px solid var(--accent-live);outline-offset:-2px}
+.plateHead b{font-family:var(--grotesk);font-size:var(--fz-l);letter-spacing:.02em;color:var(--ink)}
+.plate:not(.on) .plateHead b{color:var(--muted)}
+.plateHead i{font-style:normal;font-size:var(--fz-s);color:var(--muted)}
+/* the members: two columns, because a preset name is short and one column pushed the
+   layer stack — the thing the shelf exists to feed — below the fold */
+.shelfList{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-0);
+  padding:0 var(--sp-1) var(--sp-1)}
 .shelfItem{text-align:left;padding:6px 8px;cursor:pointer;
-  background:var(--tint-card);border:1px solid var(--line);border-radius:var(--r-ctl);
+  background:var(--tint);border:1px solid transparent;border-radius:var(--r-ctl);
   font-family:var(--grotesk);font-size:var(--fz-s);color:var(--ink);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .shelfItem:hover{border-color:var(--accent-live)}
@@ -830,7 +843,12 @@ const state = {
      circle. That is the «искажения» he is looking at, and it was on from the first frame
      together with a slow auto-spin nobody asked for. Orthographic + no spin = every shape
      drawn as itself, which is what a suprematist dance needs. Depth stays one slider away. */
-  cam:{ persp:0, zoom:1, tilt:0, spin:0, yaw:0 },
+  /* NOTE: `state.cam` is no longer stored here either — it is an accessor onto the FOCUSED
+     layer's own view (see DEF_CAM below). Rob, 2026-07-19: «когда мы начинаем крутить
+     viewport, мы крутим сугубо тот слой, на котором мы выделены… нам нужно присваивать
+     автоспин и всякую такую штуку каждому слою отдельно». Same move the forces made in
+     A4.1, for the same reason: one global object made a decision about the focused card
+     apply to every card on the stack. */
   bgL:0.13, satDrift:0.35,
   /* where the three macro faders SIT. Not a value the engine reads — the engine reads the
      parameters they wrote. Kept so a scene can recall the pose of the panel along with
@@ -896,6 +914,22 @@ const DEF_PHYS=()=>({ on:1, dim3:0, follow:2.2, collide:0.5, radius:0.13,
                          cell size and its rate of change were both welded into curlAt. */
                       flowScale:0.5, flowSpeed:0.5, vary:0.25 });
 const physFallback=DEF_PHYS();
+/* ── the view belongs to the layer ───────────────────────────────────────────────
+   A layer is a way of placing bodies; how you LOOK at those bodies is part of that
+   decision, not a property of the room. With one global camera, orbiting the stage to see
+   a 2.5D carousel also tipped the flat word formation next to it, and the auto spin that
+   makes a tunnel hypnotic dragged a 2D swarm round with it. Rob asked for exactly the
+   split the forces already have.
+   `state.cam` survives as an accessor onto the focused layer, because the Space panel, the
+   stage drag, the wheel and the rack all address it by that name — they now speak to «the
+   layer you are looking at». */
+const DEF_CAM=()=>({ persp:0, zoom:1, tilt:0, spin:0, yaw:0 });
+const camFallback=DEF_CAM();
+Object.defineProperty(state,'cam',{
+  enumerable:true, configurable:true,
+  get(){ try{ const L=activeLayer(); return (L&&L.cam)||camFallback; }catch(_){ return camFallback; } },
+  set(v){ Object.assign(this.cam, v||{}); }
+});
 Object.defineProperty(state,'phys',{
   enumerable:true, configurable:true,
   /* try/catch, not a typeof guard: `activeLayer` is a const declared 1300 lines below,
@@ -1391,14 +1425,30 @@ let formPts=[], formKey='', formSpacing=0.1;
    bodies, so every body sat on a point five times smaller than itself and the counters
    of the letters filled in — a smear, not a word. Point count scales as 1/step², so one
    corrective pass gets close enough. */
-function buildFormation(N,frame){
+/* ── the word is fitted to the FRAME, not to a constant ──────────────────────────
+   Rob, 2026-07-19: «в word formation надо делать доработку по калибровке… скейл не такой
+   мелкий, потому что она слишком сильно гуляет», with a screenshot showing scale 3.63,
+   3602 bodies and the word still running off the left edge.
+   The cause was a fixed world width: SPAN was 4.2 whatever the camera was doing. The
+   visible frame is `(W/min)·3.478/zoom` per side (A4.6) — at the standby's zoom 0.20 that
+   is an order of magnitude wider than 4.2, so the word arrived as a speck and the only way
+   out was to crank `scale`, which is why it wandered: `scale` multiplies a number that had
+   nothing to do with the frame in the first place.
+   Now the mask is measured to its own INK — no wasted margin around the letters — and laid
+   across a fraction of what the layer's own camera actually shows. `scale` 1 means «the
+   word fills the frame the way a word should», and it is a trim from there rather than the
+   thing holding the whole calibration up. */
+function buildFormation(N,frame,reach){
   N = N || pool.length || 300;
   const txt=state.formation.text||'';
   const font=state.formation.font||'';
+  /* the visible half-width this word has to sit inside; the fallback keeps the old
+     behaviour for any caller that has no camera to hand */
+  const RX=(reach&&reach>0.2)?reach:2.1;
   /* the MODE belongs in the cache key. Without it the second mode silently serves the
      first one's points — the switch appears to do nothing, which is how a feature ends up
      looking «not implemented» even after it is. */
-  const key=txt+'|'+font+'|'+N+'|'+(frame?'frame':'fill');
+  const key=txt+'|'+font+'|'+N+'|'+(frame?'frame':'fill')+'|'+RX.toFixed(2);
   if(key===formKey && formPts.length) return formPts;
   formKey=key; formPts=[];
   if(!txt.trim()) return formPts;
@@ -1411,23 +1461,36 @@ function buildFormation(N,frame){
   do { x.font='700 '+size+'px '+fam; if(x.measureText(txt).width<=W*0.9)break; size-=4; } while(size>12);
   x.fillText(txt,W/2,H/2);
   const d=x.getImageData(0,0,W,H).data;
-  /* keep the mask's own aspect so letters are not squashed; SPAN is the world width */
-  const SPAN=4.2, ySpan=SPAN*(H/W);
+  /* THE INK'S OWN BOX. The mask is 420×160 with the text fitted to 90% of the width, so a
+     short word left half the canvas empty and that emptiness was carried into the world as
+     margin — the word looked small and off-centre for reasons that had nothing to do with
+     the word. Measuring the ink and normalising to it makes «BRYK» and «A» arrive the same
+     size on screen. */
+  let ix0=W,iy0=H,ix1=0,iy1=0,ink=false;
+  for(let yy=0;yy<H;yy++) for(let xx=0;xx<W;xx++)
+    if(d[(yy*W+xx)*4+3]>128){ ink=true;
+      if(xx<ix0)ix0=xx; if(xx>ix1)ix1=xx; if(yy<iy0)iy0=yy; if(yy>iy1)iy1=yy; }
+  if(!ink){ ix0=0; iy0=0; ix1=W-1; iy1=H-1; }
+  const iw=Math.max(1,ix1-ix0), ih=Math.max(1,iy1-iy0);
+  /* 0.82 of the visible half-width per side: a word that touches the edges reads as a
+     crop, and the bodies wander a little past their targets anyway */
+  const SPAN=RX*2*0.82, ySpan=SPAN*(ih/iw);
   /* FILL puts bodies where the letters are. FRAME puts them everywhere the letters are
      NOT — the word becomes a hole punched in a field, which reads as negative space and
      is a completely different picture from the same typing (Motion Primer :195-228, its
      Fill / Frame pair). One boolean, twice the formation vocabulary. */
   const sample=step=>{ const out=[];
     for(let yy=0;yy<H;yy+=step) for(let xx=0;xx<W;xx+=step){
-      const ink=d[(yy*W+xx)*4+3]>128;
-      if(ink!==!!frame) out.push([ (xx/W-0.5)*SPAN, -(yy/H-0.5)*ySpan ]);
+      const lit=d[(yy*W+xx)*4+3]>128;
+      /* placed against the ink box, so the word is centred on what was actually drawn */
+      if(lit!==!!frame) out.push([ ((xx-ix0)/iw-0.5)*SPAN, -((yy-iy0)/ih-0.5)*ySpan ]);
     }
     return out; };
   const probe=sample(4);
   if(!probe.length) return formPts;
   const step=clamp(Math.round(4*Math.sqrt(probe.length/N)),2,26);
   formPts=sample(step);
-  formSpacing = step/W*SPAN;          /* world distance between neighbouring points */
+  formSpacing = step/iw*SPAN;         /* world distance between neighbouring points */
   return formPts;
 }
 
@@ -1558,6 +1621,10 @@ function warpNode(u,v,wp,right,up){
    restore the layer alpha, but these paths set it unconditionally on every draw. So the
    layer alpha is held here and every write that reaches the canvas goes through it. */
 let LAYER_A=1;
+/* the camera of the layer currently being painted. The body-level paint helpers used to
+   reach for `state.cam` — which is now the FOCUSED layer's, not the one being drawn, so
+   every unfocused layer would have been projected through the focused one's view. */
+let LAYER_CAM=camFallback;
 let scratchHi=0;
 function drawQuadWorld(img,C,right,up,alpha,cam,G){
   /* a warped quad needs more nodes than a flat one — at 4 the wave reads as three creases.
@@ -2360,7 +2427,7 @@ PRESETS.push(P_('word','bryk · Motion Primer:195-230','formation','Word · form
    {key:'fit',label:'fit to grid',min:0,max:1,step:0.01,def:1},
    {key:'mode',label:'fill / frame',min:0,max:1,step:1,def:0}],
   ['scale','jitter','fit','mode'], {},
-  (i,N,t,P)=>{ const pts=buildFormation(N,P.mode>0.5); if(!pts.length)return {x:0,y:0,z:0};
+  (i,N,t,P,ctx)=>{ const pts=buildFormation(N,P.mode>0.5,ctx&&ctx.vx); if(!pts.length)return {x:0,y:0,z:0};
     const p=pts[Math.min(pts.length-1,Math.floor(i*pts.length/Math.max(1,N)))];
     return { x:p[0]*P.scale+Math.sin(t*2+i)*P.jitter,
              y:p[1]*P.scale+Math.cos(t*2.2+i)*P.jitter, z:0 }; }, 'jitter'));
@@ -2571,7 +2638,24 @@ function makeLayer(prog,variant){
      каждый лейер можем давать предположим по 400, по 600». A layer arrives already a
      field rather than a handful — 220 read as a sketch of one. */
   const seedCount=(P.seed&&P.seed.count)||420;
-  return { id:++uid, prog, shapes:DEF_SHAPES(), look:DEF_LOOK(),
+  /* ── the view a preset is BORN with ─────────────────────────────────────────────
+     Rob, 2026-07-19: the behaviours «нам надо чтобы именно этот режим отображался 2d
+     полностью от края до края нашего viewport, и пусть он не будет крутиться». And, a
+     message later, the part that decides the shape of this: «это не означает, что нужно
+     было убирать у кого-то 3D. Пожалуйста, верни».
+     So this is a DEFAULT, not a restriction. A behaviour opens flat, still and filling the
+     frame, because that is the register it reads best in — its bodies live on a plane and
+     perspective only shrinks them away from the edges. Every one of the four view controls
+     stays on the panel for every layer, so turning the depth back up is one drag. Nothing
+     is taken away; the starting pose is simply the one that suits the preset. */
+  const camSeed = P.camSeed || (P.group==='behaviour' ? { persp:0, spin:0, tilt:0, zoom:1 } : null);
+  const look=DEF_LOOK();
+  /* and their calibre. «swarm pack укладка — зря ты сейчас так крутишь и даёшь такой
+     большой size of body, всё получается вообще не считываемым»: at 40px a swarm of 420
+     is a mat of overlapping shapes. A behaviour is read as a CROWD, so the individual is
+     smaller and the spread is what carries. */
+  if(P.group==='behaviour'){ look.size=22; look.varSize=0.55; }
+  return { id:++uid, prog, shapes:DEF_SHAPES(), look,
     /* Rob, 2026-07-18: «сделай просто слои и прозрачность ему». The shared pool is gone.
        It was the reason a knob felt dead: with one pool every layer's target was averaged
        under `wnorm`, so turning `wave` on YOUR layer moved a body that three other layers
@@ -2580,7 +2664,7 @@ function makeLayer(prog,variant){
        each other. Compositing moves to where EQJ always had it: opacity and blend. */
     bodies:[], count:seedCount, opacity:1, blend:'source-over',
     /* its own forces (A3.1) — a behaviour dropped on this card cannot reach a stranger */
-    phys:DEF_PHYS(),
+    phys:DEF_PHYS(), cam:Object.assign(DEF_CAM(), camSeed||{}),
     /* ── arriving and leaving ────────────────────────────────────────────────
        Rob, 2026-07-19: «нам нужно, чтобы одни играли одну роль, потом появлялись
        другие и строились в свою, а те старые незаметно съебывались — либо
@@ -2629,6 +2713,12 @@ function focusLayer(id){
   if(id!=null && id===activeId && activeLayer()) return;
   if(id!=null) activeId=id;
   matrix=(activeLayer()||{matrix:[]}).matrix;
+  /* the forces and the VIEW both belong to the layer now, and both are shown by controls
+     that live outside the card — so moving the focus has to move what they read. Without
+     this the Space panel kept the previous layer's numbers while the drag turned the new
+     one, which is the «расхождение между слоями и присвоением space view» exactly. */
+  for(const k of ['persp','zoom','tilt','spin']){ const sc=SCRUBS[k];
+    if(sc) sc.set(state.cam[k]); }
 }
 /* Exactly one card open, always (Rob: «пусть будет взаимозакрывание, чтобы не было
    путаницы по настройкам»). Load-bearing as well as tidy: the program extras are a single
@@ -2722,6 +2812,8 @@ function paramsOf(L){
               .map(d=>({ ...d, get:()=>L.params[d.key], set:v=>L.params[d.key]=v })),
     /* forces, bound to THIS layer's set (A3.1) */
     ...PHYS_PARAMS.map(d=>({ ...d, get:()=>L.phys[d.f], set:v=>L.phys[d.f]=v })),
+    /* and the view, bound the same way */
+    ...CAM_PARAMS.map(d=>({ ...d, get:()=>L.cam[d.f], set:v=>L.cam[d.f]=v })),
     ...GLOBAL_PARAMS
   ];
 }
@@ -2761,10 +2853,9 @@ const GLOBAL_PARAMS = [
   /* `size` lives on the layer (LOOK_PARAMS) since bodies stopped being shared. The global
      twin stayed in this list, so a rack row on `size` wrote state.size while the renderer
      read L.look.size — the drive reached nothing. One concept, one field. */
-  { key:'cam.persp',   label:'perspective', min:0,  max:1.2, step:0.01, get:()=>state.cam.persp, set:v=>state.cam.persp=v },
-  { key:'cam.zoom',    label:'zoom',        min:0.4,max:2.4, step:0.01, get:()=>state.cam.zoom,  set:v=>state.cam.zoom=v },
-  { key:'cam.tilt',    label:'tilt',        min:-1, max:1,   step:0.01, get:()=>state.cam.tilt,  set:v=>state.cam.tilt=v },
-  { key:'cam.yaw',     label:'yaw',         min:-3.2,max:3.2,step:0.01, get:()=>state.cam.yaw,   set:v=>state.cam.yaw=v, mod:'slow' },
+  /* the cam.* keys moved OUT of here and onto the layer (CAM_PARAMS), the same way the
+     phys.* twins did: a global twin of a per-layer field means a rack row writes one
+     object while the renderer reads another, and the drive reaches nothing. */
   /* `face` was declared HERE as well as in LOOK_PARAMS, and paramsOf lists the layer's
      look first, so every lookup — the rack, the macro map, the scrub sync — resolved to
      `L.look.face` and this one answered to nothing. The renderer reads the layer's, which
@@ -2781,7 +2872,7 @@ const GLOBAL_PARAMS = [
      a rack row writes one object while the engine reads another, and the drive reaches
      nothing. One concept, one field, one owner. */
   { key:'logoAvoid',    label:'logo as void',min:0,max:2, step:0.01, get:()=>state.logoAvoid,    set:v=>state.logoAvoid=v },
-  { key:'cam.spin',     label:'auto spin',min:-0.5,max:0.5,step:0.005,get:()=>state.cam.spin,    set:v=>state.cam.spin=v },
+
   /* The echo tunnel was reachable by hand and unreachable by the music — five knobs that
      make the most psychedelic thing in the app and not one of them could be given a beat.
      `amount` and `zoom` are the drama (the tunnel opens on a drop and closes after it);
@@ -2816,6 +2907,15 @@ const GLOBAL_PARAMS = [
    «дёргается» feels like under the hand. Extremes stay reachable by typing a number
    (allowExtend is on for all of them), which is where extremes belong.
    Defaults are the neutral pose of A3.3: a calm suprematist dance, no twitch. */
+/* The view, per layer — see DEF_CAM. Same keys the rack, the scenes and the macros have
+   always used, so every saved row keeps working; it now reaches the layer that owns it. */
+const CAM_PARAMS = [
+  { key:'cam.persp', f:'persp', label:'perspective', min:0,  max:1.2, step:0.01 },
+  { key:'cam.zoom',  f:'zoom',  label:'zoom',        min:0.4,max:2.4, step:0.01 },
+  { key:'cam.tilt',  f:'tilt',  label:'tilt',        min:-1, max:1,   step:0.01 },
+  { key:'cam.yaw',   f:'yaw',   label:'yaw',         min:-3.2,max:3.2,step:0.01, mod:'slow' },
+  { key:'cam.spin',  f:'spin',  label:'auto spin',   min:-0.5,max:0.5,step:0.005 }
+];
 const PHYS_PARAMS = [
   /* spring to the layout target. k = 1−exp(−dt·follow); at 10 that is 0.15/frame, already
      a hard snap. 20 was indistinguishable from 10 by eye. */
@@ -3112,7 +3212,13 @@ function servePending(f){
    restoreMatrix puts the base back at the end of it. Writing `state.cam.persp = v`
    directly looks like it works and is silently undone one frame later. Moves, scenes
    and the panel all go through here. (§10.4 base-sync invariant.) */
-function setDriven(key,v){ const p=GLOBAL_PARAMS.find(x=>x.key===key); if(!p)return;
+/* The moves still speak the `cam.*` language, and those keys moved onto the layer. Rather
+   than teach every move about layers, this falls through to the FOCUSED one — which is
+   what a move means by «the camera»: the thing you are performing with. Without the
+   fallback a move that opens the depth on a drop reached nothing at all. */
+function setDriven(key,v){
+  if(key.startsWith('cam.')){ const L=activeLayer(); if(L) setLayerDriven(L,key,v); return; }
+  const p=GLOBAL_PARAMS.find(x=>x.key===key); if(!p)return;
   p.set(v); rebase(key,v); }
 
 let MOVE=null;                          /* {name, t, dur, step(k), done()} */
@@ -3696,7 +3802,7 @@ function captureScene(){
     formation:{...state.formation},
     layers:layers.map(L=>({prog:L.prog,variant:L.variant,label:L.label,w:L.opacity,muted:L.muted,
       solo:L.solo,seed:L.seed,shapes:{...L.shapes},look:{...L.look},
-      count:L.count,opacity:L.opacity,blend:L.blend,phys:{...L.phys},
+      count:L.count,opacity:L.opacity,blend:L.blend,phys:{...L.phys},cam:{...L.cam},
       params:{...L.params},rows:L.matrix.map(r=>({...r}))})),
     active:activeId,
 
@@ -3729,7 +3835,10 @@ function applyScene(sc){
   const m=(a,b)=>Object.assign(a,b||{});
   state.shapes=m(def.shapes,sc.shapes);
   state.cam2=m(def.cam2,sc.cam2);
-  state.cam=m(def.cam,sc.cam);
+  /* `state.cam` is an accessor onto the focused layer, so assigning here would write the
+     view of whichever layer happens to be focused a line before the stack is rebuilt. The
+     per-layer views are restored in the layer loop below; the scene's global `cam` is kept
+     in the file as the migration source for anything saved before the split. */
   state.post=m(def.post,sc.post);
   state.echo=m(def.echo,sc.echo);
   state.kaleido=m(def.kaleido,sc.kaleido);
@@ -3777,6 +3886,10 @@ function applyScene(sc){
       /* migration v1→v2: before 2026-07-19 forces were one global set. An old scene hands
          that same set to every layer — the picture it saved. A v2 scene carries its own. */
       Object.assign(L.phys, ls.phys || sc.phys || {});
+      /* the view is per layer since 2026-07-19. A scene saved before that has one global
+         `cam` and every layer inherits it — which is exactly what it looked like when it
+         was saved, so the recall is faithful. */
+      Object.assign(L.cam, ls.cam || sc.cam || {});
       Object.assign(L.params,ls.params||{});
       L.matrix=(ls.rows||[]).map(r=>({...r}));
       layers.unshift(L);
@@ -3980,8 +4093,7 @@ function buildMatrix(){
 
 function syncAllScrubs(){
   const map={
-    persp:state.cam.persp, zoom:state.cam.zoom, tilt:state.cam.tilt,
-    spin:state.cam.spin, bgL:state.bgL, satDrift:state.satDrift,
+    bgL:state.bgL, satDrift:state.satDrift,
     chroma:state.post.chroma, chromaAng:state.post.chromaAng,
     /* marks and the whole look are per-layer now — renderLayers() at the foot of this
        function rebuilds the cards and their scrubs. The eight look entries that used to
@@ -3989,6 +4101,10 @@ function syncAllScrubs(){
        assetW) were syncing controls that had no slot in the markup: `SCRUBS.size.set()`
        moved a slider nobody could see. `wRect` was mapped here too and never existed in
        state.shapes ({tri,wedge,circle}) — a permanent no-op. */
+    /* the view is per layer now, so these four read the FOCUSED layer's — without this the
+       Space panel kept showing the numbers of whichever layer was focused when the app
+       booted, while the drag moved a different one */
+    persp:state.cam.persp, zoom:state.cam.zoom, tilt:state.cam.tilt, spin:state.cam.spin,
     /* the macro faders are panel pose: a scene recall must move them to where they sat */
     mEnergy:state.macro.energy, mDensity:state.macro.density, mChaos:state.macro.chaos,
     kSectors:state.kaleido.sectors, kRoll:state.kaleido.roll, kRate:state.kaleido.rate,
@@ -4034,14 +4150,18 @@ $('#sync').addEventListener('click',()=>{ core.resync(); setStatus('downbeat res
    The real knobs are in the layer card (LOOK_PARAMS via paramsOf), where they belong —
    a look is something a layer has, not something the scene has. mount() now shouts if a
    slot is missing, so this cannot silently happen a ninth time. */
-mount('persp',{min:0,max:1.2,step:0.01,value:state.cam.persp,allowExtend:true,label:'Perspective',
-  onInput:v=>{ state.cam.persp=v; rebase('cam.persp',v); }});
-mount('zoom',{min:0.4,max:2.4,step:0.01,value:state.cam.zoom,allowExtend:true,label:'Zoom',
-  onInput:v=>{ state.cam.zoom=v; rebase('cam.zoom',v); }});
-mount('tilt',{min:-1,max:1,step:0.01,value:state.cam.tilt,allowExtend:true,label:'Tilt',
-  onInput:v=>{ state.cam.tilt=v; rebase('cam.tilt',v); }});
-mount('spin',{min:-0.5,max:0.5,step:0.005,value:state.cam.spin,allowExtend:true,label:'Auto spin',
-  onInput:v=>state.cam.spin=v});
+/* THE VIEW IS THE FOCUSED LAYER'S. `state.cam` is an accessor onto it, so these four
+   controls address «the card you are looking at» — and `setLayerDriven` writes the value
+   AND its base, so a rack row on the same path goes on modulating around where the hand
+   put it instead of snapping back. `rebase` would have been wrong here for the same reason
+   it is wrong in the card: it rewrites the base for every layer sharing the path. */
+for(const [slot,key,cfg] of [
+  ['persp','cam.persp',{min:0,max:1.2,step:0.01,label:'Perspective'}],
+  ['zoom', 'cam.zoom', {min:0.4,max:2.4,step:0.01,label:'Zoom'}],
+  ['tilt', 'cam.tilt', {min:-1,max:1,step:0.01,label:'Tilt'}],
+  ['spin', 'cam.spin', {min:-0.5,max:0.5,step:0.005,label:'Auto spin'}]])
+  mount(slot,{...cfg, value:state.cam[key.slice(4)], allowExtend:true,
+    onInput:v=>{ const L=activeLayer(); if(L) setLayerDriven(L,key,v); }});
 mount('bgL',{min:0.05,max:0.4,step:0.005,value:state.bgL,label:'Background lightness',
   onInput:v=>{ state.bgL=v; document.documentElement.style.setProperty('--bg','oklch('+v+' 0.012 265)'); }});
 mount('satDrift',{min:0,max:1,step:0.01,value:state.satDrift,label:'Colour shimmer',
@@ -4151,23 +4271,35 @@ addEventListener('drop',e=>{ e.preventDefault(); dragDepth=0; document.body.clas
     if(!drag)return;
     const dx=e.clientX-lx, dy=e.clientY-ly; lx=e.clientX; ly=e.clientY;
     moved+=Math.abs(dx)+Math.abs(dy);
-    setDriven('cam.yaw',  state.cam.yaw + dx*0.006);
-    setDriven('cam.tilt', clamp(state.cam.tilt - dy*0.006, -1.4, 1.4));
-    SCRUBS.tilt.set(state.cam.tilt);
+    /* THE LAYER YOU ARE LOOKING AT, and only it. Rob, 2026-07-19: «я нажимаю во вьюпорте
+       и тягаю именно тот слой взаимодействия, настраиваю его там вручную внутри вьюпорта».
+       `setDriven` addressed GLOBAL_PARAMS, where the cam keys no longer live — the drag
+       would have reached nothing at all after the split. `setLayerDriven` writes the value
+       and its base together, so a rack row on the same path keeps modulating around where
+       the hand left it. */
+    const L=activeLayer(); if(!L)return;
+    setLayerDriven(L,'cam.yaw',  L.cam.yaw + dx*0.006);
+    setLayerDriven(L,'cam.tilt', clamp(L.cam.tilt - dy*0.006, -1.4, 1.4));
+    SCRUBS.tilt.set(L.cam.tilt);
   });
-  const end=()=>{ if(!drag)return; drag=false; stage.style.cursor='grab'; };
+  const end=()=>{ if(!drag)return; drag=false; stage.style.cursor='grab';
+    /* say what you just turned: with a view per layer, an orbit that silently moved «the
+       focused one» is a guess the operator should not have to make */
+    const L=activeLayer(); if(L) setStatus('view · '+L.label,'idle'); };
   stage.addEventListener('pointerup',end);
   stage.addEventListener('lostpointercapture',end);
   stage.addEventListener('wheel',e=>{
     e.preventDefault();
-    setDriven('cam.zoom', clamp(state.cam.zoom*(e.deltaY>0?0.94:1.06), 0.2, 6));
-    SCRUBS.zoom.set(state.cam.zoom);
+    const L=activeLayer(); if(!L)return;
+    setLayerDriven(L,'cam.zoom', clamp(L.cam.zoom*(e.deltaY>0?0.94:1.06), 0.2, 6));
+    SCRUBS.zoom.set(L.cam.zoom);
   },{passive:false});
   /* double-click resets the view — a viewport you can lose is a viewport you avoid */
   stage.addEventListener('dblclick',()=>{
-    setDriven('cam.yaw',0); setDriven('cam.tilt',0.1); setDriven('cam.zoom',1);
+    const L=activeLayer(); if(!L)return;
+    setLayerDriven(L,'cam.yaw',0); setLayerDriven(L,'cam.tilt',0.1); setLayerDriven(L,'cam.zoom',1);
     SCRUBS.tilt.set(0.1); SCRUBS.zoom.set(1);
-    setStatus('view reset','ok');
+    setStatus('view reset · '+L.label,'ok');
   });
 })();
 
@@ -4261,32 +4393,35 @@ let SHELF_CAT=GROUPS[0][0];
 function renderShelf(){
   const bar=$('#addLayerBar'); if(!bar)return;
   bar.innerHTML='';
-  const chips=document.createElement('div'); chips.className='shelfCats';
+  const cats=document.createElement('div'); cats.className='shelfCats';
   for(const [g,gl] of GROUPS){
     const items=PRESETS.filter(P=>P.group===g); if(!items.length)continue;
-    const c=document.createElement('button');
-    c.className='chip'+(g===SHELF_CAT?' on':'');
-    c.type='button';
-    c.innerHTML='<b></b><i></i>';
-    c.querySelector('b').textContent=gl;
-    c.querySelector('i').textContent=items.length;
-    c.dataset.desc=gl+' — '+(GROUP_HINT[g]||'');
-    c.setAttribute('aria-pressed',g===SHELF_CAT?'true':'false');
-    c.addEventListener('click',()=>{ SHELF_CAT=g; renderShelf(); });
-    chips.appendChild(c);
+    const open=(g===SHELF_CAT);
+    const plate=document.createElement('div'); plate.className='plate'+(open?' on':'');
+    const head=document.createElement('button'); head.className='plateHead'; head.type='button';
+    head.innerHTML='<b></b><i></i>';
+    head.querySelector('b').textContent=gl;
+    head.querySelector('i').textContent=items.length;
+    head.dataset.desc=gl+' — '+(GROUP_HINT[g]||'');
+    head.setAttribute('aria-expanded',open?'true':'false');
+    head.addEventListener('click',()=>{ SHELF_CAT=open?null:g; renderShelf(); });
+    plate.appendChild(head);
+    if(open){
+      const list=document.createElement('div'); list.className='shelfList';
+      for(const P of items){
+        const b2=document.createElement('button');
+        b2.className='shelfItem'; b2.type='button'; b2.textContent=P.label;
+        /* the description goes to the info dock, not into a tooltip nobody waits for */
+        b2.dataset.desc=P.desc;
+        b2.addEventListener('click',()=>{
+          addLayer(P.id); setStatus('layer added · '+P.label,'ok'); setFoot(P.desc); });
+        list.appendChild(b2);
+      }
+      plate.appendChild(list);
+    }
+    cats.appendChild(plate);
   }
-  bar.appendChild(chips);
-  const list=document.createElement('div'); list.className='shelfList';
-  for(const P of PRESETS.filter(x=>x.group===SHELF_CAT)){
-    const b=document.createElement('button');
-    b.className='shelfItem'; b.type='button'; b.textContent=P.label;
-    /* the description goes to the info dock, not into a tooltip nobody waits for */
-    b.dataset.desc=P.desc;
-    b.addEventListener('click',()=>{
-      addLayer(P.id); setStatus('layer added · '+P.label,'ok'); setFoot(P.desc); });
-    list.appendChild(b);
-  }
-  bar.appendChild(list);
+  bar.appendChild(cats);
 }
 renderShelf();
 
@@ -5120,7 +5255,7 @@ function paintStreaks(L,draws,life){
     const b=d.b;
     const sx=(b.x-b.px)*amt, sy=(b.y-b.py)*amt;
     if(Math.abs(sx)+Math.abs(sy)<1e-4) continue;
-    const back=project({x:b.x-sx,y:b.y-sy,z:b.z},state.cam);
+    const back=project({x:b.x-sx,y:b.y-sy,z:b.z},LAYER_CAM);
     const dx=d.P.x-back.x, dy=d.P.y-back.y;
     if(dx*dx+dy*dy<1) continue;                    /* shorter than a pixel: nothing to draw */
     ctx.globalAlpha=clamp(0.5*life*(d.alpha==null?1:d.alpha),0,1)*LAYER_A;
@@ -5231,7 +5366,7 @@ function paintDraws(draws,t,sizeMul){
          than as a row of stamps. Off by default; the cost is linear in N. */
       const SM=LK.smear|0;
       if(SM>1){
-        const back=project({x:b.px,y:b.py,z:b.pz},state.cam);
+        const back=project({x:b.px,y:b.py,z:b.pz},LAYER_CAM);
         const vx=(P.x-back.x)*0.5, vy=(P.y-back.y)*0.5;   /* shutter 0.5 */
         for(let q=0;q<SM;q++){
           const f2=q/(SM-1)-0.5;
@@ -5264,7 +5399,7 @@ function paintDraws(draws,t,sizeMul){
          fold, or none. Decided here, where the size is known. */
       const warping=WARP&&WARP.amp>0.001;
       drawQuadWorld(img,{x:b.x,y:b.y,z:b.z},
-        {x:rgt.x*s,y:rgt.y*s,z:rgt.z*s},{x:up.x*s,y:up.y*s,z:up.z*s},alpha,state.cam,
+        {x:rgt.x*s,y:rgt.y*s,z:rgt.z*s},{x:up.x*s,y:up.y*s,z:up.z*s},alpha,LAYER_CAM,
         warping ? (px<LOD_FINE_PX?4:8) : (px<LOD_FINE_PX?2:4));
       quads++;
     }
@@ -5446,7 +5581,11 @@ function frame(){
   }
 
   /* ── camera (the viewing one) ── */
-  setDriven('cam.yaw', state.cam.yaw + state.cam.spin*dt);   /* yaw is modulatable — a raw += is undone by restoreMatrix */
+  /* every layer turns at its OWN rate. One global spin dragged a flat 2D swarm round with
+     a 2.5D tunnel, which is the complaint: «нам нужно присваивать автоспин каждому слою
+     отдельно». `setLayerDriven`, not a raw +=, because yaw is modulatable and a bare
+     assignment is undone by restoreMatrix at the foot of the frame. */
+  for(const L of layers) if(L.cam && L.cam.spin) setLayerDriven(L,'cam.yaw', L.cam.yaw + L.cam.spin*dt);
 
   /* A preset with its own `step` integrates ITSELF — that is what a Motion Primer
      behaviour is. Its bodies still go through the shared blend afterwards, but their
@@ -5519,6 +5658,9 @@ function frame(){
   /* layers[0] is the TOP of the stack (addLayer unshifts, EQJ :670), so paint bottom-up */
   for(let li=act.length-1; li>=0; li--){
     const L=act[li], P=PROGRAMS[L.prog];
+    /* this layer's view, for the target pass below — the paint pass takes it from
+       LAYER_CAM, which is set when the layer actually starts drawing */
+    const LCAM=L.cam||camFallback;
     const arr=L.bodies; if(!arr.length) continue;
     const N=arr.length;
     pool=arr;                                  /* the ported banks read `pool` by name */
@@ -5591,7 +5733,7 @@ function frame(){
       }
       if(state.logoAvoid>0.001) avoidLogo(b,dt,state.logoAvoid);
       if(tg.skip) continue;
-      const P2=project({x:b.x,y:b.y,z:b.z},state.cam);
+      const P2=project({x:b.x,y:b.y,z:b.z},LCAM);
       if(P2.x<-200||P2.x>W+200||P2.y<-200||P2.y>H+200) continue;
       /* CASCADE from distance, not from index. A stagger keyed on `i` reads as a `for`
          loop; keyed on how far a body sits from the centre it reads as a wave crossing
@@ -5614,6 +5756,7 @@ function frame(){
     /* held for the whole layer, because the body paths overwrite globalAlpha rather than
        compose with it — see the note at LAYER_A */
     LAYER_A=clamp(L.opacity,0,1);
+    LAYER_CAM=L.cam||camFallback;
     ctx.globalAlpha=LAYER_A;
     ctx.globalCompositeOperation=L.blend||'source-over';
     if((LKL.links||0)>0.004) paintLinks(L,draws,LLIFE);
@@ -5631,7 +5774,7 @@ function frame(){
        layer and every frame that follows, and grows the save stack by one per frame — the
        same shape of bug as the global `state.phys` the note above cites. */
     try{ paintDraws(draws,t,sizeMul); }
-    finally{ WARP=null; LAYER_A=1; ctx.restore(); }
+    finally{ WARP=null; LAYER_A=1; LAYER_CAM=camFallback; ctx.restore(); }
     drawnTotal+=draws.length;
   }
   /* the quad budget is a per-FRAME cost, so it sums across every layer that painted */
@@ -5741,7 +5884,12 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
   /* what the picker OFFERS, as against what the engine can reach — the gate holds both */
   mapOptions:L=>mapOptions(L||activeLayer()),
   input:()=>curInput, armed:()=>armed, ramp:()=>RAMP, textures:()=>textures,
-  formation:(n,frame)=>buildFormation(n,frame), fps:()=>fpsShown, quads:()=>lastQuads, quadBudget:80,
+  formation:(n,frame,reach)=>buildFormation(n,frame,reach),
+  /* the point set the bodies were ACTUALLY assigned, cache and all. The gate used to
+     rebuild it with its own arguments, and once the word started fitting itself to the
+     layer's own camera the two sets stopped being the same thing — it compared bodies
+     against a word nobody had drawn. */
+  formationPoints:()=>formPts, fps:()=>fpsShown, quads:()=>lastQuads, quadBudget:80,
   cam:()=>CAM, camTick:()=>camTick(), rebuildTex:()=>rebuildTextures(),
   scene:{ capture:()=>captureScene(), apply:sc=>applyScene(sc) },
   move:id=>triggerMove(id), moving:()=>!!MOVE, pending:()=>PENDING.length,
