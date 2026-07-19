@@ -397,7 +397,15 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   const budget = await page.evaluate(async () => {
     const sleep = ms => new Promise(r => setTimeout(r, ms));
     const B = window.__bryk, rows = [];
-    B.onlyProg('radial'); B.setFace(0.8);
+    const L = B.onlyProg('radial'); B.setFace(0.8);
+    /* BODIES BIG ENOUGH THAT THE BUDGET IS WHAT STOPS THEM. At the default calibre the
+       LOD threshold culls almost everything before the cap is reached — measured 3 / 15 /
+       39 quads against a cap of 80 — so the gate was watching a bound that never bound
+       anything, and deleting the whole budget pre-pass would not have shown. Sixty pixels
+       a body puts every one of them past the LOD, and then the only thing standing between
+       1200 bodies and 1200 quads is the budget itself. */
+    Object.assign(L.look, { size: 60, varSize: 0.1, wave: 0 });
+    Object.assign(L.cam, { persp: 0.6, zoom: 1 });
     for (const n of [200, 600, 1200]) {
       B.setCount(n); await sleep(900);
       let peak = 0;
@@ -422,6 +430,10 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      and where that happens depends on calibre, so raising the default body size (fewer,
      bigger bodies) moved the saturation point and turned a true statement about the
      engine into a false one about one configuration. The bound is the invariant. */
+  /* and the cap has to be REACHED, or the line above is measuring the LOD again */
+  ok('the budget is what bounds it, not the LOD',
+     budget[budget.length - 1].peak >= budget[budget.length - 1].cap * 0.75,
+     budget.map(r => r.n + ':' + r.peak).join(' → ') + ' against a cap of ' + budget[0].cap);
   ok('quad cost is bounded however many bodies',
      budget.every(r => r.peak <= r.cap),
      budget.map(r => r.n + ':' + r.peak).join(' → ') + ' (cap ' + budget[0].cap + ')');
@@ -468,9 +480,17 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     const mean = L => { const b = B.bodiesOf(L); return b.reduce((s, p) => s + p.x, 0) / b.length; };
     const gap1 = Math.abs(mean(A) - mean(C));
     /* per-frame displacement × 60 = the u/s the ceiling is stated in */
+    /* SAMPLED WHILE IT IS MOVING. Reading the velocities after the settle measured the
+       parked state — peak 0.01 against a cap of 6, seven hundred times of slack, and
+       deleting the clamp entirely would not have shown. The clamp exists for the frames
+       right after a shove, so that is when to look: drop the damping, kick every body, and
+       watch the peak across the next second. */
     let vmax = 0;
-    for (const L of [A, C]) for (const b of B.bodiesOf(L))
-      vmax = Math.max(vmax, Math.hypot(b.vx, b.vy, b.vz) * 60);
+    for (const L of [A, C]) { L.phys.damp = 0.995; L.phys.gravity = 0.15; L.phys.follow = 0; }
+    for (const L of [A, C]) for (const b of B.bodiesOf(L)) { b.vx += 4; b.vy -= 3; }
+    for (let i = 0; i < 40; i++) { await sleep(25);
+      for (const L of [A, C]) for (const b of B.bodiesOf(L))
+        vmax = Math.max(vmax, Math.hypot(b.vx, b.vy, b.vz) * 60); }
     return { movedA, movedC, gap0, gap1, vmax };
   });
   /* Both bounds matter. The first version of this gate asserted only «> 0» and «grew»,
@@ -484,9 +504,12 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      'stranger drift ' + iso.movedC.toFixed(4));
   ok('contact separates without launching', iso.gap1 > iso.gap0 * 1.5 && iso.gap1 < 3.2,
      'gap ' + iso.gap0.toFixed(3) + ' → ' + iso.gap1.toFixed(3));
-  /* a little headroom over 6: the sample is taken between frames, and a body that was
-     just pushed has not been clamped yet this tick */
-  ok('nothing exceeds terminal speed', iso.vmax <= 7, 'peak ' + iso.vmax.toFixed(2) + ' u/s (cap 6)');
+  /* A little headroom over 6, because the first sample after a shove lands before the
+     clamp has run. And a FLOOR, so the gate cannot pass by measuring a parked field: if
+     nothing ever exceeded a third of the cap, the kick did not happen and the number
+     proves nothing. */
+  ok('nothing exceeds terminal speed', iso.vmax <= 7 && iso.vmax > 2,
+     'peak ' + iso.vmax.toFixed(2) + ' u/s while shoved (cap 6)');
 
   /* ── the four words · scale · spacing · density · size ────────────────────────
      Rob named this vocabulary himself (2026-07-19). Each knob has to do its OWN job and
@@ -796,10 +819,18 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     B.state.cam.persp = 0.35; B.state.cam.spin = 0; B.state.cam.zoom = 1.4;
     await sleep(1600);
     /* the same bodies, the same phase, one knob apart */
-    L.clock.wave = 1.1; await sleep(700);
-    const flatQ = B.quads(), flat = B.silhouette();
+    /* The «does it deform» pair has to differ in the FOLD and in nothing else. The first
+       version measured wave-off with `face:0` — the billboard path — against wave-on on
+       the mesh path, so switching rasterizer moved the lit-pixel count on its own and a
+       wave with its amplitude wired to zero would have passed. Both sides run through the
+       mesh now; the only difference is the displacement. */
+    L.clock.wave = 1.1; L.look.face = 1; await sleep(700);
+    const meshOnlyQ = B.quads(), flat = B.silhouette();
     L.look.wave = 0.34; L.clock.wave = 1.1; await sleep(700);
-    const warpQ = B.quads(), warp = B.silhouette();
+    const warp = B.silhouette();
+    /* the reach question, asked separately: the fold must open the mesh path BY ITSELF */
+    L.look.face = 0; L.look.wave = 0; await sleep(600); const flatQ = B.quads();
+    L.look.wave = 0.34; await sleep(600); const warpQ = B.quads();
     /* Cost is asked as a RATIO against the mesh path, not as an absolute frame rate.
        These bodies are 96px at zoom 1.4, so every one of them takes the quad path with a
        large bounding box — and that path is expensive by itself, budgeted for exactly
@@ -901,6 +932,14 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     const offA = ring(24, 0.3);
     await sleep(120);
     const offB = ring(24, 0.3);
+    /* the mirror test, run while the effect is OFF: the same picture must NOT come back */
+    const step0 = TAU / 6;
+    let offSame = 0, offLit = 0;
+    for (const rad of [0.12, 0.18, 0.24, 0.30])
+      for (let k = 1; k <= 6; k++) { const off = (k / 7) * (step0 / 2);
+        const a = ringAt(rad, off), b3 = ringAt(rad, step0 - off);
+        if (a[0]+a[1]+a[2] < 24 && b3[0]+b3[1]+b3[2] < 24) continue;
+        offLit++; if (alike(a, b3)) offSame++; }
     const moved = offA.some((v, i) => !alike(v, offB[i]));
     let offFps = 0; for (let i = 0; i < 4; i++) { await sleep(320); offFps = Math.max(offFps, B.fps()); }
     const N = 6; B.state.kaleido.sectors = N; await sleep(900);
@@ -933,10 +972,16 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     for (let i = 0; i < s1.length; i++) { if (dark(s1[i]) && dark(s2[i])) continue;
       lit++; if (alike(s1[i], s2[i])) same++; }
     let onFps = 0; for (let i = 0; i < 4; i++) { await sleep(320); onFps = Math.max(onFps, B.fps()); }
-    return { offMoved: moved, same, lit, offFps, onFps };
+    return { offMoved: moved, same, lit, offFps, onFps, offSym: offLit ? offSame/offLit : 1 };
   });
-  ok('with the kaleidoscope off the frame is untouched', kal.offMoved,
-     kal.offMoved ? 'the scene is live and unmirrored' : 'the scene froze — the effect is not identity at zero');
+  /* «Off» has to mean «no mirror», and the way to ask that is to look for the mirror.
+     The old check compared two ring reads 120ms apart and passed if they DIFFERED, which
+     says the scene is animating and nothing at all about the effect — a build that stamped
+     a full-frame copy at sectors 0 would have sailed through. Now it asks the same
+     question the six-wedge check asks, and requires the answer to be NO. */
+  ok('with the kaleidoscope off there is no mirror', kal.offSym < 0.5,
+     Math.round(kal.offSym * 100) + '% of samples match across the seam with it off' +
+     (kal.offMoved ? '' : ' (scene was static — reading is weak)'));
   ok('neighbouring wedges are mirror images of each other',
      kal.lit >= 4 && kal.same >= kal.lit - 1,
      kal.same + ' of ' + kal.lit + ' lit samples match across the seam');

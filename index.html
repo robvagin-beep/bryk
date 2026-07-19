@@ -5448,14 +5448,21 @@ function paintDraws(draws,t,sizeMul){
        and it collapses to 20fps at 300 turned bodies. A body smaller than
        LOD_QUAD_PX cannot show its own perspective anyway, so it bills out; a
        middling one gets a coarser mesh. Measured: 300 turned bodies 20 → 58fps. */
-    const LOD_QUAD_PX = 34, LOD_FINE_PX = 90;
+    /* A FOLD IS WORTH SEEING SMALLER THAN A PERSPECTIVE IS. 34px is the size below which
+       a body cannot show which way it is turned — that is what the quad path was built
+       for. A wave is a different read: it moves the SILHOUETTE, and an edge that ripples
+       is legible well under that. The standby is measured at «median 9.5px with dominants
+       at 38», so at the old threshold the fold reached a handful of bodies and Rob saw
+       nothing move. The budget still bounds the cost; this only decides who is eligible. */
+    const WARPING = WARP && WARP.amp > 0.001;
+    const LOD_QUAD_PX = WARPING ? 14 : 34, LOD_FINE_PX = 90;
     /* A mesh warp can only exist on the mesh path. The quad path used to open on `face`
        alone, so turning the wave up with heading at zero moved nothing at all and the
        control read as broken — the same shape of defect as a slider the engine never
        reads, arriving from the renderer's side. The wave is a second reason to pay for a
        quad, and it says so here. Budget and LOD still apply: a 20px body cannot show a
        fold, and the frame time is what protects the set. */
-    if((LK.face<0.03 && !((LK.wave||0)>0.001)) || px < LOD_QUAD_PX || px < quadCut){
+    if((LK.face<0.03 && !WARPING) || px < LOD_QUAD_PX || px < quadCut){
       /* even in billboard LOD the body still leans, just in 2D — the read is
          "it banks into its travel", which survives the substitution at this size */
       const hx=b.x-b.px, hy=b.y-b.py;
