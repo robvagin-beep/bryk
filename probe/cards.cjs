@@ -73,6 +73,37 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
     put('re-clicking the open card does not close it', B.layers().find(L => L.id === W.id).open,
         'idempotent focus — a dblclick rename depends on this');
 
+    /* ── renaming happens in the row, not in a browser modal ─────────────────── */
+    const rowOf = id => [...document.querySelectorAll('.lrow')][B.layers().findIndex(L => L.id === id)];
+    const nmBtn = rowOf(W.id).querySelector('.lname');
+    nmBtn.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    const inp = rowOf(W.id).querySelector('.lrename');
+    put('a double-click opens an inline field, not a system prompt', !!inp);
+    if (inp) {
+      inp.value = 'RENAMED';
+      /* the stage listens for 1-8 / B / H / F / W: a name typed into the row must not
+         call a scene or black out the room */
+      const before = B.layers().length;
+      inp.dispatchEvent(new KeyboardEvent('keydown', { key: '5', bubbles: true }));
+      put('typing a name does not reach the stage keys',
+          B.layers().length === before && !document.body.classList.contains('noui'));
+      inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await sleep(150);
+      const L2 = B.layers().find(L => L.id === W.id);
+      put('the new name survives the rebuild it triggers', L2 && L2.label === 'RENAMED', L2 && L2.label);
+      put('and the rack badge says the same thing',
+          (document.getElementById('rackLayer').textContent || '').includes('RENAMED'),
+          document.getElementById('rackLayer').textContent);
+      /* Escape must put the old name back, untouched */
+      rowOf(W.id).querySelector('.lname').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      const inp2 = rowOf(W.id).querySelector('.lrename');
+      inp2.value = 'THROWN AWAY';
+      inp2.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await sleep(150);
+      put('Escape cancels instead of committing',
+          B.layers().find(L => L.id === W.id).label === 'RENAMED');
+    }
+
     B.removeLayer(W.id); await sleep(200);
     put('removing the hosting layer does not destroy the extras', alive('fText') && parked('fText'));
     put('a vacancy is refilled, one card still open', openCount() === 1, openCount() + ' open');

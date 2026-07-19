@@ -257,6 +257,12 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
   font:var(--fz-m) ui-monospace,monospace;color:var(--ink);cursor:pointer;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lrow .lname .ln{color:var(--muted)}
+/* the rename field stands exactly where the name stood — same box, same type, so the
+   row does not reflow under the caret. No `height`: WCAG 1.4.12 lets the reader widen
+   spacing and a fixed height would clip the text they just typed. */
+.lrow .lrename{flex:1;min-width:0;padding:0;background:var(--bg);
+  border:1px solid var(--accent-live);border-radius:var(--r-ctl);
+  font:var(--fz-m) ui-monospace,monospace;color:var(--ink)}
 .lrow .lctl{display:flex;gap:var(--sp-0);flex:none}
 .ltiny{width:20px;height:20px;padding:0;line-height:1;font-size:var(--fz-s);
   background:var(--tint);border:1px solid transparent;border-radius:var(--r-ctl);
@@ -270,7 +276,9 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
 .ltog.on{color:var(--accent-live-ink);background:var(--ink);border-color:var(--ink)}
 .ltog.lsolo.on{background:var(--accent-beat);border-color:var(--accent-beat)}
 .lrow .lparams{margin-top:var(--sp-2);padding-top:var(--sp-2);box-shadow:inset 0 1px var(--line)}
-.rlayer{font-weight:400;color:var(--muted);font-family:ui-monospace,monospace;font-size:var(--fz-s)}
+.rlayer{font-weight:400;color:var(--muted);font-family:ui-monospace,monospace;font-size:var(--fz-s);
+  background:none;border:0;padding:0;cursor:pointer;text-align:left}
+.rlayer:hover{color:var(--ink)}
 @media (hover:hover) and (pointer:fine){
   .ltiny:hover{background:var(--tint-hi);color:var(--ink)}
   .ltog:not(.on):hover{background:var(--tint-hi);color:var(--ink)} }
@@ -524,7 +532,12 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
       <div class="row"><label>Gain</label><span data-mnt="camGain"></span></div>
     </fieldset>
 
-    <fieldset id="gRack"><legend>Mod rack <span id="rackLayer" class="rlayer">—</span></legend>
+    <!-- The badge names the layer these rows belong to, and it is the only thing in the
+         right column that knows about the left. Clicking it walks you there: with eight
+         layers on the stack, «which card is this rack talking about» was a question you
+         answered by scrolling and comparing names. -->
+    <fieldset id="gRack"><legend>Mod rack <button type="button" id="rackLayer" class="rlayer"
+      data-desc="The layer these rows drive — click to show its card">—</button></legend>
       <div id="rack"></div>
       <button class="btn wide" id="addRow" style="margin-top:var(--sp-1)">+ mapping</button>
       <p class="note">feature ▸ parameter ▸ depth ▸ curve. Rows belong to the focused
@@ -4142,6 +4155,40 @@ document.querySelectorAll('legend[data-toggle]').forEach(l=>{
    Same disease as `speed`/`sceneSpeed`: one rename, two places, only one of them told. */
 const PROG_EXTRAS={ word:'fExtras', mark:'lExtras' };
 
+/* Renaming a layer, in the row it lives in (EQJ :637-643 — `nm.replaceWith(inp)`, Enter
+   commits, Escape cancels, blur commits). It was a system `prompt()`, which is a modal
+   over the whole browser to type eight characters: the picture behind it stops being
+   looked at, and on a projector during a set that dialog is on the wall.
+   `stopPropagation` on keydown is not decoration — the stage listens for 1-8, B, H, F and
+   W, so without it typing a name called scenes and blacked out the room.
+   Load-bearing partner: `focusLayer`'s early exit. Committing re-renders the stack, and
+   if a re-click of the already-active layer churned the list, the input would be torn out
+   from under the caret mid-word. */
+/* the badge → the card. Focus follows, because arriving at a card you cannot edit is half
+   an answer; `focus({preventScroll})` puts the keyboard there without a second jump. */
+{ const rl=$('#rackLayer');
+  if(rl) rl.addEventListener('click',()=>{
+    const L=activeLayer(); if(!L)return;
+    openOnly(L.id); renderLayers(); buildMatrix();
+    const row=[...document.querySelectorAll('#layers .lrow')][layers.findIndex(x=>x.id===L.id)];
+    if(row){ row.scrollIntoView({block:'nearest',behavior:'smooth'});
+      const nm=row.querySelector('.lname'); if(nm) nm.focus({preventScroll:true}); }
+  }); }
+function renameInline(nm,L){
+  const inp=document.createElement('input');
+  inp.className='lrename'; inp.value=L.label; inp.spellcheck=false;
+  inp.setAttribute('aria-label','Rename '+L.label);
+  let done=false;
+  const finish=commit=>{ if(done)return; done=true;
+    const v=inp.value.trim();
+    if(commit&&v) L.label=v;
+    renderLayers(); buildMatrix(); };
+  inp.addEventListener('keydown',e=>{ e.stopPropagation();
+    if(e.key==='Enter'){ e.preventDefault(); finish(true); }
+    else if(e.key==='Escape'){ e.preventDefault(); finish(false); } });
+  inp.addEventListener('blur',()=>finish(true));
+  nm.replaceWith(inp); inp.focus(); inp.select();
+}
 function renderLayers(){
   const host=$('#layers'); if(!host)return;
   /* Park the extras BEFORE the wipe. They are the only nodes in this subtree that must
@@ -4160,8 +4207,7 @@ function renderLayers(){
     nm.querySelector('b').textContent=L.label;
     nm.title='Click to focus · double-click to rename';
     nm.addEventListener('click',()=>{ focusLayer(L.id); openOnly(L.id); renderLayers(); buildMatrix(); });
-    nm.addEventListener('dblclick',e=>{ e.stopPropagation();
-      const v=prompt('Layer name',L.label); if(v!=null&&v.trim()){ L.label=v.trim(); renderLayers(); buildMatrix(); } });
+    nm.addEventListener('dblclick',e=>{ e.stopPropagation(); renameInline(nm,L); });
     const ctl=document.createElement('span'); ctl.className='lctl';
     for(const [cls,txt,lbl,fn] of [
       ['lup','▲','Move layer up',()=>moveLayer(L.id,-1)],
