@@ -234,6 +234,24 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
         (B.scene.apply({ v:1, layers:[{prog:'grid'}] }), await sleep(400),
          B.state.macro.energy === 0.5), 'energy ' + B.state.macro.energy);
 
+    /* ── LEAD: all layers stay alive, one is read as the front ──────────────────
+       A3.2. Not mute and not opacity: nothing is removed, the rest sit back. The
+       crossfade is eased, so the check is that it MOVES and then ARRIVES — a step change
+       would read as a cut, and an emphasis that never arrives is a fader that drifts. */
+    B.layers().slice().forEach(L => B.removeLayer(L.id, true));
+    B.addLayer('grid'); B.addLayer('pat-cloud'); await sleep(800);
+    const em = () => B.layers().map(L => +B.leadEmphasis(L).toFixed(3));
+    put('with no lead every layer is at full weight', em().every(v => v === 1), em().join(' '));
+    B.setLead(B.layers()[0].id);
+    await sleep(120); const mid = em();
+    await sleep(1300); const done = em();
+    put('a lead change eases rather than cuts',
+        mid[1] < 1 && mid[1] > 0.6 && done[1] < 0.6,
+        'the other layer: ' + mid[1] + ' after 120ms → ' + done[1] + ' settled');
+    put('the lead itself keeps its full weight', done[0] === 1, 'lead ' + done[0]);
+    B.setLead(B.layers()[0].id); await sleep(1300);
+    put('pressing the lead again releases the stack', em().every(v => v === 1), em().join(' '));
+
     /* ── per-layer marks: the whole point of moving them off the pool ────────── */
     B.layers().slice().forEach(L => B.removeLayer(L.id));
     const A = B.addLayer('grid'), C = B.addLayer('pulsing-circle');

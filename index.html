@@ -277,6 +277,11 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
 .lrow{border:1px solid var(--line);border-radius:var(--r-mid);padding:var(--sp-2);
   margin:var(--sp-1) 0;background:var(--tint-card)}
 .lrow.act{border-color:var(--accent-live);background:var(--tint)}
+/* the LEAD is a different question from the focus: focus is «which card am I editing»,
+   lead is «which layer is the room looking at». The number carries it, because 1-4 is
+   also the key that calls it. */
+.lrow.lead .ln{background:var(--accent-beat);color:var(--bg);border-radius:var(--r-ctl);
+  padding:0 4px;font-weight:700}
 .lrow.mut{opacity:.5}
 .lrow .l1{display:flex;align-items:center;gap:var(--sp-1);margin-bottom:var(--sp-1)}
 .lrow .lname{flex:1;min-width:0;background:none;border:0;padding:0;text-align:left;
@@ -506,8 +511,10 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
       <div class="trow"><span>Fullscreen</span><span><kbd>F</kbd></span></div>
       <div class="trow"><span>Next palette</span><span><kbd>P</kbd></span></div>
       <div class="trow"><span>Formation</span><span><kbd>W</kbd></span></div>
-      <div class="trow"><span>Moves</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></span></div>
-      <div class="trow"><span>Scenes</span><span><kbd>5</kbd>–<kbd>8</kbd></span></div>
+      <div class="trow"><span>Lead layer</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></span></div>
+      <div class="trow"><span>Moves</span><span><kbd>Q</kbd><kbd>G</kbd><kbd>E</kbd><kbd>R</kbd></span></div>
+      <div class="trow"><span>Scenes 1–4</span><span><kbd>5</kbd>–<kbd>8</kbd></span></div>
+      <div class="trow"><span>Scenes 5–8</span><span><kbd>⇧</kbd><kbd>5</kbd>–<kbd>8</kbd></span></div>
       <div class="trow"><label for="fpsSw">Show FPS</label><input type="checkbox" id="fpsSw" class="sw"></div>
       <div class="trow"><span id="fps">—</span><span id="bodies">—</span></div>
     </div>
@@ -1620,6 +1627,40 @@ function warpNode(u,v,wp,right,up){
    Multiplying is not enough on its own — `ctx.save()/restore()` around a body would
    restore the layer alpha, but these paths set it unconditionally on every draw. So the
    layer alpha is held here and every write that reaches the canvas goes through it. */
+/* ── LEAD · the layer in front ────────────────────────────────────────────────────
+   A3.2, open since 2026-07-19: «к слоям присваиваются лидеры, переключение 1–4 с
+   эйсингом». All layers stay alive; one of them is READ as the lead and the rest sit
+   back. That is a different gesture from mute and from opacity — you are not removing
+   anything, you are saying where to look, and it is the thing a deck-to-deck switch does.
+
+   Emphasis is a multiplier on presence, not a swap: the lead keeps its full weight and
+   the others fall to `LEAD_BACK`. The crossfade is eased and quantised to the bar like
+   every other structural move, so a lead change lands ON the music rather than on the
+   reaction time of the hand.
+
+   Reading, of the two A3.2 offered: leadership BETWEEN layers. The other one — lead
+   BODIES inside a layer — is a different feature and does not conflict with this. */
+const LEAD_BACK=0.45, LEAD_MS=900;
+let LEAD_ID=null, LEAD_FROM=null, LEAD_T=1;
+function setLead(id){
+  if(id===LEAD_ID) id=null;              /* pressing the lead again releases the stack */
+  LEAD_FROM=leadWeights(); LEAD_ID=id; LEAD_T=0;
+  const L=id!=null&&layers.find(x=>x.id===id);
+  setStatus(L?('lead · '+L.label):'lead released','live');
+  renderLayers();
+}
+/* where each layer's emphasis sits right now, so a change starts from what you can see
+   rather than snapping to the old target first */
+function leadWeights(){ const o={};
+  for(const L of layers) o[L.id]=(LEAD_ID==null||L.id===LEAD_ID)?1:LEAD_BACK;
+  return o; }
+function leadEmphasis(L){
+  const to=(LEAD_ID==null||L.id===LEAD_ID)?1:LEAD_BACK;
+  if(LEAD_T>=1) return to;
+  const from=(LEAD_FROM&&LEAD_FROM[L.id]!=null)?LEAD_FROM[L.id]:1;
+  const k=LEAD_T*LEAD_T*(3-2*LEAD_T);    /* smoothstep — critically damped, no bounce */
+  return from+(to-from)*k;
+}
 let LAYER_A=1;
 /* the camera of the layer currently being painted. The body-level paint helpers used to
    reach for `state.cam` — which is now the FOCUSED layer's, not the one being drawn, so
@@ -4819,10 +4860,13 @@ function renderLayers(){
   host.innerHTML='';
   layers.forEach((L,idx)=>{
     const d=document.createElement('div');
-    d.className='lrow'+(L.id===activeId?' act':'')+(L.muted?' mut':'')+(L.open?' open':'');
+    d.className='lrow'+(L.id===activeId?' act':'')+(L.muted?' mut':'')+(L.open?' open':'')
+      +(L.id===LEAD_ID?' lead':'');
 
     const r1=document.createElement('div'); r1.className='l1';
     const nm=document.createElement('button'); nm.className='lname';
+    /* the number IS the key that leads it (1-4), so it doubles as the lead indicator —
+       no extra glyph for a state the row can already carry */
     nm.innerHTML='<span class="ln">'+(idx+1)+'</span> · <b></b>';
     nm.querySelector('b').textContent=L.label;
     nm.title='Click to focus · double-click to rename';
@@ -5172,8 +5216,25 @@ addEventListener('keydown',e=>{
   else if(k==='p')nextPalette();
   else if(k==='c'){ if(CAM.on){ camStop(); camNoteText(); }
     else camBtn.click(); }
-  else if(e.key>='1'&&e.key<='4') triggerMove(['magnet','gather','crowd','snap'][+e.key-1]);
+  /* 1-4 say WHERE TO LOOK (A2.3: «цифры = куда смотрю»), the moves move to QWER — a
+     performance key should name one kind of thing, and «fire an effect» and «bring this
+     layer forward» are not the same kind. */
+  else if(e.key>='1'&&e.key<='4'){ const L=layers[+e.key-1];
+    if(L) fire(()=>setLead(L.id),'lead '+e.key); }
+  /* Q E R G, not QWER: `w` is the word layer and has been since the formation landed.
+     A move key that shadows an existing one is how a control becomes «sometimes it works». */
+  else if(['q','e','r','g'].includes(k))
+    triggerMove({q:'magnet',g:'gather',e:'crowd',r:'snap'}[k]);
+  /* Eight banks, eight keys. 5-8 reached banks 1-4 and the other four could only be
+     called with the mouse — a scene you cannot fire is a scene you do not save into
+     (A1.3-2, open since the audit). Shift is the second row: the digit still says WHICH,
+     the modifier says which half. */
   else if(e.key>='5'&&e.key<='8'){ const i=+e.key-5;
+    if(banks[i]) fire(()=>{ applyScene(banks[i]); setStatus('scene '+(i+1),'live'); },'scene '+(i+1)); }
+  else if(e.shiftKey&&['%','^','&','*'].includes(e.key)){
+    /* the shifted digits, by the character they produce — `e.key` is '%' not '5' when
+       Shift is down, and reading `e.code` would break on every non-US layout */
+    const i=['%','^','&','*'].indexOf(e.key)+4;
     if(banks[i]) fire(()=>{ applyScene(banks[i]); setStatus('scene '+(i+1),'live'); },'scene '+(i+1)); }
   else if(k==='w'){ const L=layerOfProg('word')||addLayer('word');
     L.opacity = L.opacity>0.5?0:1; renderLayers(); }
@@ -5806,7 +5867,7 @@ function frame(){
     ctx.save();
     /* held for the whole layer, because the body paths overwrite globalAlpha rather than
        compose with it — see the note at LAYER_A */
-    LAYER_A=clamp(L.opacity,0,1);
+    LAYER_A=clamp(L.opacity,0,1)*leadEmphasis(L);
     LAYER_CAM=L.cam||camFallback;
     ctx.globalAlpha=LAYER_A;
     ctx.globalCompositeOperation=L.blend||'source-over';
@@ -5831,6 +5892,7 @@ function frame(){
   /* the quad budget is a per-FRAME cost, so it sums across every layer that painted */
   lastQuads=lastQuadsAcc; lastQuadsAcc=0;
 
+  if(LEAD_T<1) LEAD_T=Math.min(1,LEAD_T+dt*1000/LEAD_MS);
   paintKaleido(dt);
   restoreMatrix(acc);
   runPost();
@@ -5918,7 +5980,7 @@ frame();
 window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), layers:()=>layers, scrubs:SCRUBS,
   /* the stored bases of every driven path — the gate asks whether a hand edit reached
      them, because reaching the parameter alone lasts exactly one frame */
-  bases:()=>BASES, applyMacro,
+  bases:()=>BASES, applyMacro, setLead, leadEmphasis,
   /* how many pixels the scene is actually lighting. The eye's own question, and the only
      honest way to ask «did that change the picture» of an effect that claims to reshape
      things rather than recolour them. */
