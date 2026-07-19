@@ -414,8 +414,19 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
   border-top:1px solid var(--line);min-height:46px}
 #footText{color:var(--muted);font:400 10px/14px system-ui,sans-serif;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.lcap{font-size:var(--fz-s);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);
-  margin:var(--sp-2) 0 var(--sp-1)}
+/* Заголовки разделов карточки (Роб, видео 7:40: «даже если здесь есть категории,
+   то их сделать как-то более выделенным цветом, чтобы оно помогало ориентироваться,
+   потому что оно просто всё сливается в одну колбасу, и ты не понимаешь, где что
+   настраивал»).
+   Были того же цвета и почти того же кегля, что подписи ручек под ними, — то есть
+   ничем не отличались от строк, которые должны были разделять. Теперь заголовок
+   ярче содержимого и опирается на линию слева: глаз цепляется за начало раздела,
+   а не перечитывает подписи в поисках границы. Линия — вместо рамки: рамка на
+   276px крадёт ширину у самих ручек. */
+.lcap{font-size:var(--fz-s);letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink);font-weight:600;
+  margin:var(--sp-3) 0 var(--sp-1);padding-left:var(--sp-2);
+  border-left:2px solid var(--accent-live);line-height:1.5}
 .lcap:first-child{margin-top:0}
 @media (prefers-contrast:more){ fieldset{box-shadow:inset 0 -1px var(--ink)} }
 </style>
@@ -2822,9 +2833,18 @@ const LOOK_PARAMS=[
   {key:'linkDist',label:'link reach',     min:0.05,max:1.2,step:0.01, def:0.34, hard:1, mod:'no'}, /* re-wires WHICH pairs are neighbours: the web jumps rather than breathes. Drive `links` instead */
   /* the mesh warp, R10.3 — see drawQuadWorld. Amplitude is in world units, so it reads
      the same at any zoom; 0.35 already folds a body over on itself. */
+  /* 🔴 «Вот это вот fold, fold, fold — непонятно, что оно даёт» (Роб, видео 1:06).
+     «Я не прошу переназвать, я прошу дать по-другому, чтобы это было заметно и
+     ощутимо.» Дело и правда не в именах: `count` и `travel` — МОДИФИКАТОРЫ
+     складки, а сама складка (`amount`) по умолчанию ноль. Тянешь ручку — не
+     происходит ничего, и никакое имя этого не объяснит. Ручка, которая молчит,
+     пока где-то выше не поднят другой ползунок, читается как сломанная.
+     `needs` говорит, от чего ручка зависит; карточка на этом основании САМА
+     поднимает хозяина при первом касании зависимого (см. rows()). Тронул
+     «сколько складок» — складка появилась, и стало видно, что это такое. */
   {key:'wave',    label:'fold · amount',  min:0,  max:0.5, step:0.005,def:0},
-  {key:'waveFreq',label:'fold · count',   min:0.5,max:6,   step:0.1,  def:2,  hard:1},   /* the 8×8 mesh cannot carry more than about three cycles — 6 is the honest ceiling, not a taste choice */
-  {key:'waveRate',label:'fold · travel',  min:0,  max:4,   step:0.05, def:1.4},
+  {key:'waveFreq',label:'fold · count',   min:0.5,max:6,   step:0.1,  def:2,  hard:1, needs:'wave'},   /* the 8×8 mesh cannot carry more than about three cycles — 6 is the honest ceiling, not a taste choice */
+  {key:'waveRate',label:'fold · travel',  min:0,  max:4,   step:0.05, def:1.4, needs:'wave'},
   {key:'waveMode',label:'wave · cloth',   min:0,  max:1,   step:1,    def:0,  hard:1, mod:'no'},
   {key:'tint',    label:'asset tint',     min:0,  max:1,   step:0.01, def:0.55, hard:1, mod:'no'}  /* rebuilds the texture bank on every change — a rebuild on an envelope */
 ];
@@ -5223,7 +5243,19 @@ function renderFocus(){
        dragging. §18 §8 grants the signature its single exemption from allowExtend *because
        it is a switch*, so rendering it as a number breaks the exemption's own premise.
        Pre-existing on `outline only`; `wave · cloth` arrived and made it two. */
-    const write=v=>{ p.set(v); if(BASES.has(L.id+'::'+p.key)) BASES.set(L.id+'::'+p.key,v); };
+    const write=v=>{ p.set(v); if(BASES.has(L.id+'::'+p.key)) BASES.set(L.id+'::'+p.key,v);
+      /* Зависимая ручка сама будит то, что модифицирует (Роб, 1:06). Иначе она
+         молчит, пока оператор не догадается, какой ползунок выше надо поднять
+         сначала — а он не догадается, потому что на карточке про это ни слова.
+         Будим один раз и МЯГКО: до четверти хода хозяина, чтобы эффект стал
+         виден, но не прыгнул в максимум за оператора. */
+      if(p.needs){ const m=paramsOf(L).find(x=>x.key===p.needs);
+        if(m && m.get()<=m.min+1e-9){ const soft=m.min+(m.max-m.min)*0.25;
+          m.set(soft);
+          if(BASES.has(L.id+'::'+m.key)) BASES.set(L.id+'::'+m.key,soft);
+          if(CARD_SCRUBS[m.key]) CARD_SCRUBS[m.key].set(soft);
+          setFoot('«'+m.label+'» поднят — без него «'+p.label+'» нечего менять'); } }
+    };
     const cfg={min:p.min,max:p.max,step:p.step,value:p.get(),allowExtend:!p.hard,
       k:p.descKey||p.key, label:L.label+' '+p.label, onInput:write};
     const s2=(p.min===0&&p.max===1&&p.step===1) ? mountToggle(null,cfg,sl) : mkScrub(cfg);

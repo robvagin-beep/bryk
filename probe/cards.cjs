@@ -183,20 +183,27 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
     const M1 = B.addLayer('pat-burst'); await sleep(400);
     M1.matrix.length = 0; B.bases().clear(); B.state.cam.spin = 0;
 
-    const spread = () => { const b = M1.bodies.slice(0, 300);
+    /* Разброс, УСРЕДНЁННЫЙ по нескольким кадрам. Мгновенный замер зависит от фазы
+       вдоха: поле дышит, и два снимка в разных точках цикла отличаются на десятую
+       часть сами по себе — гейт краснел на ровном месте. Фаза уходит усреднением,
+       а не послаблением порога. */
+    const spreadNow = () => { const b = M1.bodies.slice(0, 300);
       const d = b.map(q => Math.hypot(q.x, q.y));
       const m = d.reduce((a, v) => a + v, 0) / d.length;
       return Math.sqrt(d.reduce((a, v) => a + (v - m) ** 2, 0) / d.length); };
+    const spread = async () => { let acc = 0;
+      for (let i = 0; i < 8; i++) { acc += spreadNow(); await sleep(110); }
+      return acc / 8; };
     const layerShot = () => JSON.stringify({ follow: M1.phys.follow, swirl: M1.phys.swirl,
       flock: M1.phys.flock, vary: M1.phys.vary, tilt: B.state.varTilt,
       size: M1.look.size, count: M1.count, scale: M1.look.scale });
 
     B.state.motion.chaos = 0; await sleep(900);
-    const calmSpread = spread(), calmLayer = layerShot();
+    const calmSpread = await spread(), calmLayer = layerShot();
     B.state.motion.chaos = 1; await sleep(1500);
-    const wildSpread = spread(), wildLayer = layerShot();
+    const wildSpread = await spread(), wildLayer = layerShot();
     B.state.motion.chaos = 0; await sleep(1500);
-    const backSpread = spread(), backLayer = layerShot();
+    const backSpread = await spread(), backLayer = layerShot();
 
     put('хаос отпускает формацию — это видно на телах',
         wildSpread > calmSpread * 1.15,
@@ -207,7 +214,7 @@ const TARGET = process.argv[2] || 'http://localhost:8931/index.html?fix=1';
         Math.abs(backSpread - calmSpread) / calmSpread < 0.08,
         calmSpread.toFixed(3) + ' → ' + backSpread.toFixed(3));
     put('ноль — это нейтраль, а не середина хода',
-        (B.state.motion.chaos = 0, await sleep(500), Math.abs(spread() - calmSpread) / calmSpread < 0.08));
+        (B.state.motion.chaos = 0, await sleep(500), Math.abs(await spread() - calmSpread) / calmSpread < 0.08));
 
     /* инструмент едет со сценой целиком — обе оси пада И хаос.
        Раньше сохранялась поза макро, а пад не сохранялся вовсе: сцена приезжала

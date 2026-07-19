@@ -1054,6 +1054,43 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   ok('a rack row on auto spin turns the scene', view.idle < 0.01 && view.driven > 0.1,
      'idle ' + view.idle.toFixed(3) + ' → driven ' + view.driven.toFixed(3) + ' rad');
 
+  /* ── ЗАВИСИМАЯ РУЧКА БУДИТ ХОЗЯИНА (Роб, видео 1:06) ─────────────────────────
+     «Вот это вот fold, fold, fold — непонятно, что оно даёт. Я не прошу переназвать,
+     я прошу дать по-другому, чтобы было заметно и ощутимо.»
+     `fold · count` и `fold · travel` модифицируют складку, а сама складка по
+     умолчанию ноль — ручка молчала, пока где-то выше не поднимут другую. Гейт
+     тычет в ЗАВИСИМУЮ ручку так, как это делает рука (через поле карточки), и
+     требует, чтобы после этого изменилась КАРТИНКА, а не только число. */
+  const needsR = await page.evaluate(async () => {
+    const r = []; const put = (n, c, e) => r.push([n, !!c, e == null ? '' : String(e)]);
+    const s = ms => new Promise(f => setTimeout(f, ms));
+    const B2 = window.__bryk;
+    B2.layers().slice().forEach(x => B2.removeLayer(x.id));
+    const LL = B2.addLayer('pat-burst'); LL.matrix.length = 0; await s(600);
+    const ps = B2.paramsOf(LL);
+    const master = ps.find(p => p.key === 'wave');
+    master.set(0); await s(400);
+    const lit0 = B2.silhouette();
+    let row = null;
+    for (const q of document.querySelectorAll('#focusBody .row')) {
+      const lb = q.querySelector('label');
+      if (lb && /fold · count/i.test(lb.textContent)) { row = q; break; } }
+    put('зависимая ручка вообще есть на карточке', !!row);
+    if (row) {
+      const sc = row.querySelector('.scrub'), ed = row.querySelector('.sedit');
+      sc.focus(); sc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      ed.value = '4'; ed.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      await s(700);
+      put('...и, тронутая, будит то, что модифицирует', master.get() > 0.01,
+          'fold · amount 0 → ' + master.get().toFixed(3));
+      put('...так что двигается КАРТИНКА, а не только число',
+          Math.abs(B2.silhouette() - lit0) > 2000,
+          lit0 + ' → ' + B2.silhouette() + ' светящихся пикселей');
+    }
+    return r;
+  });
+  for (const [n, p, e] of needsR) ok(n, p, e);
+
   /* ── НАВЁЛСЯ — ВИДНО, ЧТО РУЧКА ДЕЛАЕТ (Роб, видео 8:05) ──────────────────────
      «Возможно ли, чтобы ты наводишь — и появляется вертикальная чёрточка, которая
      показывает motion, что именно эта штука делает.»
@@ -1120,6 +1157,11 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
        от края до края: угол пада = угол графика = угол, названный подписью.
        Гейт тычет РУКОЙ в четыре подписи и в центр. Промах здесь означает, что
        вкладыш вернулся — то есть вернулся квадрат в квадрате. */
+    /* Пад надо СНАЧАЛА показать. Проверки выше жмут focus() на строках карточки, а
+       focus прокручивает панель — и прямоугольник, прочитанный вслепую, указывает
+       туда, где пада уже нет. Промах был не в координатах пада, а в том, что гейт
+       мерил его вне экрана. */
+    el.scrollIntoView({ block: 'center' }); await s(250);
     const r0 = el.getBoundingClientRect(), M = 1;
     const hit = (dx, dy) => { const ev = o => new PointerEvent(o, { clientX: r0.left + dx,
         clientY: r0.top + dy, bubbles: true, pointerId: 1 });
