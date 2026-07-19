@@ -556,6 +556,13 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
       <canvas id="ramp" aria-label="Palette ramp"></canvas>
       <div class="row"><label>Background</label><span data-mnt="bgL"></span></div>
       <div class="row"><label title="Spectral brightness breathes the palette saturation. Hue never moves">Colour shimmer</label><span data-mnt="satDrift"></span></div>
+      <!-- The echo tunnel: MilkDrop's depth, applied to the finished frame rather than to
+           any one layer, so it belongs with the other output-stage effects. -->
+      <div class="row" style="margin-top:var(--sp-2)"><label title="How much of the last frame survives under this one">Echo</label><span data-mnt="echoAmt"></span></div>
+      <div class="row"><label title="Below 1 the echo falls inward, above 1 it grows outward">Echo zoom</label><span data-mnt="echoZoom"></span></div>
+      <div class="row"><label title="Turns the echo as it recedes">Echo turn</label><span data-mnt="echoRot"></span></div>
+      <div class="row"><label title="How long a trail survives. Lower fades faster">Echo decay</label><span data-mnt="echoDecay"></span></div>
+      <div class="row"><label title="Degrees of hue the echo drifts each frame — this is the part that reads as psychedelia rather than as a trail">Echo hue drift</label><span data-mnt="echoHue"></span></div>
       <div class="row" style="margin-top:var(--sp-2)"><label>Chromatic</label><span data-mnt="chroma"></span></div>
       <div class="row"><label>Aberration angle</label><span data-mnt="chromaAng"></span></div>
     </fieldset>
@@ -757,6 +764,17 @@ const state = {
      ТОЛЬКО к своим телам». One global force set meant giving one layer gravity made
      the whole screen fall. */
   post:{ chroma:0, chromaAng:0 },
+  /* ── the echo tunnel ────────────────────────────────────────────────────────
+     MilkDrop's whole psychedelia, in the two operations Canvas does natively: draw the
+     last frame back into itself slightly scaled and rotated, then fade it. Nothing else
+     in this file buys as much depth per line. Numbers are Geiss's own defaults carried
+     over (decay 0.98, «recommended»; zoom within 1.005–1.02 — a body's echo doubles its
+     radius in 2.3s at 1.005 and in 0.6s at 1.02) plus one measured correction:
+     fading to black with a plain fillRect reaches zero, while `destination-out` — the
+     usual advice — sticks and leaves a permanent ghost. Measured, not assumed.
+     `hue` is the part that separates psychedelia from a plain trail: rotating the tone a
+     few degrees per frame sends the echo around the colour wheel behind the live image. */
+  echo:{ amount:0, zoom:1.008, rot:0, decay:0.94, hue:0 },
   stops:[ {c:'#2436a7',p:0}, {c:'#fdbe0c',p:0.5}, {c:'#ce1c22',p:1} ],
   formation:{ text:'BRYK', font:'', on:false }
 };
@@ -2319,6 +2337,13 @@ function makeLayer(prog,variant){
     bodies:[], count:seedCount, opacity:1, blend:'source-over',
     /* its own forces (A3.1) — a behaviour dropped on this card cannot reach a stranger */
     phys:DEF_PHYS(),
+    /* ── arriving and leaving ────────────────────────────────────────────────
+       Rob, 2026-07-19: «нам нужно, чтобы одни играли одну роль, потом появлялись
+       другие и строились в свою, а те старые незаметно съебывались — либо
+       уменьшались, либо прозрачными становились. Просто нужно это делать плавно».
+       `k` runs 0→1 on arrival and 1→0 on the way out; bodies fade AND shrink, because
+       fading alone reads as «switched off» while shrinking reads as «went away». */
+    life:{ k:0, dir:1 },
     variant: variant ?? null,
     label: P.label + (variant ? ' · '+variant : ''),
     /* no `w`: one field per concept. Two fields for «how much of this layer» is how
@@ -2376,8 +2401,12 @@ function addLayer(prog,variant){
   openOnly(L.id);
   renderLayers(); buildMatrix(); return L;
 }
-function removeLayer(id){
+function removeLayer(id,now){
   const i=layers.findIndex(L=>L.id===id); if(i<0)return;
+  /* a layer leaves the way it arrived. `now` is the frame loop coming back once the
+     departure has finished — and the escape hatch for anything that needs the stack
+     changed this instant (scene loads, probes). */
+  if(!now && layers[i].life && layers[i].life.k>0.001){ layers[i].life.dir=-1; return; }
   layers.splice(i,1);
   if(activeId===id) activeId=layers.length?layers[0].id:null;
   focusLayer();
@@ -3249,7 +3278,7 @@ function captureScene(){
     camW:state.camW, cam2:{...state.cam2}, mixSeed:state.mixSeed,
     count:state.count, size:state.size, radius:state.radius, stroke:state.stroke, face:state.face,
     cam:{...state.cam}, bgL:state.bgL, satDrift:state.satDrift,
-    post:{...state.post}, phys:{...state.phys},
+    post:{...state.post}, echo:{...state.echo}, phys:{...state.phys},
     stops:state.stops.map(s=>({...s})),
     formation:{...state.formation},
     layers:layers.map(L=>({prog:L.prog,variant:L.variant,label:L.label,w:L.opacity,muted:L.muted,
@@ -3271,6 +3300,7 @@ function applyScene(sc){
   state.cam2=m(def.cam2,sc.cam2);
   state.cam=m(def.cam,sc.cam);
   state.post=m(def.post,sc.post);
+  state.echo=m(def.echo,sc.echo);
   /* `state.phys` is the focused layer's forces now, and the stack below is about to be
      rebuilt from scratch — writing here would set forces on a layer that is one line from
      being discarded. The scene's forces are restored per layer in the loop below. */
@@ -3469,6 +3499,18 @@ mount('bgL',{min:0.05,max:0.4,step:0.005,value:state.bgL,label:'Background light
   onInput:v=>{ state.bgL=v; document.documentElement.style.setProperty('--bg','oklch('+v+' 0.012 265)'); }});
 mount('satDrift',{min:0,max:1,step:0.01,value:state.satDrift,label:'Colour shimmer',
   onInput:v=>{ state.satDrift=v; rebase('satDrift',v); }});
+mount('echoAmt',{min:0,max:1,step:0.01,value:state.echo.amount,label:'Echo',
+  onInput:v=>state.echo.amount=v});
+/* 1.005 doubles a body's echo radius in 2.3s, 1.02 in 0.6s — the whole useful travel of
+   this control lives in that sliver, so the slider IS that sliver (Geiss's own range). */
+mount('echoZoom',{min:0.97,max:1.03,step:0.001,value:state.echo.zoom,label:'Echo zoom',
+  onInput:v=>state.echo.zoom=v});
+mount('echoRot',{min:-0.06,max:0.06,step:0.001,value:state.echo.rot,label:'Echo turn',
+  onInput:v=>state.echo.rot=v});
+mount('echoDecay',{min:0.85,max:0.995,step:0.001,value:state.echo.decay,label:'Echo decay',
+  onInput:v=>state.echo.decay=v});
+mount('echoHue',{min:0,max:12,step:0.1,value:state.echo.hue,label:'Echo hue drift',
+  onInput:v=>state.echo.hue=v});
 mount('chroma',{min:0,max:1,step:0.01,value:0,label:'Chromatic aberration',
   onInput:v=>state.post.chroma=v});
 mount('chromaAng',{min:0,max:360,step:1,value:0,label:'Aberration angle',
@@ -4436,7 +4478,26 @@ function frame(){
      вместе работать... лучше сделай просто слои и прозрачность ему».
      Compositing is now where EQJ always kept it (mvj-inject composite :588-605): per
      layer opacity and blend mode, applied to the whole layer, not to the geometry. */
-  ctx.clearRect(0,0,W,H);
+  /* Echo replaces the clear: instead of wiping the frame we keep a faded, slightly
+     magnified copy of it underneath everything the layers are about to draw. */
+  const E=state.echo;
+  if(E.amount>0.002){
+    ctx.save();
+    ctx.globalAlpha=1;
+    /* fade first, in place — a plain black fill over the whole frame. This is the step
+       `destination-out` gets wrong on a dark stage. */
+    ctx.globalCompositeOperation='source-over';
+    ctx.fillStyle='rgba(0,0,0,'+clamp((1-E.decay)*E.amount,0.004,1).toFixed(4)+')';
+    ctx.fillRect(0,0,W,H);
+    /* then the frame back into itself, scaled about the centre */
+    const z=1+(E.zoom-1)*E.amount, rot=E.rot*E.amount;
+    ctx.translate(W/2,H/2); ctx.rotate(rot); ctx.scale(z,z); ctx.translate(-W/2,-H/2);
+    ctx.globalAlpha=clamp(E.amount,0,1);
+    if(E.hue>0.01) ctx.filter='hue-rotate('+(E.hue*E.amount).toFixed(1)+'deg)';
+    ctx.drawImage(cv,0,0,W,H);
+    ctx.filter='none';
+    ctx.restore();
+  } else ctx.clearRect(0,0,W,H);
   const act=layers.filter(layerVisible).filter(L=>L.opacity>0.002);
   const vp=viewportHalf(), vxw=vp.x, vyw=vp.y;
   let drawnTotal=0;
@@ -4465,6 +4526,10 @@ function frame(){
        envelope could have fixed it: the error grows with how long the app has been open.
        Accumulating the phase instead makes the modulation change the SPEED, which is what
        a rate control means. */
+    /* ENTER 0.8s, EXIT 0.6s — long enough to read as a move, short enough to be a cue */
+    L.life=L.life||{k:1,dir:1};
+    L.life.k=clamp(L.life.k + dt/(L.life.dir>0?0.8:0.6)*L.life.dir, 0, 1);
+    if(L.life.k<=0 && L.life.dir<0){ removeLayer(L.id,true); renderLayers(); continue; }
     L.clock=L.clock||{ dance:0, speed:0, scene:0, flow:0 };
     L.clock.dance += dt*(L.params.dance==null?1:L.params.dance);
     L.clock.speed += dt*(L.params.speed==null?1:L.params.speed);
@@ -4472,6 +4537,7 @@ function frame(){
     L.clock.flow  += dt*(L.phys.flowSpeed==null?1:L.phys.flowSpeed);
     stepPhysics(dt,t,f,L);
     const LP=L.phys, LKL=L.look, LSC=(LKL.scale==null?1:LKL.scale);
+    const LLIFE=L.life?L.life.k:1, CASCADE=0.45;
 
     const sizeMul = P.sizeScale ? P.sizeScale(N,L.params) : 1;
     const draws=[];
@@ -4514,7 +4580,17 @@ function frame(){
       if(tg.skip) continue;
       const P2=project({x:b.x,y:b.y,z:b.z},state.cam);
       if(P2.x<-200||P2.x>W+200||P2.y<-200||P2.y>H+200) continue;
-      draws.push({b,P:P2,i,alpha:tg.alpha,order:tg.order,scale:tg.scale});
+      /* CASCADE from distance, not from index. A stagger keyed on `i` reads as a `for`
+         loop; keyed on how far a body sits from the centre it reads as a wave crossing
+         the frame. The spread is a fraction of the whole move, so the arrival takes the
+         same time whether the layer carries 200 bodies or 900 (research: budget the
+         total, never the per-item step). */
+      const dn=Math.min(1,Math.hypot(b.x,b.y)/(vxw||1));
+      const ent=clamp((LLIFE*(1+CASCADE) - CASCADE*dn), 0, 1);
+      /* fade AND shrink: alpha alone reads as «switched off», calibre carries «went
+         away». The floor of 0.45 keeps a body a body while it travels. */
+      draws.push({b,P:P2,i,alpha:(tg.alpha==null?1:tg.alpha)*ent,order:tg.order,
+        scale:(tg.scale==null?1:tg.scale)*(0.45+0.55*ent)});
     }
 
     draws.sort((a,b2)=>(a.order!=null||b2.order!=null)
@@ -4588,7 +4664,11 @@ frame();
    the one array. Probes that ask «what is on screen» want the union; probes that ask about
    a layer use bodiesOf(L). */
 window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), layers:()=>layers, scrubs:SCRUBS,
-  programs:()=>PROGRAMS, addLayer, removeLayer, duplicateLayer, focusLayer,
+  programs:()=>PROGRAMS, addLayer, duplicateLayer, focusLayer,
+  /* the debug path removes NOW. A probe asking «take this layer off the stack» is asking
+     about state, not about choreography — leaving it fading for 0.6s would silently
+     contaminate whatever it measures next. The panel's ✕ still animates. */
+  removeLayer:id=>removeLayer(id,true), removeSlow:id=>removeLayer(id),
   activeLayer:()=>activeLayer(), paramsOf:L=>paramsOf(L||activeLayer()),
   input:()=>curInput, armed:()=>armed, ramp:()=>RAMP, textures:()=>textures,
   formation:(n,frame)=>buildFormation(n,frame), fps:()=>fpsShown, quads:()=>lastQuads, quadBudget:80,

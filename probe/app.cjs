@@ -620,6 +620,31 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      'quiet frame ' + smooth.quiet.toFixed(4) + ' → after a rate change ' +
      smooth.jolt.toFixed(4) + ' (×' + smooth.ratio.toFixed(1) + ')');
 
+  /* ── a layer arrives and leaves, it does not blink ────────────────────────────
+     Rob chose fade + shrink over a plain crossfade, so both have to be true: the layer
+     must ramp rather than appear, and it must still be on the stack while it leaves. */
+  const life = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const B = window.__bryk;
+    B.layers().slice().forEach(L => B.removeLayer(L.id));
+    const L = B.addLayer('pat-cloud');
+    const k0 = L.life.k;
+    await sleep(120); const kEarly = L.life.k;
+    await sleep(1200); const kFull = L.life.k;
+    B.removeSlow(L.id);                       /* the ✕ button's path */
+    await sleep(200);
+    const stillThere = B.layers().some(x => x.id === L.id), kGoing = L.life.k;
+    await sleep(900);
+    const gone = !B.layers().some(x => x.id === L.id);
+    return { k0, kEarly, kFull, stillThere, kGoing, gone };
+  });
+  ok('a layer ramps in rather than blinking',
+     life.k0 < 0.05 && life.kEarly > 0.05 && life.kEarly < 0.95 && life.kFull > 0.99,
+     'k ' + life.k0.toFixed(2) + ' → ' + life.kEarly.toFixed(2) + ' → ' + life.kFull.toFixed(2));
+  ok('a layer leaves over time, then is gone',
+     life.stillThere && life.kGoing < 0.8 && life.kGoing > 0 && life.gone,
+     'still on the stack at k ' + life.kGoing.toFixed(2) + ', removed after');
+
   /* the engine section runs for minutes after the boot snapshot; an exception thrown in
      it used to be printed by nobody and counted by nobody */
   ok('console clean through the whole run', errors.length === bootErrs,
