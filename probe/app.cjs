@@ -148,7 +148,12 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     const cv = document.getElementById('cv'), g = cv.getContext('2d');
     const px = g.getImageData(0, 0, cv.width, cv.height).data;
     let lit = 0; for (let i = 3; i < px.length; i += 4) if (px[i] > 8) lit++;
-    put('stage is painting', lit > 5000, lit + ' lit px');
+    /* The bar was 5000, calibrated when boot opened on a demo that filled the frame with
+       lanes. Boot is Rob's standby now — a deliberately sparse field waiting for music —
+       and it lights ~4700 px, so the old number was measuring DENSITY while claiming to
+       measure life. What this check is for is a dead render: a blank stage lights 0, a
+       single stray body a few hundred. 1500 catches both and lets the standby be calm. */
+    put('stage is painting', lit > 1500, lit + ' lit px');
 
     /* Gate the VALUE the engine sees, inside the frame, not the riser on the panel.
        The riser is painted by applyMatrix whether or not the value reaches anything, and

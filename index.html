@@ -2321,6 +2321,15 @@ const LOOK_PARAMS=[
      question about what makes the Karl Sims class of image hypnotic. Costs one pass over
      the spatial hash we already build for collisions. */
   {key:'links',   label:'link · web',     min:0,  max:1,   step:0.01, def:0},
+  /* MilkDrop's motion vectors, ported to bodies. A short stroke from where a body WAS to
+     where it is turns the field into visible flow — you stop reading positions and start
+     reading current. Length is a multiple of the frame's own travel, so it costs nothing
+     to compute: the previous position is already on the body. */
+  {key:'streak',  label:'streak · flow',  min:0,  max:8,   step:0.05, def:0},
+  /* Sub-frame blur: N stamps along the travel at 1/N alpha, shutter 0.5 (the 180° rule).
+     Fast bodies stop reading as a stutter of stamps. Cost is linear in N, so it is a
+     small integer and it is off by default. */
+  {key:'smear',   label:'motion blur',    min:0,  max:4,   step:1,    def:0},
   {key:'linkDist',label:'link reach',     min:0.05,max:1.2,step:0.01, def:0.34},
   {key:'tint',    label:'asset tint',     min:0,  max:1,   step:0.01, def:0.55}
 ];
@@ -4158,7 +4167,7 @@ function renderFocus(){
     seg.append(rr,ad); host.appendChild(seg); }
 
   const all=paramsOf(L), byKey=k=>all.find(x=>x.key===k);
-  rows(['size','varSize','angles','links','linkDist','radius','stroke'].map(byKey).filter(Boolean));
+  rows(['size','varSize','angles','links','linkDist','streak','smear','radius','stroke'].map(byKey).filter(Boolean));
 
   cap('field');
   rows([{key:'count',label:'density · bodies',min:20,max:900,step:1,
@@ -4307,6 +4316,28 @@ function paintLinks(L,draws,life){
   }
   ctx.restore();
 }
+/* One stroke per body, from where it was toward where it is, lengthened by `streak`.
+   MilkDrop draws these off a grid because it has no bodies; we have the bodies and their
+   previous position, so the field's own flow is already in hand. Under a pixel the stroke
+   is invisible and is skipped rather than drawn as a dot. */
+function paintStreaks(L,draws,life){
+  const amt=L.look.streak||0;
+  ctx.save();
+  ctx.lineCap='round';
+  ctx.strokeStyle=RAMP[(RAMP.length*0.72)|0]||'#999';
+  for(const d of draws){
+    const b=d.b;
+    const sx=(b.x-b.px)*amt, sy=(b.y-b.py)*amt;
+    if(Math.abs(sx)+Math.abs(sy)<1e-4) continue;
+    const back=project({x:b.x-sx,y:b.y-sy,z:b.z},state.cam);
+    const dx=d.P.x-back.x, dy=d.P.y-back.y;
+    if(dx*dx+dy*dy<1) continue;                    /* shorter than a pixel: nothing to draw */
+    ctx.globalAlpha=clamp(0.5*life*(d.alpha==null?1:d.alpha),0,1);
+    ctx.lineWidth=Math.max(1,(d.scale==null?1:d.scale)*1.5);
+    ctx.beginPath(); ctx.moveTo(back.x,back.y); ctx.lineTo(d.P.x,d.P.y); ctx.stroke();
+  }
+  ctx.restore();
+}
 function paintDraws(draws,t,sizeMul){
 
   /* Size, tilt spread and heading are per-layer: a body wears the look of the layer
@@ -4380,7 +4411,19 @@ function paintDraws(draws,t,sizeMul){
          a clock face. Per layer, because one layer may be the strict one. */
       const AQ=LK.angles|0;
       if(AQ>1){ const q=TAU/AQ; rot=Math.round(rot/q)*q; }
-      drawBillboard(img,P,Math.max(2,px),rot,alpha);
+      /* SUB-FRAME BLUR: N stamps spread along this frame's travel at 1/N alpha, shutter
+         angle 0.5 — the 180° rule, which is what makes film motion read as motion rather
+         than as a row of stamps. Off by default; the cost is linear in N. */
+      const SM=LK.smear|0;
+      if(SM>1){
+        const back=project({x:b.px,y:b.py,z:b.pz},state.cam);
+        const vx=(P.x-back.x)*0.5, vy=(P.y-back.y)*0.5;   /* shutter 0.5 */
+        for(let q=0;q<SM;q++){
+          const f2=q/(SM-1)-0.5;
+          drawBillboard(img,{x:P.x-vx*f2*2,y:P.y-vy*f2*2,k:P.k,z:P.z},
+                        Math.max(2,px),rot,alpha/SM);
+        }
+      } else drawBillboard(img,P,Math.max(2,px),rot,alpha);
     } else {
       /* heading = direction of travel; the quad banks into it */
       const hx=b.x-b.px, hy=b.y-b.py, hz=b.z-b.pz;
@@ -4658,6 +4701,7 @@ function frame(){
     ctx.globalAlpha=L.opacity;
     ctx.globalCompositeOperation=L.blend||'source-over';
     if((LKL.links||0)>0.004) paintLinks(L,draws,LLIFE);
+    if((LKL.streak||0)>0.01) paintStreaks(L,draws,LLIFE);
     paintDraws(draws,t,sizeMul);
     ctx.restore();
     drawnTotal+=draws.length;
@@ -4693,11 +4737,17 @@ buildRamp(); buildStops(); rebuildPool(); rebuildTextures();
    values below are his, carried over verbatim from the export rather than re-derived. */
 (function(){ const L=addLayer('pat-burst');
   L.count=631; L.opacity=1; L.blend='source-over';
-  Object.assign(L.look,{ size:16, scale:1, spacing:1, varSize:0.7,
+  Object.assign(L.look,{ size:16, scale:1.13, spacing:1, varSize:0.7,
                          radius:14, stroke:0, face:0, varTilt:1, tint:0.55 });
+  /* re-tuned by Rob against the smoothed engine (`bryk-scene (3).json`, 2026-07-19):
+     «у тебя они не дёргаются» — with the phase integrated he could finally turn the drift
+     up. Swirl 0.1 → 0.4 and flock 0 → 0.46 are the standby he actually wants: bodies that
+     drift AND school, which is the lava read; a trace of gravity gives the field a down. */
   Object.assign(L.phys,{ on:1, dim3:0, follow:2.2, collide:0.5, radius:0.13,
-                         swirl:0.1, gravity:0, attract:0.09, flock:0, damp:0.93 });
+                         swirl:0.4, gravity:0.04, attract:0.01, flock:0.46, damp:0.93 });
   Object.assign(L.params,{ spread:1.85, dance:0.72, amplitude:1, frequency:1, twist:1, lanes:7 });
+  /* his framing: a slight tilt and turn, still orthographic — depth without warp */
+  Object.assign(state.cam,{ persp:0, zoom:1, tilt:-0.449, spin:0, yaw:0.272 });
   /* the matrix he tuned: nothing moves in silence, everything answers the band it is on.
      `size` on the fast bass envelope is the pulse; `dance` on flux is the build-up. */
   L.matrix=[
