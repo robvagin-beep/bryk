@@ -551,6 +551,28 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      'range 0 → ×' + vocab.flatRatio.toFixed(2) + ' · range 1 → ×' + vocab.spreadRatio.toFixed(1) +
      ' (mean ' + vocab.spreadGm.toFixed(2) + ')');
 
+  /* ── fill / frame ─────────────────────────────────────────────────────────────
+     The switch shipped in the card, wired to a `mode` param, passed as a second argument
+     to a function declared with one — so JS dropped it and the control did nothing. The
+     two modes are complements: whatever is ink in FILL is empty in FRAME. Testing that
+     they merely DIFFER would pass on any bug that returns two different lists, so the
+     test is the complement itself — sample the same points in both modes and require
+     them to be disjoint, and require both to be non-empty. */
+  const ff = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const B = window.__bryk;
+    B.state.formation.text = 'BRYK';
+    const key = p => p[0].toFixed(3) + ',' + p[1].toFixed(3);
+    const fill = B.formation(300, false).map(key);
+    const frame = B.formation(300, true).map(key);
+    const shared = new Set(fill).size ? frame.filter(k => new Set(fill).has(k)).length : -1;
+    await sleep(50);
+    return { nFill: fill.length, nFrame: frame.length, shared };
+  });
+  ok('fill and frame are complements, not the same list',
+     ff.nFill > 20 && ff.nFrame > 20 && ff.shared === 0,
+     'fill ' + ff.nFill + ' pts · frame ' + ff.nFrame + ' pts · overlapping ' + ff.shared);
+
   /* the engine section runs for minutes after the boot snapshot; an exception thrown in
      it used to be printed by nobody and counted by nobody */
   ok('console clean through the whole run', errors.length === bootErrs,

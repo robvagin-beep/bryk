@@ -1220,11 +1220,14 @@ let formPts=[], formKey='', formSpacing=0.1;
    bodies, so every body sat on a point five times smaller than itself and the counters
    of the letters filled in — a smear, not a word. Point count scales as 1/step², so one
    corrective pass gets close enough. */
-function buildFormation(N){
+function buildFormation(N,frame){
   N = N || pool.length || 300;
   const txt=state.formation.text||'';
   const font=state.formation.font||'';
-  const key=txt+'|'+font+'|'+N;
+  /* the MODE belongs in the cache key. Without it the second mode silently serves the
+     first one's points — the switch appears to do nothing, which is how a feature ends up
+     looking «not implemented» even after it is. */
+  const key=txt+'|'+font+'|'+N+'|'+(frame?'frame':'fill');
   if(key===formKey && formPts.length) return formPts;
   formKey=key; formPts=[];
   if(!txt.trim()) return formPts;
@@ -1239,9 +1242,15 @@ function buildFormation(N){
   const d=x.getImageData(0,0,W,H).data;
   /* keep the mask's own aspect so letters are not squashed; SPAN is the world width */
   const SPAN=4.2, ySpan=SPAN*(H/W);
+  /* FILL puts bodies where the letters are. FRAME puts them everywhere the letters are
+     NOT — the word becomes a hole punched in a field, which reads as negative space and
+     is a completely different picture from the same typing (Motion Primer :195-228, its
+     Fill / Frame pair). One boolean, twice the formation vocabulary. */
   const sample=step=>{ const out=[];
-    for(let yy=0;yy<H;yy+=step) for(let xx=0;xx<W;xx+=step)
-      if(d[(yy*W+xx)*4+3]>128) out.push([ (xx/W-0.5)*SPAN, -(yy/H-0.5)*ySpan ]);
+    for(let yy=0;yy<H;yy+=step) for(let xx=0;xx<W;xx+=step){
+      const ink=d[(yy*W+xx)*4+3]>128;
+      if(ink!==!!frame) out.push([ (xx/W-0.5)*SPAN, -(yy/H-0.5)*ySpan ]);
+    }
     return out; };
   const probe=sample(4);
   if(!probe.length) return formPts;
@@ -2033,7 +2042,7 @@ for(const [id,label] of PATTERNS)
 PRESETS.push(P_('mark','bryk LOGO · Motion Primer:195-230','formation','Mark · logo',
   'Тела собираются В марку, а в режиме frame обходят её и марка читается пустотой',
   [{key:'scale',label:'scale',min:0.1,max:4,step:0.01,def:1.6},
-   {key:'jitter',label:'jitter',min:0,max:0.5,step:0.005,def:0.02},
+   {key:'jitter',label:'jitter',min:0,max:0.12,step:0.002,def:0.02},
    {key:'fit',label:'fit to grid',min:0,max:1,step:0.01,def:1},
    {key:'mode',label:'fill / frame',min:0,max:1,step:1,def:0}],
   ['scale','jitter','fit','mode'], {},
@@ -2045,11 +2054,14 @@ PRESETS.push(P_('mark','bryk LOGO · Motion Primer:195-230','formation','Mark ·
 
 PRESETS.push(P_('word','bryk · Motion Primer:195-230','formation','Word · formation',
   'Bodies settle into the shape of the text',
+  /* jitter 0…0.5 put the default (0.02) at 4% of the slider and handed the seeded drive a
+     range 25× the value it modulates — one beat blew the word apart. Working zone. */
   [{key:'scale',label:'scale',min:0.1,max:3,step:0.01,def:1},
-   {key:'jitter',label:'jitter',min:0,max:0.5,step:0.005,def:0.02},
-   {key:'fit',label:'fit to grid',min:0,max:1,step:0.01,def:1}],
-  ['scale','jitter','fit'], {},
-  (i,N,t,P)=>{ const pts=buildFormation(N); if(!pts.length)return {x:0,y:0,z:0};
+   {key:'jitter',label:'jitter',min:0,max:0.12,step:0.002,def:0.02},
+   {key:'fit',label:'fit to grid',min:0,max:1,step:0.01,def:1},
+   {key:'mode',label:'fill / frame',min:0,max:1,step:1,def:0}],
+  ['scale','jitter','fit','mode'], {},
+  (i,N,t,P)=>{ const pts=buildFormation(N,P.mode>0.5); if(!pts.length)return {x:0,y:0,z:0};
     const p=pts[Math.min(pts.length-1,Math.floor(i*pts.length/Math.max(1,N)))];
     return { x:p[0]*P.scale+Math.sin(t*2+i)*P.jitter,
              y:p[1]*P.scale+Math.cos(t*2.2+i)*P.jitter, z:0 }; }, 'jitter'));
@@ -2080,10 +2092,14 @@ const LOGO={ img:null, mask:null, MW:0, MH:0, pts:[], key:'', aspect:1, ready:fa
     im.src='data:image/svg+xml;base64,'+btoa(unescape(encodeURIComponent(txt)));
   }).catch(()=>{ LOGO.ready=false; });
 })();
-function buildLogoMask(N){
+function buildLogoMask(N,frame){
   if(!LOGO.ready)return LOGO.pts;
   N=N||pool.length||300;
-  const key=N+'|'+state.logoScale;
+  /* `frame` was declared in the card, passed in from the preset — and this function took
+     ONE argument, so JavaScript dropped the second on the floor without a word. The
+     «fill / frame» switch has been in the panel this whole time controlling nothing.
+     It goes in the cache key too, or switching modes serves the other mode's points. */
+  const key=N+'|'+state.logoScale+'|'+(frame?'frame':'fill');
   if(key===LOGO.key && LOGO.pts.length) return LOGO.pts;
   LOGO.key=key;
   const MH=220, MW=Math.max(8,Math.round(MH*LOGO.aspect));
@@ -2100,8 +2116,10 @@ function buildLogoMask(N){
      so a body is the size of a cell and the mark reads instead of smearing */
   const SPAN=state.logoScale, ySpan=SPAN/LOGO.aspect;
   const sample=step=>{ const o=[];
-    for(let yy=0;yy<MH;yy+=step) for(let xx=0;xx<MW;xx+=step)
-      if(LOGO.mask[(yy*MW+xx)*4+3]>128) o.push([ (xx/MW-0.5)*SPAN, -(yy/MH-0.5)*ySpan ]);
+    for(let yy=0;yy<MH;yy+=step) for(let xx=0;xx<MW;xx+=step){
+      const ink=LOGO.mask[(yy*MW+xx)*4+3]>128;
+      if(ink!==!!frame) o.push([ (xx/MW-0.5)*SPAN, -(yy/MH-0.5)*ySpan ]);
+    }
     return o; };
   const probe=sample(4); if(!probe.length) return LOGO.pts=[];
   const step=clamp(Math.round(4*Math.sqrt(probe.length/N)),2,26);
@@ -2715,9 +2733,14 @@ function tightestCell(L){
      whichever layer was stepped LAST, so the spacing was computed from a stranger's body
      count. Now it answers for one layer, from that layer's own crowd. */
   if(!L || !layerVisible(L) || L.opacity<=0.002) return Infinity;
-  if(L.prog!=='word') return Infinity;
+  /* `mark` is a formation too — it lists «fit to grid» in its card and the card was
+     telling the truth about the intent and a lie about the effect, because only `word`
+     ever got here. Both formations now retune their calibre to their own cell spacing. */
+  if(L.prog!=='word' && L.prog!=='mark') return Infinity;
   if((L.params.fit??1)<=0) return Infinity;            /* fit 0 = «leave my calibre alone» */
-  buildFormation(L.bodies.length);
+  if(L.prog==='mark'){ buildLogoMask(L.bodies.length,L.params.mode>0.5);
+    return (LOGO.spacing||Infinity)*(L.params.scale??1); }
+  buildFormation(L.bodies.length,L.params.mode>0.5);
   return formSpacing*(L.params.scale??1);
 }
 /* the collision radius a layer's bodies actually stand at, after the formation clamp */
@@ -3798,7 +3821,12 @@ document.querySelectorAll('legend[data-toggle]').forEach(l=>{
    fieldset is what made the panel read as «настройки, потом выбор, потом опять настройки».
    Debt, stated out loud: state.formation is still ONE global object, so two Word layers
    share a text. It now READS per-layer and is not yet. Per-layer lands with L.shapes. */
-const PROG_EXTRAS={ word:'fExtras', logo:'lExtras' };
+/* `logo` was the preset's id until the mark and the word were split; the shelf calls it
+   `mark` now. This table kept the old key, so `PROG_EXTRAS[L.prog]` came back undefined
+   and `#lExtras` — the Logo size control — stayed parked in the hidden bay forever. The
+   knob existed, was wired, was read by buildLogoMask, and could not be reached by hand.
+   Same disease as `speed`/`sceneSpeed`: one rename, two places, only one of them told. */
+const PROG_EXTRAS={ word:'fExtras', mark:'lExtras' };
 
 function renderLayers(){
   const host=$('#layers'); if(!host)return;
@@ -4314,7 +4342,7 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
   programs:()=>PROGRAMS, addLayer, removeLayer, duplicateLayer, focusLayer,
   activeLayer:()=>activeLayer(), paramsOf:L=>paramsOf(L||activeLayer()),
   input:()=>curInput, armed:()=>armed, ramp:()=>RAMP, textures:()=>textures,
-  formation:(n)=>buildFormation(n), fps:()=>fpsShown, quads:()=>lastQuads, quadBudget:80,
+  formation:(n,frame)=>buildFormation(n,frame), fps:()=>fpsShown, quads:()=>lastQuads, quadBudget:80,
   cam:()=>CAM, camTick:()=>camTick(), rebuildTex:()=>rebuildTextures(),
   scene:{ capture:()=>captureScene(), apply:sc=>applyScene(sc) },
   move:id=>triggerMove(id), moving:()=>!!MOVE, pending:()=>PENDING.length,
