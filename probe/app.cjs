@@ -975,16 +975,29 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     for (let i = 0; i < s1.length; i++) { if (dark(s1[i]) && dark(s2[i])) continue;
       lit++; if (alike(s1[i], s2[i])) same++; }
     let onFps = 0; for (let i = 0; i < 4; i++) { await sleep(320); onFps = Math.max(onFps, B.fps()); }
-    return { offMoved: moved, same, lit, offFps, onFps, offSym: offLit ? offSame/offLit : 1 };
+    return { offMoved: moved, same, lit, offFps, onFps, offLit, offSame,
+             offSym: offLit ? offSame/offLit : 1 };
   });
   /* «Off» has to mean «no mirror», and the way to ask that is to look for the mirror.
      The old check compared two ring reads 120ms apart and passed if they DIFFERED, which
      says the scene is animating and nothing at all about the effect — a build that stamped
      a full-frame copy at sectors 0 would have sailed through. Now it asks the same
      question the six-wedge check asks, and requires the answer to be NO. */
-  ok('with the kaleidoscope off there is no mirror', kal.offSym < 0.5,
-     Math.round(kal.offSym * 100) + '% of samples match across the seam with it off' +
-     (kal.offMoved ? '' : ' (scene was static — reading is weak)'));
+  /* 🔴 Порог был у сестринской проверки и не был здесь (2026-07-19).
+     Доля считается только по ОСВЕЩЁННЫМ парам, а сколько их наберётся — как ляжет
+     поле: при двух-трёх парах одно совпадение даёт 33%, два — 67%, и гейт краснел
+     на ровном месте. Замеряно по кругу: 4 · 9 · 13 · 18 · 23 · 67 · 83 процента на
+     одном и том же коде, при пороге 50 — то есть монетка, а не измерение.
+     Ослаблять порог было бы способом перестать замечать. Правильный ход — тот же,
+     что уже сделан строкой ниже у «neighbouring wedges»: сначала докажи, что
+     измерению есть на чём стоять, и только потом суди. */
+  ok('with the kaleidoscope off there is no mirror',
+     kal.offLit >= 8 && kal.offSym < 0.5,
+     kal.offLit < 8
+       ? ('слишком мало освещённых пар (' + kal.offLit + ' из 24) — измерять нечего')
+       : Math.round(kal.offSym * 100) + '% of samples match across the seam with it off (' +
+         kal.offSame + '/' + kal.offLit + ' lit pairs)' +
+         (kal.offMoved ? '' : ' (scene was static — reading is weak)'));
   ok('neighbouring wedges are mirror images of each other',
      kal.lit >= 4 && kal.same >= kal.lit - 1,
      kal.same + ' of ' + kal.lit + ' lit samples match across the seam');
@@ -1022,6 +1035,100 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   ok('every view axis is offered to the rack', view.offered.length >= 5, view.offered.join(' '));
   ok('a rack row on auto spin turns the scene', view.idle < 0.01 && view.driven > 0.1,
      'idle ' + view.idle.toFixed(3) + ' → driven ' + view.driven.toFixed(3) + ' rad');
+
+  /* ── Motion Pad (A8.3 · Н3) ───────────────────────────────────────────────────
+     Пад ломался ДВАЖДЫ и одинаково: кто-то ужимал его по высоте, бокс переставал
+     быть квадратом, квадратный канвас растягивался — и точка-хендл превращалась
+     в эллипс, а сетка и кривая уезжали. Оба раза ловил глаз Роба, не гейт, потому
+     что гейта не было. Спрашиваем ГЕОМЕТРИЮ, а не CSS: `aspect-ratio:1` в стилях
+     перебивается снаружи чем угодно, а вот прямоугольный бокс не соврёт. */
+  const padR = await page.evaluate(async () => {
+    const r = []; const put = (n, c, e) => r.push([n, !!c, e == null ? '' : String(e)]);
+    const B = window.__bryk, s = ms => new Promise(f => setTimeout(f, ms));
+    const el = document.getElementById('mpad'), cv = document.getElementById('mpadc');
+    put('Motion Pad на панели есть', !!el && !!cv);
+    if (!el || !cv) return r;
+
+    const box = el.getBoundingClientRect();
+    put('🔒 пад — КВАДРАТ (иначе хендл станет эллипсом)',
+        Math.abs(box.width - box.height) < 0.5, box.width.toFixed(1) + '×' + box.height.toFixed(1));
+    put('🔒 и буфер канваса тоже квадратный', cv.width === cv.height, cv.width + '×' + cv.height);
+    put('пад берётся с клавиатуры', el.tabIndex >= 0 && !!el.getAttribute('aria-label'));
+
+    /* Нейтраль. Центр пада во флоте даёт 1.15; отвалится нормировка — и сцена,
+       которую Роб тюнил руками, поедет на 15% в первом же кадре. */
+    put('центр пада = темп ×1.00, сцена не разгоняется сама',
+        Math.abs(B.motionResolve(0.5, 0.5).speed / B.motionNeutral - 1) < 1e-9);
+    put('кривая выходит из 0 и приходит в 1 при любом характере',
+        [[0,0],[1,1],[0.3,0.7],[0.9,0.2]].every(([x,y]) => { const e = B.motionResolve(x,y).ease;
+          return Math.abs(e(0)) < 1e-9 && Math.abs(e(1) - 1) < 1e-9; }));
+    /* характер обязан РАЗЛИЧАТЬСЯ по Y, иначе пад одномерный и Y — украшение */
+    const half = (x,y) => B.motionResolve(x,y).ease(0.5);
+    put('Y действительно меняет характер, а не только подпись',
+        Math.abs(half(0.1,0.9) - half(0.1,0.1)) > 0.02 || Math.abs(half(0.9,0.9) - half(0.9,0.1)) > 0.02,
+        'soft ' + half(0.1,0.9).toFixed(3) + ' vs slow ' + half(0.1,0.1).toFixed(3));
+
+    /* ЗНАЧЕНИЕ, а не индикатор: спрашиваем клок слоя. Пад, который красиво возит
+       точку и не трогает сцену, прошёл бы любую проверку на «точка сдвинулась». */
+    /* Свой слой, а не `layers()[0]`: клок заводится только для ВИДИМОГО слоя с
+       ненулевой прозрачностью, а к этому месту прогон успевает намьютить и
+       спрятать что угодно. Мерили `undefined − undefined` и получали NaN — гейт,
+       который «не смог измерить», выглядел как гейт, который «измерил и всё плохо». */
+    B.layers().slice().forEach(x => B.removeLayer(x.id));
+    const L = B.addLayer('pat-burst'); L.opacity = 1; L.muted = false;
+    await s(400);
+    if (L) {
+      const rate = async (x, y) => { B.state.motion.x = x; B.state.motion.y = y; await s(200);
+        const t0 = performance.now(), c0 = L.clock.dance; await s(700);
+        return (L.clock.dance - c0) / ((performance.now() - t0) / 1000); };
+      const mid = await rate(0.5, 0.5), fast = await rate(0.95, 0.05), slow = await rate(0.05, 0.05);
+      B.state.motion.x = 0.5; B.state.motion.y = 0.5; await s(200);
+      put('X пада реально гонит клок слоя, а не только точку',
+          fast > mid * 1.2 && slow < mid * 0.85,
+          'slow ×' + (slow/mid).toFixed(2) + ' · mid ×1 · fast ×' + (fast/mid).toFixed(2));
+    }
+
+    /* ── макро × пад (Роб, 2026-07-19 · «досвязать») ────────────────────────────
+       До связки наверху панели стояли ДВА ответа на вопрос «какой характер у сета»,
+       и они молча расходились: energy гнала темп, точка пада стояла и врала.
+       Гейт держит ровно тот контракт, который заявлен: energy везёт X, chaos везёт
+       Y, density не трогает пад вообще, а рука на паде не дёргает фейдеры обратно.
+       Последнее — не придирка: связь в обе стороны сделала бы из двух контролов
+       петлю, где непонятно, кто кого ведёт. */
+    const m0 = { x: B.state.motion.x, y: B.state.motion.y };
+    B.applyMacro('energy', 0.9, true); await s(260);
+    const eX = B.state.motion.x, eY = B.state.motion.y;
+    put('energy ведёт X пада (темп)', eX > m0.x + 0.05, m0.x.toFixed(2) + ' → ' + eX.toFixed(2));
+    put('…и не трогает Y', Math.abs(eY - m0.y) < 1e-9);
+    B.applyMacro('chaos', 0.9, true); await s(260);
+    put('chaos ведёт Y пада (характер)', B.state.motion.y > eY + 0.05,
+        eY.toFixed(2) + ' → ' + B.state.motion.y.toFixed(2));
+    put('…и не трогает X', Math.abs(B.state.motion.x - eX) < 1e-9);
+    const dPad = { x: B.state.motion.x, y: B.state.motion.y };
+    B.applyMacro('density', 0.15, true); await s(260);
+    put('density пад не трогает — плотность не про движение',
+        Math.abs(B.state.motion.x - dPad.x) < 1e-9 && Math.abs(B.state.motion.y - dPad.y) < 1e-9);
+    const mac0 = { ...B.state.macro };
+    B.state.motion.x = 0.2; B.state.motion.y = 0.8; await s(260);
+    put('а рука на паде фейдеры не дёргает (связь в одну сторону)',
+        ['energy','density','chaos'].every(k => Math.abs(B.state.macro[k] - mac0[k]) < 1e-9));
+    B.applyMacro('energy', 0.5, true); B.applyMacro('chaos', 0.5, true);
+    B.state.motion.x = 0.5; B.state.motion.y = 0.5; await s(200);
+
+    /* Двусторонняя связь — канон пада: ползунок, который ведёт точку в одну сторону
+       и не идёт за ней обратно, разъезжается с падом на первом же перетаскивании. */
+    const sc = B.scrubs.mSpeed;
+    put('Speed-ряд смонтирован', !!sc);
+    if (sc) {
+      B.state.motion.x = 0.9; B.state.motion.y = 0.1; await s(300);
+      const shown = sc.get(), real = B.motionSpeed();
+      put('тянешь пад — число идёт следом', Math.abs(shown - real) < 0.03,
+          'на ряду ' + shown + ', в движке ' + real.toFixed(2));
+      B.state.motion.x = 0.5; B.state.motion.y = 0.5; await s(200);
+    }
+    return r;
+  });
+  for (const [n, p, e] of padR) ok(n, p, e);
 
   /* the engine section runs for minutes after the boot snapshot; an exception thrown in
      it used to be printed by nobody and counted by nobody */

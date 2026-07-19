@@ -163,6 +163,7 @@ const ok = (n, pass, extra) => results.push({ n, pass: !!pass, extra: extra == n
   });
   for (const [n, p, e] of clock) ok(n, p, e);
 
+
   await browser.close();
 
   const failed = results.filter(r => !r.pass);

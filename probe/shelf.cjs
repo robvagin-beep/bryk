@@ -20,23 +20,31 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
        одна из тех проверок не заметит, если полка завтра снова распухнет до 39.
        Эти четыре меряют ровно то, что было сделано: что предлагается ВЫБРАТЬ. */
     const shelfIds = B.focusKeep;
-    const offered = [...document.querySelectorAll('.plate')];
-    put('фокус-полка предлагает ровно семь подач', shelfIds.length === 7, shelfIds.join(', '));
-    put('ядро — Pulse burst, и оно в своей категории',
-        B.focusCore === 'pat-burst' && bank['pat-burst'].group === 'core',
-        'group=' + bank['pat-burst'].group);
-    put('вырезанные семьи не предлагаются на полке',
+    const nav = [...document.querySelectorAll('.navItem')];
+    put('навигация предлагает ровно три вариатива', shelfIds.length === 3, shelfIds.join(', '));
+    put('и ровно столько же кнопок на экране', nav.length === 3, nav.length + ' кнопок');
+    put('ядро — Pulse burst, первым и во всю ширину',
+        B.focusCore === 'pat-burst' && nav[0] && nav[0].classList.contains('core') &&
+        /Pulse burst/i.test(nav[0].textContent), nav[0] && nav[0].textContent);
+    /* Роб: «не имела вот эти уже дроп-даун меню, потому что это уже не нужно» —
+       проверяем ОТСУТСТВИЕ механики, иначе она вернётся первым же рефакторингом */
+    put('ни дроп-даунов, ни категорий, ни раскрытия',
+        !document.querySelector('.plate, .plateHead, .shelfCats, .shelfList') &&
+        !document.querySelector('#addLayerBar select') &&
+        nav.every(b => !b.hasAttribute('aria-expanded')));
+    put('shapes убраны с глаз (Роб, второй заход)',
+        !shelfIds.some(id => ['pulsing-circle','vortex','spring','helix'].includes(id)),
+        shelfIds.join(', '));
+    put('вырезанные семьи не предлагаются',
         !shelfIds.some(id => ['flow','waterfall','sine-wave','zigzag','grid','float','radial',
                               'carousel','card-deck','flip-book','swarm','pack','magnet','orbit',
-                              'fall','scatter'].includes(id)),
-        shelfIds.join(', '));
+                              'fall','scatter'].includes(id)));
     put('но движок их не потерял — сцена с ними ещё загрузится',
-        ['flow','grid','swarm','pat-cloud'].every(id => !!bank[id]));
-    put('ядро открыто первым, без единого клика',
-        offered.length === 3 && offered[0].classList.contains('on') &&
-        offered[0].querySelector('.shelfItem') &&
-        /Pulse burst/i.test(offered[0].querySelector('.shelfItem').textContent),
-        offered.length + ' категории');
+        ['flow','grid','swarm','pat-cloud','helix','vortex'].every(id => !!bank[id]));
+    /* добавление слоя — один клик, без промежуточного «раскрой категорию» */
+    const n0 = B.layers().length;
+    nav[0].click(); await s(260);
+    put('слой добавляется одним кликом по вариативу', B.layers().length === n0 + 1);
     /* The old pattern accepted `z:0`. Pattern-matching was the wrong contract anyway: what
        must hold is that a preset cites one of OUR files, because the whole point of the
        field is to make «I wrote something similar» impossible to pass off as a port. */
