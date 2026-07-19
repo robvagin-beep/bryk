@@ -699,6 +699,49 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   ok('no link crosses the frame', looks.longest <= looks.cap,
      'longest ' + Math.round(looks.longest) + 'px, cap ' + Math.round(looks.cap));
 
+  /* ── the mesh warp (R10.3) ────────────────────────────────────────────────────
+     Three things have to hold together or the control is a lie in one of three ways:
+     it must reach the mesh path on its own (the path used to open on `face` only, so the
+     wave did nothing at heading 0), it must actually change the SILHOUETTE (displacing
+     along the surface normal alone is nearly invisible to a near-frontal camera — the
+     first version returned a circle with a dent), and it must not cost the set its frame. */
+  const wave = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const B = window.__bryk;
+    const L = B.onlyProg('grid'); B.setCount(60); L.matrix.length = 0; L.opacity = 1;
+    Object.assign(L.phys, { swirl:0, flock:0, attract:0, gravity:0, collide:0, follow:9, vary:0 });
+    Object.assign(L.look, { size:96, varSize:0, varTilt:0, angles:0, face:0,
+                            wave:0, waveFreq:2, waveRate:0, scale:0.7 });
+    B.state.cam.persp = 0.35; B.state.cam.spin = 0; B.state.cam.zoom = 1.4;
+    await sleep(1600);
+    /* the same bodies, the same phase, one knob apart */
+    L.clock.wave = 1.1; await sleep(700);
+    const flatQ = B.quads(), flat = B.silhouette();
+    L.look.wave = 0.34; L.clock.wave = 1.1; await sleep(700);
+    const warpQ = B.quads(), warp = B.silhouette();
+    /* Cost is asked as a RATIO against the mesh path, not as an absolute frame rate.
+       These bodies are 96px at zoom 1.4, so every one of them takes the quad path with a
+       large bounding box — and that path is expensive by itself, budgeted for exactly
+       that reason (QUAD_BUDGET). Reading the absolute number here would have failed the
+       wave for the cost of the perspective port, on a software renderer, which tells
+       nobody anything. What the wave owes an answer for is what IT adds. */
+    L.look.wave = 0; L.look.face = 1; await sleep(900);
+    let meshFps = 0; for (let i = 0; i < 4; i++) { await sleep(350); meshFps = Math.max(meshFps, B.fps()); }
+    L.look.wave = 0.34; L.look.face = 0; await sleep(900);
+    let warpFps = 0; for (let i = 0; i < 4; i++) { await sleep(350); warpFps = Math.max(warpFps, B.fps()); }
+    return { flatQ, warpQ, flat, warp, meshFps, warpFps };
+  });
+  ok('the wave reaches the mesh path with heading at zero',
+     wave.flatQ === 0 && wave.warpQ > 0, wave.flatQ + ' quads flat → ' + wave.warpQ + ' warped');
+  /* pixels, because «it deforms» is a claim about what the eye gets */
+  ok('the wave changes the silhouette, not just the shading',
+     Math.abs(wave.warp - wave.flat) / Math.max(1, wave.flat) > 0.02,
+     'lit pixels ' + wave.flat + ' → ' + wave.warp);
+  ok('folding costs little on top of the mesh it already needed',
+     wave.warpFps >= wave.meshFps * 0.7,
+     'same 60 bodies: ' + wave.meshFps + ' fps turned → ' + wave.warpFps + ' fps folded' +
+     ' (headless software renderer; judge the absolute number headed)');
+
   /* ── the view is reachable by hand AND by the beat ────────────────────────────
      Rob, 2026-07-19: «ты удалил панель ракурсов камеры, даже когда присваиваю в мэппинге
      его нет». The panel had only moved out of sight, and the drive was working the whole

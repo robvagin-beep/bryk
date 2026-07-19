@@ -1442,7 +1442,14 @@ function texTriInto(g,img,s,d){
   const b=((d1[1]-d0[1])*(s2[1]-s0[1])-(d2[1]-d0[1])*(s1[1]-s0[1]))/den;
   const c=((d2[0]-d0[0])*(s1[0]-s0[0])-(d1[0]-d0[0])*(s2[0]-s0[0]))/den;
   const e=((d2[1]-d0[1])*(s1[0]-s0[0])-(d1[1]-d0[1])*(s2[0]-s0[0]))/den;
-  const cx=(d0[0]+d1[0]+d2[0])/3, cy=(d0[1]+d1[1]+d2[1])/3, INF=0.6;
+  /* The inflation has to scale with the CELL, not sit at a constant. 0.6px was measured
+     against the 4×4 mesh the perspective port used; the warp runs at 8×8, where each cell
+     is half the size and adjacent edges no longer overlap by enough — hairline seams came
+     back across every folded body. Proportional to the cell and floored at the old value,
+     so the flat path is unchanged. */
+  const cx=(d0[0]+d1[0]+d2[0])/3, cy=(d0[1]+d1[1]+d2[1])/3;
+  const cell=Math.max(Math.hypot(d1[0]-d0[0],d1[1]-d0[1]),Math.hypot(d2[0]-d0[0],d2[1]-d0[1]));
+  const INF=Math.max(0.6,cell*0.06);
   g.save(); g.beginPath();
   for(let i=0;i<3;i++){ const P=d[i];
     const vx=P[0]-cx, vy=P[1]-cy, L=Math.hypot(vx,vy)||1;
@@ -1452,11 +1459,50 @@ function texTriInto(g,img,s,d){
   g.transform(a,b,c,e, d0[0]-a*s0[0]-c*s0[1], d0[1]-b*s0[0]-e*s0[1]);
   g.drawImage(img,0,0); g.restore();
 }
+/* ── the mesh warp ────────────────────────────────────────────────────────────────
+   R10.3 named this the one mechanism the whole Space Type Generator taxonomy needs and
+   we did not have: FLAG, MORISAWA, RIBBON and the cloth family are a quad whose GRID
+   NODES are displaced, not a quad that is moved. The 5×5 grid was already here, laid down
+   for the perspective port and used only to keep the texture from shearing — so the
+   entire feature is a displacement on the node before it is projected.
+
+   It rides on the surface's own axes rather than on screen x/y, so the wave travels
+   across the face as the body turns instead of sliding over it like a decal. And it
+   works on ANY texture, because everything in this engine is one: the brand marks, a
+   dropped PNG, a letter of the formation, the live camera feed. A flag of video.
+
+   Phase is accumulated by the caller and handed in (A5.2) — computing it from the clock
+   here would bring the flies straight back. */
+let WARP=null;   /* {amp, freq, phase, mode} while a warped layer paints, else null */
+function warpNode(u,v,wp,right,up){
+  if(!WARP||!WARP.amp)return wp;
+  const a=WARP.amp, f=WARP.freq, ph=WARP.phase;
+  /* one travelling wave along the surface, one standing ripple across it: the first is
+     the flag, the second is what stops it reading as a cylinder */
+  const d = WARP.mode===1
+    ? Math.sin((u*f*3.0)+ph)*Math.cos((v*f*1.7)-ph*0.6)          /* cloth: two crossing */
+    : Math.sin((u*f*3.0)+ph)*(0.35+0.65*(v+0.5));                /* flag: held at one edge */
+  /* Along the surface NORMAL (right × up) — and NOT only along it. A cloth seen head-on
+     is a cloth whose folds move toward and away from the eye, which a camera at persp 0.35
+     renders as almost nothing: measured, a circle at wave 0.34 came back a circle with a
+     dent. The silhouette has to move too, so a second, smaller displacement runs IN the
+     surface, gathering the fabric along the direction the wave travels. That is also what
+     cloth does — a fold takes up length — so it is the physical term, not a fudge. */
+  const nx=right.y*up.z-right.z*up.y, ny=right.z*up.x-right.x*up.z, nz=right.x*up.y-right.y*up.x;
+  const nl=Math.hypot(nx,ny,nz)||1;
+  const gather=Math.cos((u*f*3.0)+ph)*a*0.55;      /* derivative of the wave: the take-up */
+  return { x:wp.x+nx/nl*d*a - right.x*gather,
+           y:wp.y+ny/nl*d*a - right.y*gather,
+           z:wp.z+nz/nl*d*a - right.z*gather };
+}
 function drawQuadWorld(img,C,right,up,alpha,cam,G){
-  G=G||4; const pts=[];
+  /* a warped quad needs more nodes than a flat one — at 4 the wave reads as three creases.
+     Only pay for them when there is a wave. */
+  G=G||(WARP&&WARP.amp?8:4); const pts=[];
   for(let j=0;j<=G;j++) for(let i=0;i<=G;i++){
     const u=i/G-0.5, v=0.5-j/G;
-    const wp={ x:C.x+right.x*u*2+up.x*v*2, y:C.y+right.y*u*2+up.y*v*2, z:C.z+right.z*u*2+up.z*v*2 };
+    let wp={ x:C.x+right.x*u*2+up.x*v*2, y:C.y+right.y*u*2+up.y*v*2, z:C.z+right.z*u*2+up.z*v*2 };
+    wp=warpNode(u,v,wp,right,up);
     pts.push(project(wp,cam));
   }
   let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
@@ -2425,6 +2471,12 @@ const LOOK_PARAMS=[
      small integer and it is off by default. */
   {key:'smear',   label:'motion blur',    min:0,  max:4,   step:1,    def:0,  hard:1, mod:'no'},   /* integer stamp count: driven, it flickers between 2 and 3 stamps */
   {key:'linkDist',label:'link reach',     min:0.05,max:1.2,step:0.01, def:0.34, hard:1, mod:'no'}, /* re-wires WHICH pairs are neighbours: the web jumps rather than breathes. Drive `links` instead */
+  /* the mesh warp, R10.3 — see drawQuadWorld. Amplitude is in world units, so it reads
+     the same at any zoom; 0.35 already folds a body over on itself. */
+  {key:'wave',    label:'wave · amount',  min:0,  max:0.5, step:0.005,def:0},
+  {key:'waveFreq',label:'wave · ripples', min:0.5,max:6,   step:0.1,  def:2,  hard:1},
+  {key:'waveRate',label:'wave · speed',   min:0,  max:4,   step:0.05, def:1.4},
+  {key:'waveMode',label:'wave · cloth',   min:0,  max:1,   step:1,    def:0,  hard:1, mod:'no'},
   {key:'tint',    label:'asset tint',     min:0,  max:1,   step:0.01, def:0.55, hard:1, mod:'no'}  /* rebuilds the texture bank on every change — a rebuild on an envelope */
 ];
 const DEF_LOOK=()=>{ const o={}; for(const d of LOOK_PARAMS) o[d.key]=d.def; return o; };
@@ -4576,6 +4628,10 @@ function renderFocus(){
   restRows(['angles','radius','stroke','varTilt','tint'].map(byKey));
   restCap('web · flow');
   restRows(['links','linkDist','linkMax','streak','smear'].map(byKey));
+  /* the cloth family (R10.3): one wave over the body's own surface, on whatever the body
+     is wearing — a mark, a dropped SVG, a letter, or the live camera */
+  restCap('wave · cloth');
+  restRows(['wave','waveFreq','waveRate','waveMode'].map(byKey));
   restCap('lava · detail');
   restRows(MOTION_ROWS.filter(m=>!PRIMARY_MOTION.includes(m.key))
     .map(m=>{ const p=byKey(m.key); return p&&{...p,label:m.label}; }));
@@ -4820,13 +4876,22 @@ function paintDraws(draws,t,sizeMul){
      The gate also read `state.face` — the dead global — so the whole pre-pass was skipped
      unless something wrote a field the renderer no longer reads. Every draw in one call
      belongs to one layer, so the layer's own look is the honest source. */
-  const QUAD_BUDGET = 80;
+  /* A FOLDED quad costs more than a flat one — measured on the same sixty bodies, 32 fps
+     turned against 20 folded, because a fold pushes the mesh outward and every scratch
+     operation grows with the bounding box it lands in. So a folded body is billed at two,
+     which is the honest exchange rate: the budget is a frame-time promise, and a body
+     that costs twice should occupy twice the promise. Forty large folds instead of eighty,
+     and the ones that lose the budget are the small ones whose fold nobody could read. */
+  const QUAD_BUDGET = 80 / ((WARP && WARP.amp) ? 2 : 1);
   let quadCut = 0;
   const L0 = draws.length ? lookOf(draws[0].b) : null;
   const pxOf = d => { const pv=d.b.pd||{size:1}; const K=lookOf(d.b);
     return (size*d.P.k/220*(d.scale==null?1:d.scale)
             *sizeMult(pv.size,K.varSize)*(K.size??16))*2.2; };
-  if(L0 && L0.face>=0.03 && draws.length>QUAD_BUDGET){
+  /* the warp opens the mesh path on its own, so it must also be able to CLOSE it: the
+     pre-pass used to run only when heading was up, and a folded field at heading 0 was
+     handed the whole draw list with no cut at all */
+  if(L0 && (L0.face>=0.03 || (WARP&&WARP.amp)) && draws.length>QUAD_BUDGET){
     const sizes=new Float64Array(draws.length);
     for(let i=0;i<draws.length;i++) sizes[i]=pxOf(draws[i]);
     const sorted=Float64Array.prototype.slice.call(sizes).sort();
@@ -4851,7 +4916,13 @@ function paintDraws(draws,t,sizeMul){
        LOD_QUAD_PX cannot show its own perspective anyway, so it bills out; a
        middling one gets a coarser mesh. Measured: 300 turned bodies 20 → 58fps. */
     const LOD_QUAD_PX = 34, LOD_FINE_PX = 90;
-    if(LK.face<0.03 || px < LOD_QUAD_PX || px < quadCut){
+    /* A mesh warp can only exist on the mesh path. The quad path used to open on `face`
+       alone, so turning the wave up with heading at zero moved nothing at all and the
+       control read as broken — the same shape of defect as a slider the engine never
+       reads, arriving from the renderer's side. The wave is a second reason to pay for a
+       quad, and it says so here. Budget and LOD still apply: a 20px body cannot show a
+       fold, and the frame time is what protects the set. */
+    if((LK.face<0.03 && !((LK.wave||0)>0.001)) || px < LOD_QUAD_PX || px < quadCut){
       /* even in billboard LOD the body still leans, just in 2D — the read is
          "it banks into its travel", which survives the substitution at this size */
       const hx=b.x-b.px, hy=b.y-b.py;
@@ -5094,7 +5165,10 @@ function frame(){
     L.life=L.life||{k:1,dir:1};
     L.life.k=clamp(L.life.k + dt/(L.life.dir>0?0.8:0.6)*L.life.dir, 0, 1);
     if(L.life.k<=0 && L.life.dir<0){ removeLayer(L.id,true); renderLayers(); continue; }
-    L.clock=L.clock||{ dance:0, speed:0, scene:0, flow:0 };
+    L.clock=L.clock||{ dance:0, speed:0, scene:0, flow:0, wave:0 };
+    if(L.clock.wave==null) L.clock.wave=0;
+    /* the wave is a rate like every other one here, so it accumulates (A5.2) */
+    L.clock.wave  += dt*(L.look.waveRate==null?1.4:L.look.waveRate);
     L.clock.dance += dt*(L.params.dance==null?1:L.params.dance);
     L.clock.speed += dt*(L.params.speed==null?1:L.params.speed);
     L.clock.scene += dt*(L.params.sceneSpeed==null?1:L.params.sceneSpeed);
@@ -5166,7 +5240,15 @@ function frame(){
     ctx.globalCompositeOperation=L.blend||'source-over';
     if((LKL.links||0)>0.004) paintLinks(L,draws,LLIFE);
     if((LKL.streak||0)>0.01) paintStreaks(L,draws,LLIFE);
+    /* the mesh warp belongs to THIS layer and must not leak into the next one — a
+       module-level flag set and not cleared is how one card's setting ends up on every
+       card, which is the bug that took a whole morning as `state.phys` (A4.1) */
+    WARP=(LKL.wave||0)>0.001
+      ? { amp:LKL.wave, freq:LKL.waveFreq==null?2:LKL.waveFreq,
+          phase:(L.clock&&L.clock.wave)||0, mode:LKL.waveMode|0 }
+      : null;
     paintDraws(draws,t,sizeMul);
+    WARP=null;
     ctx.restore();
     drawnTotal+=draws.length;
   }
@@ -5260,6 +5342,13 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
   /* the stored bases of every driven path — the gate asks whether a hand edit reached
      them, because reaching the parameter alone lasts exactly one frame */
   bases:()=>BASES, applyMacro,
+  /* how many pixels the scene is actually lighting. The eye's own question, and the only
+     honest way to ask «did that change the picture» of an effect that claims to reshape
+     things rather than recolour them. */
+  silhouette(){ const g=cv.getContext('2d');
+    const d=g.getImageData(0,0,cv.width,cv.height).data; let n=0;
+    for(let i=3;i<d.length;i+=4) if(d[i]>24) n++;
+    return n; },
   programs:()=>PROGRAMS, addLayer, duplicateLayer, focusLayer,
   /* the debug path removes NOW. A probe asking «take this layer off the stack» is asking
      about state, not about choreography — leaving it fading for 0.6s would silently
