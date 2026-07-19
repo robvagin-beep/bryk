@@ -4906,18 +4906,23 @@ buildRamp(); buildStops(); rebuildPool(); rebuildTextures();
   Object.assign(L.phys,{ on:1, dim3:0, follow:2.2, collide:0.5, radius:0.13,
                          swirl:0.4, gravity:0.04, attract:0.01, flock:0.46, damp:0.93 });
   Object.assign(L.params,{ spread:1.85, dance:0.72, amplitude:1, frequency:1, twist:1, lanes:7 });
-  /* his framing: a slight tilt and turn, still orthographic — depth without warp */
-  Object.assign(state.cam,{ persp:0, zoom:1, tilt:-0.449, spin:0, yaw:0.272 });
-  /* the matrix he tuned: nothing moves in silence, everything answers the band it is on.
-     `size` on the fast bass envelope is the pulse; `dance` on flux is the build-up. */
+  /* his framing, 2026-07-19: «вот эта перспектива нам подходит». Depth is ON now (0.94),
+     the scene sits far back (zoom 0.2) and turns slowly by itself — the flat default was
+     the right base to build from, not the right place to stop. */
+  Object.assign(state.cam,{ persp:0.94, zoom:0.20, tilt:0.23, spin:0.095, yaw:0 });
+  /* ── the matrix he tuned, verbatim ────────────────────────────────────────
+     Rob, 2026-07-19: «вот этот подбор маппинга нам подходит. Тот маппинг, который ты
+     предлагал, это какая-то дёрганая херня, пожалуйста, больше её не предлагай».
+     Three rows, not seven. Mine drove size from a fast envelope AND collide AND follow AND
+     satDrift AND twist at once, so every band fought every other and the field never
+     settled into a phrase — that is what read as twitch.
+     His: the transient hits calibre and nothing else; the bass runs the figure's speed;
+     the mids turn it. One thing per band, and the two big depths are rates, not positions,
+     so they read as tempo rather than as a jump (see the integrated clock above). */
   L.matrix=[
-    { feat:'env.bassFast', path:'size',         mode:'bi', depth:0.30, curve:'exp'  },
-    { feat:'env.midSlow',  path:'phys.collide', mode:'up', depth:0.10, curve:'ease' },
-    { feat:'env.highSlow', path:'phys.follow',  mode:'up', depth:0.19, curve:'lin'  },
-    { feat:'band.bass',    path:'amplitude',    mode:'up', depth:0.15, curve:'lin'  },
-    { feat:'env.midFast',  path:'satDrift',     mode:'up', depth:0.54, curve:'lin'  },
-    { feat:'env.bassSlow', path:'twist',        mode:'up', depth:1.08, curve:'lin'  },
-    { feat:'flux',         path:'dance',        mode:'bi', depth:0.55, curve:'exp'  }
+    { feat:'onset',        path:'size',  mode:'bi', depth:1.11,  curve:'ease' },
+    { feat:'env.bassFast', path:'dance', mode:'up', depth:58.14, curve:'sqrt' },
+    { feat:'env.midFast',  path:'twist', mode:'bi', depth:23.45, curve:'ease' }
   ];
   rebuildLayer(L); renderLayers(); buildMatrix(); })();
 resize(); refreshDevices(); setArmState('idle');
