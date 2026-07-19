@@ -227,6 +227,16 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
   padding-top:var(--sp-2);box-shadow:inset 0 1px var(--line)}
 .mcard.open .mparams{display:block}
 
+.plate{border:1px solid var(--line);border-radius:var(--r-mid);padding:6px var(--sp-2) var(--sp-2);
+  margin-bottom:6px;background:var(--tint)}
+.plateHead{display:flex;align-items:baseline;justify-content:space-between;gap:var(--sp-1);
+  margin-bottom:4px}
+.plateHead b{font-family:var(--grotesk);font-size:var(--fz-m);letter-spacing:.02em}
+.plateHead i{font-style:normal;font-size:var(--fz-s);color:var(--muted);
+  font-variant-numeric:tabular-nums}
+.plateHint{font-size:var(--fz-s);color:var(--muted);margin:2px 0 var(--sp-1)}
+.lrow .lblend{flex:none;max-width:92px}
+
 /* ═══ layer stack — EQJ .lrow grammar ═══ */
 #addLayerBar{margin-bottom:var(--sp-2)}
 #addLayerBar select{width:100%}
@@ -274,18 +284,22 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
 /* ═══ corner ═══ */
 #corner{position:fixed;right:0;bottom:0;z-index:30;padding:16px;
   display:flex;flex-direction:column;align-items:flex-end;gap:var(--sp-1)}
-#tray{display:flex;flex-direction:column;gap:var(--sp-1);padding:var(--sp-2);min-width:184px;
+/* the tray lives above the info dock at bottom LEFT now and opens on hovering it */
+#tray{position:absolute;left:0;bottom:100%;margin-bottom:var(--sp-1);
+  display:flex;flex-direction:column;gap:var(--sp-1);padding:var(--sp-2);min-width:184px;
   background:var(--panel);border:1px solid var(--line);border-radius:var(--r-outer);
-  transform-origin:100% 100%;opacity:0;transform:scale(.92) translateY(6px);pointer-events:none;
+  transform-origin:0 100%;opacity:0;transform:scale(.96) translateY(6px);pointer-events:none;
   transition:opacity var(--dur-pop) var(--ease-out), transform var(--dur-pop) var(--ease-out)}
-#corner:hover #tray,#corner:focus-within #tray{opacity:1;transform:none;pointer-events:auto}
+#foot:hover #tray,#foot:focus-within #tray{opacity:1;transform:none;pointer-events:auto}
+#tray kbd+kbd{margin-left:2px}
 #tray .trow{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-2);
   font-size:var(--fz-s);color:var(--muted)}
 #tray .thead{font-family:var(--grotesk);font-size:var(--fz-s);color:var(--muted);
   letter-spacing:.06em;text-transform:uppercase}
-#uiBtn{flex:none;width:34px;height:34px;padding:0;border-radius:var(--r-full);
+#uiBtn{flex:none;height:34px;padding:0 12px;border-radius:var(--r-full);
   border:1px solid var(--line);background:var(--panel);color:var(--ink);
-  font:14px/1 ui-monospace,monospace;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  font-family:var(--grotesk);font-size:var(--fz-s);letter-spacing:.06em;
+  cursor:pointer;display:flex;align-items:center;justify-content:center}
 #uiBtn[aria-pressed="true"]{background:var(--ink);color:var(--panel);border-color:var(--ink)}
 body.noui #panel,body.noui #rightcol{display:none}
 body.noui #stage{left:0;right:0}
@@ -316,7 +330,7 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
    BOTH columns. Explanation lives here instead of in paragraphs between the controls,
    which is what ate the height the controls needed. */
 #panel{display:flex;flex-direction:column}
-#foot{flex:none;display:flex;align-items:center;gap:8px;padding:8px 14px;
+#foot{position:relative;flex:none;display:flex;align-items:center;gap:8px;padding:8px 14px;
   border-top:1px solid var(--line);min-height:46px}
 #footText{color:var(--muted);font:400 10px/14px system-ui,sans-serif;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -342,12 +356,26 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
 <aside id="panel">
   <div class="ptitle">Build</div>
   <div class="pbody">
+    <!-- THE RAIL (Rob, 2026-07-19). Two things, in this order, and nothing else:
+         a stack of layer ROWS — name · opacity · blend, the MixEmergency read — and one
+         section of settings belonging to the layer you are looking at. The card used to
+         unfold its whole parameter dictionary inline, so the stack jumped every time you
+         opened one and the settings of layer 2 pushed layer 3 off the screen. «Нам нужно
+         просто чтобы было opacity и всё. Рядом — тип отображения multiply overlay.» -->
     <fieldset id="gLayers"><legend>Layers</legend>
-      <div class="seg wrap" id="addLayerBar" role="group" aria-label="Add layer"></div>
+      <div id="addLayerBar" role="group" aria-label="Add layer"></div>
       <div id="layers"></div>
     </fieldset>
 
-    <fieldset id="gPool"><legend>Pool</legend>
+    <!-- Settings of the FOCUSED layer. Forces and the field live here, not in the right
+         column: they are rules for how this layer's objects are built and read, which is
+         a decision about the layer, not a mapping. Rob: «forces переставляешь в левую
+         колонку вниз под слоями, spacing — то же самое». -->
+    <fieldset id="gFocus"><legend><span id="focusName">no layer</span></legend>
+      <div id="focusBody"></div>
+    </fieldset>
+
+    <fieldset id="gPool"><legend>Assets</legend>
       <!-- Only what CANNOT be per-layer lives here. A body either exists or it does not,
            so Count is one number for the stage; the dropped files are one shared library
            every layer draws from. Everything about how a body LOOKS moved into the card,
@@ -390,7 +418,24 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
       </div>
     </div>
   </div>
-  <div id="foot"><div id="footText" aria-live="polite">Info</div></div>
+  <!-- The info dock. Hovering anything in the panel writes its description here; hovering
+       the dock itself opens the key map and the frame counter. All the helper text in one
+       corner, out of the picture until asked for (Rob, 2026-07-19). -->
+  <div id="foot">
+    <div id="tray" role="group" aria-label="Keys and readouts">
+      <div class="thead">Keys</div>
+      <div class="trow"><span>Chrome</span><span><kbd>H</kbd></span></div>
+      <div class="trow"><span>Blackout</span><span><kbd>B</kbd></span></div>
+      <div class="trow"><span>Fullscreen</span><span><kbd>F</kbd></span></div>
+      <div class="trow"><span>Next palette</span><span><kbd>P</kbd></span></div>
+      <div class="trow"><span>Formation</span><span><kbd>W</kbd></span></div>
+      <div class="trow"><span>Moves</span><span><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></span></div>
+      <div class="trow"><span>Scenes</span><span><kbd>5</kbd>–<kbd>8</kbd></span></div>
+      <div class="trow"><label for="fpsSw">Show FPS</label><input type="checkbox" id="fpsSw" class="sw"></div>
+      <div class="trow"><span id="fps">—</span><span id="bodies">—</span></div>
+    </div>
+    <div id="footText" aria-live="polite">Info</div>
+  </div>
 </aside>
 
 <main id="stage">
@@ -469,22 +514,17 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
          стороне. Слева мы сугубо строим нашу фигуру». Forces and Space used to sit in the
          left column, which put every question about HOW IT MOVES next to the answer to
          WHAT IT IS. They are here now, in signal order: rack → forces → moves. -->
-    <fieldset id="gPhys"><legend>Forces</legend>
-      <div class="row"><label title="Motion Primer behaviours — a whole force set at once">Behaviour</label>
-        <select id="behSel" class="tinSelect" aria-label="Behaviour"><option value="">—</option></select></div>
-      <div class="row"><label title="Manner of the swarm — cohesion vs separation vs flow">Manner</label>
-        <select id="mannerSel" class="tinSelect" aria-label="Manner"><option value="">—</option></select></div>
-      <div class="row"><label title="Bodies gain velocity and start noticing each other">Physics on</label><span data-mnt="physOn"></span></div>
-      <div class="row"><label title="Off = they avoid each other in the plane. On = in full depth.">Interact in 3D</label><span data-mnt="dim3"></span></div>
-      <div class="row"><label title="How hard the layout pulls">Follow</label><span data-mnt="follow"></span></div>
-      <div class="row"><label>Damping</label><span data-mnt="damp"></span></div>
-      <div class="row"><label title="Bodies push each other apart">Collide</label><span data-mnt="collide"></span></div>
-      <div class="row"><label>Body radius</label><span data-mnt="pradius"></span></div>
-      <div class="row"><label title="Curl field — divergence-free, so they swirl">Swirl</label><span data-mnt="swirl"></span></div>
-      <div class="row"><label title="Magnet to centre, stronger the closer they get">Attract</label><span data-mnt="attract"></span></div>
-      <div class="row"><label>Gravity</label><span data-mnt="gravity"></span></div>
-      <div class="row"><label title="Cohesion toward the local mean">Flock</label><span data-mnt="flock"></span></div>
-      <div class="row" style="margin-top:var(--sp-2)"><label title="Bodies are pushed out of the mark, so streams part around it">Logo as void</label><span data-mnt="logoAvoid"></span></div>
+    <!-- Forces moved to the LEFT rail, under the layer stack (Rob, 2026-07-19):
+         «forces переставляешь в левую колонку вниз под слоями, spacing — то же самое.
+         Space — это наше важное восприятие объектов и то, как мы их смотрим, это куда
+         важнее по приоритетности, нежели наши маппинги». The note above argued that
+         anything about MOVEMENT belongs on the right; that reading was too broad. Forces
+         are not animation, they are how a layer's objects are built and how they behave
+         toward each other — a property of the thing, not a mapping onto it. The right
+         column keeps what genuinely arrives from outside: rhythm, sound, camera, mappings.
+         Behaviour and Manner presets go with them — they are whole force sets. -->
+    <fieldset id="gLogo"><legend>Mark</legend>
+      <div class="row"><label title="Bodies are pushed out of the mark, so streams part around it">Logo as void</label><span data-mnt="logoAvoid"></span></div>
     </fieldset>
 
     <fieldset id="gSpace"><legend>Space</legend>
@@ -534,18 +574,13 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
 
 <div id="drop" aria-hidden="true">Drop PNG or SVG to add faces to the mix</div>
 
+<!-- Bottom right is ONE button and it says what it does. It used to be a ◐ glyph, which
+     reads as an invert toggle — Rob read it as exactly that and asked for the inversion to
+     go and a Hide UI to take its place. It was Hide UI the whole time; the icon was
+     lying. The hover tray of key hints that hung off it moved to the info dock at bottom
+     left, where the rest of the helper text already lives. -->
 <div id="corner">
-  <div id="tray" role="group" aria-label="Display options">
-    <div class="thead">Display</div>
-    <div class="trow"><span>Chrome</span><span><kbd>H</kbd></span></div>
-    <div class="trow"><span>Blackout</span><span><kbd>B</kbd></span></div>
-    <div class="trow"><span>Fullscreen</span><span><kbd>F</kbd></span></div>
-    <div class="trow"><span>Next palette</span><span><kbd>P</kbd></span></div>
-    <div class="trow"><span>Formation</span><span><kbd>W</kbd></span></div>
-    <div class="trow"><label for="fpsSw">Show FPS</label><input type="checkbox" id="fpsSw" class="sw"></div>
-    <div class="trow"><span id="fps">—</span><span id="bodies">—</span></div>
-  </div>
-  <button id="uiBtn" aria-pressed="false" title="Hide interface (H)">◐</button>
+  <button id="uiBtn" aria-pressed="false" title="Hide interface (H)">HIDE UI</button>
 </div>
 
 <script src="audio-core.js"></script>
@@ -3352,9 +3387,9 @@ function syncAllScrubs(){
     camW:state.camW,
     camLayer:state.cam2.layer, camOver:state.cam2.over, camMirror:state.cam2.mirror,
     camDuo:state.cam2.duotone, camContrast:state.cam2.contrast, camGain:state.cam2.gain,
-    physOn:state.phys.on, follow:state.phys.follow, damp:state.phys.damp,
-    collide:state.phys.collide, pradius:state.phys.radius, swirl:state.phys.swirl,
-    attract:state.phys.attract, gravity:state.phys.gravity, flock:state.phys.flock };
+    /* forces are per-layer and are rebuilt by renderFocus, which syncAllScrubs calls
+       through renderLayers — listing them here would sync controls that no longer exist */
+  };
   for(const k in map){ const s=SCRUBS[k]; if(s)s.set(map[k]); }
   renderLayers();
   const fi=$('#fText'); if(fi)fi.value=state.formation.text;
@@ -3454,12 +3489,8 @@ addEventListener('drop',e=>{ e.preventDefault(); dragDepth=0; document.body.clas
 /* ── physics ──
    No captured reference: applyScene REPLACES state.phys, and a captured object would
    leave every slider writing into an orphan after the first scene recall. */
-mount('physOn',{min:0,max:1,step:1,value:state.phys.on,label:'Physics on',
-  /* the FOCUSED layer's bodies, not `pool` — `pool` is whichever layer the frame loop
-     stepped last, so switching physics off used to freeze a stranger */
-  onInput:v=>{ state.phys.on=v;
-    if(!v){ const L=activeLayer(); if(L) for(const b of L.bodies){ b.vx=b.vy=b.vz=0; } } }});
-mount('dim3',{min:0,max:1,step:1,value:state.phys.dim3,label:'Interact in 3D',onInput:v=>state.phys.dim3=v});
+/* physOn / dim3 / the eight force scrubs are built per-focused-layer by renderFocus.
+   Mounting them here would need eight slots in a column that no longer holds forces. */
 /* ── one declaration per knob ────────────────────────────────────────────────────
    Rob, 2026-07-19: «противоречий до жопы». This was one of them, and a nasty one because
    nothing looked wrong: every force was declared TWICE — once here as a hand control and
@@ -3470,11 +3501,6 @@ mount('dim3',{min:0,max:1,step:1,value:state.phys.dim3,label:'Interact in 3D',on
    — which is a FRACTION OF THE FULL RANGE — silently changed size when the rack read the
    wider twin. The panel is generated from the rack's declaration now: one range, one step,
    one name, both hands on the same rope. */
-for(const d of PHYS_PARAMS){
-  mount(SCRUB_FOR[d.key],{ min:d.min, max:d.max, step:d.step, value:state.phys[d.f],
-    allowExtend:true, label:d.label.replace(/^./,c=>c.toUpperCase()),
-    onInput:v=>state.phys[d.f]=v });
-}
 
 /* ── viewport: drag to orbit, wheel to zoom (image-shuffler bindUi:867–871) ──────
    The stage is a control, not a picture. Ported from the shuffler, with one required
@@ -3574,35 +3600,48 @@ refreshCams(); camNoteText();
    screen-reader-correct for free and cannot drift from the panel canon. */
 const GROUPS=[['axis','axis · lanes'],['layout','layouts'],['particles','particles'],
               ['behaviour','behaviours'],['formation','formation']];
+/* ── the shelf: one plate per category ──────────────────────────────────────────
+   Rob, 2026-07-19: «панели add layer невозможно выбрать, они все просто одинаковые.
+   Нужно дать вариатив типа плашек и чтобы в этих плашках были категории — большие
+   плашки drop down, ты можешь понимать что добавляешь».
+   One flat select with five optgroups made all 28 presets look identical: the same row
+   height, the same weight, no way to tell a lane engine from a swarm without reading
+   every line. A plate per category names the KIND of thing first — you pick the family
+   with your eye and the member with one more click, which is how a shelf is read. */
+const GROUP_HINT={ axis:'lanes across the frame', layout:'a shape the field takes',
+  particles:'a swarm with a pattern', behaviour:'a way of moving', formation:'letters and marks' };
 (function(){ const bar=$('#addLayerBar'); if(!bar)return;
   bar.innerHTML='';
-  const sel=document.createElement('select'); sel.className='tinSelect'; sel.id='presetPick';
-  sel.setAttribute('aria-label','Add a layer');
-  const ph=document.createElement('option');
-  ph.value=''; ph.textContent='+ add layer'; ph.selected=true; sel.appendChild(ph);
   for(const [g,gl] of GROUPS){
     const items=PRESETS.filter(P=>P.group===g); if(!items.length)continue;
-    const og=document.createElement('optgroup'); og.label=gl;
+    const plate=document.createElement('div'); plate.className='plate';
+    const head=document.createElement('div'); head.className='plateHead';
+    head.innerHTML='<b></b><i></i>';
+    head.querySelector('b').textContent=gl;
+    head.querySelector('i').textContent=items.length;
+    plate.appendChild(head);
+    /* the hint rides in the info dock on hover instead of taking a third line in every
+       plate — five plates × three lines pushed the layer stack below the fold */
+    const sel=document.createElement('select'); sel.className='tinSelect';
+    sel.setAttribute('aria-label','Add a layer from '+gl);
+    const ph=document.createElement('option');
+    ph.value=''; ph.textContent='+ add'; ph.selected=true; sel.appendChild(ph);
     for(const P of items){ const o=document.createElement('option');
-      o.value=P.id; o.textContent=P.label; og.appendChild(o); }
-    sel.appendChild(og);
+      o.value=P.id; o.textContent=P.label; o.title=P.desc; sel.appendChild(o); }
+    sel.dataset.desc=gl+' — '+(GROUP_HINT[g]||'');
+    sel.addEventListener('change',()=>{
+      const P=PROGRAMS[sel.value]; sel.value='';       /* back to the placeholder at once */
+      if(!P)return;
+      addLayer(P.id); setStatus('layer added · '+P.label,'ok'); setFoot(P.desc);
+    });
+    plate.appendChild(sel); bar.appendChild(plate);
   }
-  sel.dataset.desc='Pick a preset — it becomes a new layer straight away';
-  sel.addEventListener('change',()=>{
-    const P=PROGRAMS[sel.value]; sel.value='';         /* back to the placeholder at once */
-    if(!P)return;
-    addLayer(P.id); setStatus('layer added · '+P.label,'ok'); setFoot(P.desc);
-  });
-  bar.appendChild(sel);
 })();
 
-/* ── behaviours + manners (Motion Primer) ── */
-for(const [sel,table,fn] of [['#behSel',BEHAVIOURS,applyBehaviour],['#mannerSel',mannerTable(),applyManner]]){
-  const el=$(sel);
-  for(const k of Object.keys(table)){ const o=document.createElement('option');
-    o.value=k; o.textContent=k; el.appendChild(o); }
-  el.addEventListener('change',()=>{ if(el.value) fire(()=>fn(el.value), el.value); });
-}
+/* Behaviour and Manner are built by renderFocus now — they are whole force sets for the
+   FOCUSED layer, so they live with the forces, in the rail, and are rebuilt when the
+   focus moves. Two fixed selects in the right column could only ever address whoever
+   happened to be focused, without saying so. */
 
 /* ── moves · quantise · scenes · rack ── */
 document.querySelector('#gMoves .seg').addEventListener('click',e=>{
@@ -3936,68 +3975,119 @@ function renderLayers(){
     const sc=mkScrub({min:0,max:1,step:0.01,value:L.opacity,label:L.label+' opacity',
       onInput:v=>{ L.opacity=v; }});
     lop.appendChild(sc.el); SCRUBS['w_'+L.id]=sc;
+    /* how this layer meets the ones under it — the second half of «видно / не видно».
+       It sat inside the unfolded card, three screens down from the opacity it belongs
+       next to; on the row it reads as one decision, which is what it is. */
+    { const bs=mkSel(BLENDS, L.blend||'source-over', v=>{ L.blend=v; });
+      bs.classList.add('lblend'); bs.setAttribute('aria-label',L.label+' blend mode');
+      r2.appendChild(bs); }
 
-    if(L.open){
-      const box=document.createElement('div'); box.className='lparams';
-      /* One card, read top to bottom: how much of me → whose bodies → what they look
-         like → how I place them → my own extras. `share` first because it decides how
-         many bodies the rest of the card is even talking about. */
-      const cap=t=>{ const h=document.createElement('div'); h.className='lcap';
-        h.textContent=t; box.appendChild(h); };
-      const mkRows=(list,extend)=>{ for(const p of list){
-        const row=document.createElement('div'); row.className='row';
-        const lb=document.createElement('label'); lb.textContent=p.label; lb.title=p.label;
-        const sl=document.createElement('span'); row.append(lb,sl); box.appendChild(row);
-        const s2=mkScrub({min:p.min,max:p.max,step:p.step,value:p.get(),allowExtend:!!extend,
-          k:p.descKey||p.key, label:L.label+' '+p.label, onInput:v=>p.set(v)});
-        sl.appendChild(s2.el);
-      } };
-
-      mkRows([{key:'count',label:'count',min:20,max:2000,step:1,
-               get:()=>L.count,set:v=>{ L.count=Math.round(v); rebuildLayer(L); }}], true);
-
-      cap('bodies');
-      mkRows([['tri','triangle'],['wedge','wedge'],['circle','circle'],['asset','dropped assets']]
-        .map(([k,lbl])=>({ key:k, label:lbl, min:0, max:3, step:0.05,
-          get:()=>L.shapes[k]??0,
-          /* weights, not a choice: every mark above zero is in this layer's mix */
-          set:v=>{ L.shapes[k]=v; rebuildTextures(); } })), true);
-      const rr=document.createElement('button'); rr.className='btn wide'; rr.textContent='RANDOMISE';
-      rr.title='Re-deal THIS layer: its marks, its particle cloud, its start positions';
-      rr.addEventListener('click',e=>{ e.stopPropagation(); rerollLayer(L); });
-      box.appendChild(rr);
-
-      cap('look');
-      /* from paramsOf, so the card and the rack address exactly the same objects */
-      { const all=paramsOf(L), byKey=k=>all.find(x=>x.key===k);
-        mkRows(LOOK_PARAMS.map(d=>byKey(d.key)).filter(Boolean), true); }
-
-      if(P.params.length){ cap('form');
-        /* allowExtend, like every other numeric row. Ten engine controls clamped because
-           this one call omitted the flag — the input law is not optional per call site. */
-        mkRows(P.params.map(x=>({...x, descKey:L.prog+'.'+x.key,
-          get:()=>L.params[x.key], set:v=>L.params[x.key]=v})), true); }
-      /* the program's own non-scrub controls, moved in from the parking bay */
-      const exId=PROG_EXTRAS[L.prog];
-      if(exId){ const ex=document.getElementById(exId); if(ex) box.appendChild(ex); }
-      d.appendChild(box);
-    }
+    /* The card no longer unfolds here. Its parameters moved into #gFocus below the
+       stack, so the rows stay a fixed-height list you can scan and click through.
+       Rob: «нам нужно просто чтобы было opacity и всё, рядом тип отображения». */
     host.appendChild(d);
   });
   const rl=$('#rackLayer'); if(rl) rl.textContent=activeLayer()?('▸ '+activeLayer().label):'— no layer';
-  /* the physics column now shows the FOCUSED layer's forces, so it has to follow the
-     focus — otherwise the risers keep showing the previous card's numbers while every
-     drag writes to the new one, which is the worst possible lie a panel can tell */
-  syncPhysScrubs();
+  renderFocus();
+}
+
+/* ── the focused layer's settings, one section, below the stack ──────────────────
+   Everything a layer decides about ITSELF: what its bodies are, how the field is laid
+   out, and the forces acting inside it. Nothing here belongs to the stage. */
+const BLENDS=[['source-over','normal'],['multiply','multiply'],['screen','screen'],
+  ['overlay','overlay'],['difference','difference'],['exclusion','exclusion'],['lighter','add']];
+/* Marks as a CHOICE, not four weight sliders. Rob asked three times to stop making him
+   dial a triangle and a circle separately: «просто добавляется в каждую карточку базовый
+   пресет нашего бренда, 3 добавленных svg, вот и всё». A set is one decision; the
+   randomiser re-deals which body wears which of them. */
+const SHAPE_SETS={
+  brand:   { tri:1, wedge:1, circle:1, asset:1 },
+  circles: { tri:0, wedge:0, circle:1, asset:0 },
+  angles:  { tri:1, wedge:1, circle:0, asset:0 },
+  mixed:   { tri:1, wedge:0.4, circle:1.6, asset:0.8 },
+  assets:  { tri:0, wedge:0, circle:0, asset:1 }
+};
+const shapeSetOf=L=>{
+  for(const k in SHAPE_SETS){ const s=SHAPE_SETS[k];
+    if(['tri','wedge','circle','asset'].every(m=>Math.abs((L.shapes[m]??0)-s[m])<0.001)) return k; }
+  return 'custom';
+};
+function renderFocus(){
+  const host=$('#focusBody'), nameEl=$('#focusName'); if(!host)return;
+  /* park the program extras before the wipe — moving a node keeps its listeners, and
+     innerHTML='' would take the text field and the font picker down with everything else */
+  const park=$('#progExtras');
+  if(park) for(const id of Object.values(PROG_EXTRAS)){
+    const el=document.getElementById(id); if(el) park.appendChild(el); }
+  host.innerHTML='';
+  const L=activeLayer();
+  if(!L){ if(nameEl)nameEl.textContent='no layer';
+    const n=document.createElement('p'); n.className='note';
+    n.textContent='Add a layer above — these are its own settings.'; host.appendChild(n); return; }
+  if(nameEl) nameEl.textContent='▸ '+L.label;
+  const P=PROGRAMS[L.prog];
+
+  const cap=t=>{ const h=document.createElement('div'); h.className='lcap';
+    h.textContent=t; host.appendChild(h); };
+  const rows=(list)=>{ for(const p of list){
+    const row=document.createElement('div'); row.className='row';
+    const lb=document.createElement('label'); lb.textContent=p.label; lb.title=p.label;
+    const sl=document.createElement('span'); row.append(lb,sl); host.appendChild(row);
+    const s2=mkScrub({min:p.min,max:p.max,step:p.step,value:p.get(),allowExtend:true,
+      k:p.descKey||p.key, label:L.label+' '+p.label, onInput:v=>p.set(v)});
+    sl.appendChild(s2.el);
+  } };
+
+  cap('shapes');
+  { const row=document.createElement('div'); row.className='row';
+    const lb=document.createElement('label'); lb.textContent='set'; row.appendChild(lb);
+    const sel=mkSel(Object.keys(SHAPE_SETS).map(k=>[k,k]).concat(
+      shapeSetOf(L)==='custom'?[['custom','custom']]:[]), shapeSetOf(L), v=>{
+        if(v==='custom')return;
+        Object.assign(L.shapes,SHAPE_SETS[v]); rebuildTextures(); renderFocus(); });
+    sel.setAttribute('aria-label','Shape set'); row.appendChild(sel); host.appendChild(row); }
+  { const seg=document.createElement('div'); seg.className='seg';
+    const rr=document.createElement('button'); rr.className='btn'; rr.textContent='RE-DEAL';
+    rr.title='Re-deal THIS layer: its marks, its particle cloud, its start positions';
+    rr.addEventListener('click',()=>rerollLayer(L));
+    const ad=document.createElement('button'); ad.className='btn'; ad.textContent='+ SVG';
+    ad.title='Add PNG or SVG files as faces for every layer that wants assets';
+    ad.addEventListener('click',()=>$('#fileIn').click());
+    seg.append(rr,ad); host.appendChild(seg); }
+
+  const all=paramsOf(L), byKey=k=>all.find(x=>x.key===k);
+  cap('field');
+  rows([{key:'count',label:'density · bodies',min:20,max:900,step:1,
+         get:()=>L.count,set:v=>{ L.count=Math.round(v); rebuildLayer(L); }}]
+       .concat(['scale','spacing','size','varSize'].map(byKey).filter(Boolean)));
+
+  cap('forces');
+  /* a whole force set in one gesture, for THIS layer — quantised like every other
+     performance action, so it lands on the bar rather than mid-phrase */
+  for(const [lbl,table,fn] of [['behaviour',BEHAVIOURS,applyBehaviour],
+                               ['manner',mannerTable(),applyManner]]){
+    const row=document.createElement('div'); row.className='row';
+    const lb=document.createElement('label'); lb.textContent=lbl; row.appendChild(lb);
+    const sel=mkSel([['','—']].concat(Object.keys(table).map(k=>[k,k])),'',v=>{
+      if(v) fire(()=>{ fn(v); renderFocus(); }, v); });
+    sel.setAttribute('aria-label',lbl+' preset'); row.appendChild(sel); host.appendChild(row);
+  }
+  rows(PHYS_PARAMS.map(d=>byKey(d.key)).filter(Boolean));
+
+  if(P.params.length){ cap('drawing');
+    rows(P.params.filter(d=>!P.keys||P.keys.includes(d.key))
+      .map(x=>({...x, descKey:L.prog+'.'+x.key,
+        get:()=>L.params[x.key], set:v=>L.params[x.key]=v}))); }
+  /* the rest of the look — the texture-baked half — stays reachable but out of the way */
+  cap('material');
+  rows(['radius','stroke','tint','face','varTilt'].map(byKey).filter(Boolean));
+
+  const exId=PROG_EXTRAS[L.prog];
+  if(exId){ const ex=document.getElementById(exId); if(ex) host.appendChild(ex); }
 }
 /* the force scrubs alone. Cannot call syncAllScrubs() from here: that one ends by calling
    renderLayers(), and the two would chase each other forever. */
-function syncPhysScrubs(){
-  const P=state.phys;
-  const map={ physOn:P.on, dim3:P.dim3, follow:P.follow, damp:P.damp, collide:P.collide,
-              pradius:P.radius, swirl:P.swirl, attract:P.attract, gravity:P.gravity, flock:P.flock };
-  for(const k in map){ const s=SCRUBS[k]; if(s)s.set(map[k]); }
-}
+function syncPhysScrubs(){ /* forces are rebuilt per focus by renderFocus now */ }
 
 /* formation */
 const fText=$('#fText'), fFont=$('#fFont'), fNote=$('#fNote');
@@ -4427,6 +4517,10 @@ window.__bryk = { state, core:()=>core, pool:()=>layers.flatMap(L=>L.bodies), la
      the ported reference set is MANNER_PRESET. One key for both let a gate go green on
      the table the UI does not use. */
   mannerPresets:()=>MANNER_PRESET, bodiesOf:L=>L.bodies, sizeMult,
+  /* the force-set presets, addressed as the engine addresses them: they act on the
+     FOCUSED layer. The probe used to drive a <select> by id; the selects are rebuilt per
+     focus now, and a gate that reaches for a DOM id tests the markup, not the rule. */
+  applyBehaviour, applyManner,
   /* measure the frame the way the SCREEN sees it, not the way a layout believes it —
      a gate that asks the engine for its own constant and compares the engine against it
      will pass however wrong that constant is (this one did, at 46% of the real frame) */

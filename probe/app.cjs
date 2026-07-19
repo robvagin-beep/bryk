@@ -249,26 +249,34 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
        on correct code: fall now sets gravity 0.55, orbit swirl 0.55, Disperse collide
        exactly 1.00. Any re-tune moves those numbers again; it must not move the ordering. */
     B.quant('off');
-    const bs = document.getElementById('behSel');
-    const pick = async (el, v) => { el.value = v; el.dispatchEvent(new Event('change')); await sleep(500);
-      return { ...B.state.phys }; };
-    const fall = await pick(bs, 'fall'), orbit = await pick(bs, 'orbit'), pack = await pick(bs, 'pack');
+    /* Call the engine's own entry point. The behaviour and manner selects are built per
+       focused layer now, so there is no stable DOM id to drive — and driving one only ever
+       proved the markup existed. `state.phys` is the focused layer's force set. */
+    const pick = async (fn, v) => { fn(v); await sleep(400); return { ...B.state.phys }; };
+    const fall = await pick(B.applyBehaviour, 'fall'), orbit = await pick(B.applyBehaviour, 'orbit'),
+          pack = await pick(B.applyBehaviour, 'pack');
     put('fall is the only behaviour that falls',
         fall.gravity > 0 && orbit.gravity === 0 && pack.gravity === 0,
         'fall ' + fall.gravity + ' / orbit ' + orbit.gravity + ' / pack ' + pack.gravity);
     put('gravity dominates fall, swirl dominates orbit',
         fall.gravity > fall.swirl && orbit.swirl > orbit.gravity && orbit.swirl > fall.swirl,
         'fall g' + fall.gravity + ' s' + fall.swirl + ' | orbit g' + orbit.gravity + ' s' + orbit.swirl);
-    const ms2 = document.getElementById('mannerSel');
-    const disp = await pick(ms2, 'Disperse'), clus = await pick(ms2, 'Cluster'), flow = await pick(ms2, 'Flow');
+    const disp = await pick(B.applyManner, 'Disperse'), clus = await pick(B.applyManner, 'Cluster'),
+          flow = await pick(B.applyManner, 'Flow');
     put('Disperse separates hardest and refuses to cohere',
         disp.collide > clus.collide && disp.collide > flow.collide && disp.flock === 0,
         'collide ' + disp.collide + ' vs ' + clus.collide + '/' + flow.collide);
     put('Cluster coheres, Flow flows',
         clus.flock > disp.flock && flow.swirl > clus.swirl,
         'cluster flock ' + clus.flock + ' | flow swirl ' + flow.swirl);
-    put('panel follows a behaviour change',
-        Math.abs(B.scrubs.collide.get() - B.state.phys.collide) < 0.001);
+    /* the rail must show what the engine just did — the forces section is rebuilt on
+       every apply, so read the row that carries `collide` out of the live DOM */
+    const collideRow = [...document.querySelectorAll('#focusBody .row')]
+      .find(r => r.querySelector('label') && r.querySelector('label').textContent === 'collide');
+    put('the rail follows a behaviour change',
+        !!collideRow && Math.abs(parseFloat(collideRow.querySelector('.sval').textContent) -
+                                 B.state.phys.collide) < 0.02,
+        collideRow ? collideRow.querySelector('.sval').textContent + ' vs ' + B.state.phys.collide : 'no row');
 
     // ── quantise: a fired action must wait for the musical grid ──────────────
     B.quant('phrase');
