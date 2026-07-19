@@ -110,6 +110,43 @@ const {chromium}=require(path.join('/Users/robertvagin/Claude/Projects/synthex-e
     put('every key a card shows actually moves the picture', dead.length===0,
         dead.slice(0,6).join(' | ') || ids.length+' presets swept');
 
+    /* ── THE SHARED BLOCK — the half the sweep above cannot see ──────────────────
+       `keys` is only the preset's own params. A card is built from `paramsOf`, which is
+       `w` + `count` + the whole LOOK block + the PHYS block + the globals — about forty
+       controls that appear on EVERY card and were swept on none. That omission is not
+       academic: all three dead-slider defects this file documents (`size`, `count`, `face`
+       global twins, «the drive reached nothing») happened in exactly that block, and a
+       fourth could be introduced today and every gate would stay green.
+       It cannot be asked the same way — these are not pure functions of a target, they
+       reach the renderer through look, physics and the camera. So ask the renderer: move
+       the value and require the PICTURE to change. Anything that fails here is either a
+       control wired to nothing or one whose effect is invisible, and both are worth a look. */
+    const shared = B.paramsOf(B.layers()[0]).filter(p => !((bank[B.layers()[0].prog].keys)||[]).includes(p.key));
+    const numb = [];
+    {
+      const L = B.onlyProg('pat-cloud'); L.matrix.length = 0; L.opacity = 1;
+      Object.assign(L.phys, { swirl:0, flock:0, attract:0, gravity:0, collide:0.4, follow:6, vary:0 });
+      Object.assign(L.look, { size:44, varSize:0.5, scale:1, spacing:1, links:0.3, streak:0.5,
+                              radius:10, tint:0.5, wave:0.1, angles:0 });
+      B.setCount(260); B.state.cam.spin = 0; await s(1500);
+      /* what the eye gets, plus where the bodies are: a look change moves pixels, a force
+         change moves bodies, and either counts as «it does something» */
+      const feel = () => B.silhouette() + '|' +
+        B.bodiesOf(L).slice(0, 60).map(b => b.x.toFixed(2) + ',' + b.y.toFixed(2)).join(' ');
+      for (const p of shared) {
+        if (p.key === 'count') continue;          /* re-deals the crowd; covered by its own gate */
+        const was = p.get();
+        const to = (was - p.min) > (p.max - was) ? p.min + (was - p.min) * 0.2
+                                                 : was + (p.max - was) * 0.8;
+        await s(120); const before = feel();
+        p.set(to); await s(260); const after = feel();
+        p.set(was); await s(60);
+        if (before === after) numb.push(p.key + ' (' + (+was.toFixed(3)) + '→' + (+to.toFixed(3)) + ')');
+      }
+    }
+    put('every shared control moves the picture too', numb.length === 0,
+        numb.slice(0, 8).join(' | ') || (shared.length - 1) + ' shared controls swept');
+
     /* the transport half, asked of the running app: the rate must move the picture over
        TIME, and 0 must actually mean still. Both directions matter — a rate that cannot
        stop is the same defect as one that cannot go. */

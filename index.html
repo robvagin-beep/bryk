@@ -1477,7 +1477,11 @@ function texTriInto(g,img,s,d){
      so the flat path is unchanged. */
   const cx=(d0[0]+d1[0]+d2[0])/3, cy=(d0[1]+d1[1]+d2[1])/3;
   const cell=Math.max(Math.hypot(d1[0]-d0[0],d1[1]-d0[1]),Math.hypot(d2[0]-d0[0],d2[1]-d0[1]));
-  const INF=Math.max(0.6,cell*0.06);
+  /* ONLY where the mesh is folded. A warped mesh needs a wider overlap because the cells
+     no longer meet in a plane; a flat one does not, and applying it there inflated a 300px
+     body's cells by 4.5px, drawing extrapolated texture past the quad's own silhouette on
+     every ordinary perspective scene. The seam fix was right and its blast radius was not. */
+  const INF=(WARP&&WARP.amp>0.001)?Math.max(0.6,cell*0.06):0.6;
   g.save(); g.beginPath();
   for(let i=0;i<3;i++){ const P=d[i];
     const vx=P[0]-cx, vy=P[1]-cy, L=Math.hypot(vx,vy)||1;
@@ -1518,11 +1522,19 @@ function warpNode(u,v,wp,right,up){
      cloth does — a fold takes up length — so it is the physical term, not a fudge. */
   const nx=right.y*up.z-right.z*up.y, ny=right.z*up.x-right.x*up.z, nz=right.x*up.y-right.y*up.x;
   const nl=Math.hypot(nx,ny,nz)||1;
-  const gather=Math.cos((u*f*3.0)+ph)*a*0.55;      /* derivative of the wave: the take-up */
+  /* Mean-free. `cos(u·f·3+ph)` averaged over the face is not zero for most frequencies,
+     so the take-up term did not only gather the fabric — it TRANSLATED the whole quad
+     sideways, by an amount that rolled with the phase. Every body in a layer shares one
+     clock, so the entire field swayed laterally in unison, which reads as one object being
+     shaken rather than as cloth. Subtracting the mean leaves the shape change and drops
+     the drift; the closed form of the average over u ∈ [−½,½] is sinc(f·3/2π). */
+  const w=f*3.0, mean=w>1e-6 ? (Math.sin(w/2)/(w/2))*Math.cos(ph) : Math.cos(ph);
+  const gather=(Math.cos(u*w+ph)-mean)*a*0.55;      /* derivative of the wave: the take-up */
   return { x:wp.x+nx/nl*d*a - right.x*gather,
            y:wp.y+ny/nl*d*a - right.y*gather,
            z:wp.z+nz/nl*d*a - right.z*gather };
 }
+let scratchHi=0;
 function drawQuadWorld(img,C,right,up,alpha,cam,G){
   /* a warped quad needs more nodes than a flat one — at 4 the wave reads as three creases.
      Only pay for them when there is a wave. */
@@ -1537,8 +1549,19 @@ function drawQuadWorld(img,C,right,up,alpha,cam,G){
   for(const p of pts){ if(p.x<x0)x0=p.x; if(p.y<y0)y0=p.y; if(p.x>x1)x1=p.x; if(p.y>y1)y1=p.y; }
   const bw=Math.ceil(x1-x0)+2, bh=Math.ceil(y1-y0)+2;
   if(bw<1||bh<1||bw>4096||bh>4096)return;
+  /* It only ever grew. Measured over three seconds of large folded bodies it ratcheted to
+     1421×1102 and stayed there after the scene went small again; the ceiling below is
+     4096², which is 67 MB resident for the rest of the set. Worse, past that ceiling the
+     quad is not drawn at all and a body silently stops existing.
+     So it shrinks too — but only when the frame has been comfortably smaller for a while,
+     because reallocating a canvas is not free and a scene that breathes across the
+     threshold must not reallocate twice a second. */
   if(scratch.width<bw||scratch.height<bh){ scratch.width=Math.max(scratch.width,bw);
-    scratch.height=Math.max(scratch.height,bh); sctx=scratch.getContext('2d'); }
+    scratch.height=Math.max(scratch.height,bh); sctx=scratch.getContext('2d'); scratchHi=0; }
+  else if(bw*2<scratch.width && bh*2<scratch.height){
+    if(++scratchHi>240){ scratch.width=Math.max(64,bw*2); scratch.height=Math.max(64,bh*2);
+      sctx=scratch.getContext('2d'); scratchHi=0; }
+  } else scratchHi=0;
   sctx.clearRect(0,0,bw,bh);
   const S=img.width/G;
   for(let j=0;j<G;j++) for(let i=0;i<G;i++){
@@ -3650,10 +3673,28 @@ function captureScene(){
 
     quant:QUANT };
 }
+/* Taken at parse time, before the standby is applied: the picture as the file declares
+   it, which is what «default» has to mean for a scene that predates a field. */
+const DEFAULT_SCENE=(()=>{ try{ return JSON.parse(JSON.stringify({
+    shapes:{...state.shapes}, assetW:state.assetW, assetTint:state.assetTint,
+    camW:state.camW, cam2:{...state.cam2}, mixSeed:state.mixSeed,
+    count:state.count, size:state.size, radius:state.radius, stroke:state.stroke, face:state.face,
+    cam:{...state.cam}, bgL:state.bgL, satDrift:state.satDrift, macro:{...state.macro},
+    post:{...state.post}, echo:{...state.echo}, kaleido:{...state.kaleido}, phys:{...state.phys},
+    stops:state.stops.map(x=>({...x})), formation:{...state.formation} })); }
+  catch(_){ return {}; } })();
 function applyScene(sc){
   if(!sc)return;
   if(sc.v!==SCENE_V) setStatus('scene v'+sc.v+' loaded into v'+SCENE_V+' — missing fields defaulted','ok');
-  const def=captureScene();                     /* fresh defaults, then the stored data over them */
+  /* FACTORY defaults, not the live picture. `captureScene()` captures what is on screen
+     right now, so every field a stored scene lacks was inheriting the current state and
+     calling it a default — the exact opposite of migration. Driven and confirmed: with an
+     ornament running at 8 wedges, recalling any bank saved before the kaleidoscope existed
+     left the ornament running at 8 wedges, silently, with no way to see why. Every bank in
+     localStorage and every JSON Rob has exported predates it.
+     `DEFAULT_STATE` is built once from the same literal `state` is, so a missing field
+     comes back as the thing that was true before anyone touched it. */
+  const def=DEFAULT_SCENE;
   /* mutate the EXISTING objects rather than replacing them: replacing orphans any
      reference the panel or the engine already holds */
   const m=(a,b)=>Object.assign(a,b||{});
@@ -5063,7 +5104,14 @@ function paintDraws(draws,t,sizeMul){
      which is the honest exchange rate: the budget is a frame-time promise, and a body
      that costs twice should occupy twice the promise. Forty large folds instead of eighty,
      and the ones that lose the budget are the small ones whose fold nobody could read. */
-  const QUAD_BUDGET = 80 / ((WARP && WARP.amp) ? 2 : 1);
+  /* The exchange rate is the CELL COUNT, not a guess. A folded body is meshed 8×8 against
+     the flat path's 4×4, and every cell is a clip plus an affine drawImage — four times
+     the work, so it costs four budget slots, not two. Two was measured when the mesh was
+     secretly still 4×4 (the density default never fired), and the moment the fold got the
+     nodes it actually needs, the same 60 bodies went 31 → 20 fps. Twenty large folds
+     instead of eighty, and the fold is worth more than the sixty small ones it displaces —
+     a 30px body cannot show a crease. */
+  const QUAD_BUDGET = 80 / ((WARP && WARP.amp) ? 4 : 1);
   let quadCut = 0;
   const L0 = draws.length ? lookOf(draws[0].b) : null;
   const pxOf = d => { const pv=d.b.pd||{size:1}; const K=lookOf(d.b);
@@ -5144,14 +5192,23 @@ function paintDraws(draws,t,sizeMul){
       const rl=Math.hypot(rgt.x,rgt.y,rgt.z)||1; rgt.x/=rl; rgt.y/=rl; rgt.z/=rl;
       const up={ x:n.y*rgt.z-n.z*rgt.y, y:n.z*rgt.x-n.x*rgt.z, z:n.x*rgt.y-n.y*rgt.x };
       const s=size/220*calibre;
-      const ownR=(pv.roll+t*pv.spin*0.12)*LK.varTilt;
+      /* 0.72, matching the billboard branch. They disagreed by 6×, so a body oscillating
+         around the LOD threshold visibly snapped between 1.7°/s and 10.3°/s each time it
+         crossed — one rate, one look. */
+      const ownR=(pv.roll+t*pv.spin*0.72)*LK.varTilt;
       const ca=Math.cos(ownR), sa=Math.sin(ownR);
       const rr={x:rgt.x*ca+up.x*sa, y:rgt.y*ca+up.y*sa, z:rgt.z*ca+up.z*sa};
       const uu={x:-rgt.x*sa+up.x*ca, y:-rgt.y*sa+up.y*ca, z:-rgt.z*sa+up.z*ca};
       rgt.x=rr.x; rgt.y=rr.y; rgt.z=rr.z; up.x=uu.x; up.y=uu.y; up.z=uu.z;
+      /* A FOLD NEEDS NODES. The mesh density was written as a default inside
+         drawQuadWorld — and the call site has always passed a number, so the default never
+         once fired and every warped body was folded on the same 4×4 (2×2 under 90px) grid
+         the flat perspective path uses. A 2×2 mesh samples the wave at three points: one
+         fold, or none. Decided here, where the size is known. */
+      const warping=WARP&&WARP.amp>0.001;
       drawQuadWorld(img,{x:b.x,y:b.y,z:b.z},
         {x:rgt.x*s,y:rgt.y*s,z:rgt.z*s},{x:up.x*s,y:up.y*s,z:up.z*s},alpha,state.cam,
-        px<LOD_FINE_PX?2:4);
+        warping ? (px<LOD_FINE_PX?4:8) : (px<LOD_FINE_PX?2:4));
       quads++;
     }
   }
@@ -5196,8 +5253,16 @@ function paintKaleido(dt){
   kc.drawImage(cv,0,0,cv.width,cv.height,0,0,kw,kh);   /* the untouched frame, read N times */
   const cx=W/2, cy=H/2, R=Math.hypot(W,H), step=TAU/N;
   ctx.save();
-  ctx.globalAlpha=clamp(K.mix==null?1:K.mix,0,1);
-  ctx.clearRect(0,0,W,H);
+  /* A CROSSFADE, not a curtain. `mix` used to set globalAlpha and then clear the frame, so
+     at 0 the screen went black and at 0.5 you got a half-dimmed ornament over nothing —
+     driving it from a bass envelope strobed the whole stage. The rack label promises «the
+     ornament fades in over the picture», so the picture has to still be there: the scene
+     is already in `cv`, the wedges are stamped over it at `mix`, and only at full mix is
+     the original cleared away. */
+  const mix=clamp(K.mix==null?1:K.mix,0,1);
+  if(mix<=0.001){ ctx.restore(); return; }
+  ctx.globalAlpha=mix;
+  if(mix>=0.999) ctx.clearRect(0,0,W,H);
   for(let i=0;i<N;i++){
     ctx.save();
     ctx.translate(cx,cy);
@@ -5500,9 +5565,13 @@ function frame(){
       ? { amp:LKL.wave, freq:LKL.waveFreq==null?2:LKL.waveFreq,
           phase:(L.clock&&L.clock.wave)||0, mode:LKL.waveMode|0 }
       : null;
-    paintDraws(draws,t,sizeMul);
-    WARP=null;
-    ctx.restore();
+    /* try/finally, because `requestAnimationFrame(frame)` is re-armed at the TOP of the
+       frame: a throw inside paintDraws does not stop the loop, it just skips the two lines
+       after it. Without this, one broken texture leaks the last layer's warp onto every
+       layer and every frame that follows, and grows the save stack by one per frame — the
+       same shape of bug as the global `state.phys` the note above cites. */
+    try{ paintDraws(draws,t,sizeMul); }
+    finally{ WARP=null; ctx.restore(); }
     drawnTotal+=draws.length;
   }
   /* the quad budget is a per-FRAME cost, so it sums across every layer that painted */

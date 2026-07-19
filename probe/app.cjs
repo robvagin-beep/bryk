@@ -684,7 +684,14 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     L.look.linkMax = 5; L.look.linkDist = 0.45; await sleep(600);
     B.linkReset(); await sleep(500);            /* several frames at the worst setting */
     const rep = B.linkReport();
-    return { fps, offGrid, n: B.bodiesOf(L).length, longest: rep.longest, cap: rep.cap };
+    /* The cap is computed HERE, from the stage size, not read back from the engine. Asking
+       the renderer for its own bound and then comparing the renderer to it can only ever
+       pass — and worse, the renderer skips a link before recording it, so `longest < cap`
+       is a theorem, not a measurement. A wrong constant (say W*2) would sail through.
+       A fifth of the stage width is the spec; the engine has to agree with the spec. */
+    const cs = B.canvasSize();
+    return { fps, offGrid, n: B.bodiesOf(L).length, longest: rep.longest,
+             cap: cs.w * 0.2, engineCap: rep.cap };
   });
   ok('angle snap lands every body on the grid', looks.offGrid === 0,
      looks.offGrid + ' of 200 off a quarter-turn');
@@ -698,6 +705,11 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
      link may cross more than a fifth of the frame. */
   ok('no link crosses the frame', looks.longest <= looks.cap,
      'longest ' + Math.round(looks.longest) + 'px, cap ' + Math.round(looks.cap));
+  /* and the bound the engine enforces is the bound the spec asks for — the check above
+     cannot see a cap that is simply set too high */
+  ok('the engine enforces the frame-fifth it was asked for',
+     Math.abs(looks.engineCap - looks.cap) < 1,
+     'engine ' + Math.round(looks.engineCap) + 'px vs spec ' + Math.round(looks.cap) + 'px');
 
   /* ── the mesh warp (R10.3) ────────────────────────────────────────────────────
      Three things have to hold together or the control is a lie in one of three ways:
