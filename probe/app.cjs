@@ -1195,6 +1195,55 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   });
   for (const [n, p, e] of hoverR) ok(n, p, e);
 
+  /* ── 🔴 ТАБЛИЦА СТИЛЕЙ ПАРСИТСЯ ЦЕЛИКОМ ──────────────────────────────────────
+     Удаляя правило, я срезал его до первого перевода строки — а оно занимало две.
+     Осиротевший хвост с закрывающей скобкой обрушил разбор ВСЕГО, что ниже,
+     включая `#corner`, и кнопка HIDE UI уехала в левый верхний угол. Ни одной
+     ошибки в консоли: браузер молча пропускает битый CSS.
+     Поэтому гейт спрашивает не «есть ли ошибки», а «доехал ли парсер до конца»:
+     проверяет якорные правила из головы, середины и ХВОСТА таблицы. Если хвост
+     снова отвалится, это будет видно здесь, а не на проекторе. */
+  const cssR = await page.evaluate(() => {
+    const r = []; const put = (n, c, e) => r.push([n, !!c, e == null ? '' : String(e)]);
+    const rules = [...document.styleSheets[0].cssRules].map(x => x.cssText);
+    const has = sel => rules.some(t => t.startsWith(sel));
+    put('таблица стилей разобрана до конца — хвост на месте',
+        has('#corner') && has('#uiBtn') && has('#foot'),
+        rules.length + ' правил · corner:' + has('#corner') + ' uiBtn:' + has('#uiBtn'));
+    /* и якоря из головы и середины, чтобы «до конца» значило именно это */
+    put('...и голова с серединой тоже', has(':root') && has('.mpad') && has('.navItem'));
+    return r;
+  });
+  for (const [n, p, e] of cssR) ok(n, p, e);
+
+  /* ── КНОПКА HIDE UI (Роб, 2026-07-20) ────────────────────────────────────────
+     «Мелкая, всегда статичная, привязанная к правому нижнему углу; в режиме hide
+     UI еле видна, процентов на 10-15, при ховере полностью, и чтобы можно было
+     классно вернуть обратно.» Гейт держит все четыре требования: угол, размер,
+     прозрачность в скрытом режиме и возврат интерфейса кликом. */
+  const uiR = await page.evaluate(async () => {
+    const r = []; const put = (n, c, e) => r.push([n, !!c, e == null ? '' : String(e)]);
+    const s = ms => new Promise(f => setTimeout(f, ms));
+    const b = document.getElementById('uiBtn');
+    put('кнопка есть', !!b); if (!b) return r;
+    const box = () => b.getBoundingClientRect();
+    const corner = () => { const q = box();
+      return (innerWidth - q.right) < 30 && (innerHeight - q.bottom) < 30; };
+    put('стоит в правом нижнем углу', corner());
+    put('мелкая', box().height <= 30, Math.round(box().width) + '×' + Math.round(box().height));
+    b.click(); await s(400);
+    const op = +getComputedStyle(b).opacity;
+    put('интерфейс спрятался', getComputedStyle(document.getElementById('panel')).display === 'none');
+    put('в скрытом режиме еле видна (10-15%)', op >= 0.08 && op <= 0.2, 'opacity ' + op);
+    put('...и НЕ уехала из угла', corner());
+    b.click(); await s(400);
+    put('клик вернул интерфейс',
+        getComputedStyle(document.getElementById('panel')).display !== 'none' &&
+        +getComputedStyle(b).opacity === 1);
+    return r;
+  });
+  for (const [n, p, e] of uiR) ok(n, p, e);
+
   /* ── AUTO TILT · маятник, а не кувырок (Роб, 2026-07-20) ─────────────────────
      «Добавь ещё значение в space, как auto spin, так же auto tilt.»
      Поворот копится свободно — полный оборот у сцены естественен. Наклон живёт в

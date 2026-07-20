@@ -11,6 +11,26 @@
    Panel grammar ported from Synthex Engine v1; DSP from audio-core.js;
    render core from image-shuffler; mod-matrix contract from EQJ/MUSICVIZ.
    ═══════════════════════════════════════════════════════════════════════════ */
+/* ── Фирменный шрифт слова (Роб, 2026-07-20) ─────────────────────────────────
+   Здесь ДОЛЖЕН стоять @font-face для Druk Text Wide, и он появится, как только
+   придёт файл. Пока файла нет — правила нет, и вот почему: @font-face с четырьмя
+   src на отсутствующие файлы даёт ЧЕТЫРЕ 404 при каждой загрузке страницы.
+   Гейт «console clean» поймал это сразу, и он прав: инструмент открывают на
+   площадке, и сыпать в сеть заведомо мёртвыми запросами он не должен.
+
+   Что сделать, когда файл будет: положить его в `assets/fonts/` (имена — в
+   README рядом) и вернуть сюда:
+
+     @font-face{ font-family:'Druk Text Wide';
+       src:url('assets/fonts/DrukTextWide.woff2') format('woff2');
+       font-weight:normal; font-style:normal; font-display:block }
+
+   `font-display:block` намеренно: слово лепится из тел по растру глифов, и
+   подмена шрифта на лету пересобрала бы формацию прямо на экране. Короткая
+   пауза на загрузке лучше, чем перестроение кадра посреди сета.
+   Имя шрифта в `state.formation.font` уже стоит — оно ничего не ломает и просто
+   говорит, чем слово хочет быть набрано. */
+
 :root{
   --bg:      oklch(0.13 0.012 265);
   --panel:   oklch(0.165 0.012 265);
@@ -375,10 +395,12 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
 .crow .xdel{padding:0;height:20px;line-height:1;font-size:var(--fz-l);
   background:var(--tint);border:1px solid transparent;border-radius:var(--r-ctl);
   color:var(--muted);cursor:pointer}
-/* Полоса-превью палитры снята (Роб, 8:31: «не понимаю, для чего здесь
-   градиентная полоса, её убрать надо»). Сама рампа осталась — её читает движок,
-   показывать её отдельной плашкой было нечего. */
-  border-radius:var(--r-ctl);margin:var(--sp-2) 0 0}
+/* 🔴 Полоса-превью палитры снята (Роб, 8:31), и я снял её НЕАККУРАТНО: правило
+   занимало две строки, а вырезал я до первого перевода строки. Осиротевший хвост
+   со закрывающей скобкой обрушил разбор ВСЕГО, что ниже, — включая `#corner`.
+   Поэтому кнопка HIDE UI и уехала в левый верхний угол: её правило просто не
+   существовало для браузера. Один лишний символ унёс хвост таблицы стилей молча,
+   без единой ошибки в консоли. */
 
 /* ═══ corner ═══ */
 #corner{position:fixed;right:0;bottom:0;z-index:30;padding:16px;
@@ -395,14 +417,25 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
   font-size:var(--fz-s);color:var(--muted)}
 #tray .thead{font-family:var(--grotesk);font-size:var(--fz-s);color:var(--muted);
   letter-spacing:.06em;text-transform:uppercase}
-#uiBtn{flex:none;height:34px;padding:0 12px;border-radius:var(--r-full);
+/* Кнопка скрытия интерфейса (Роб, 2026-07-20: «мелкая, всегда статичная,
+   привязанная к правому нижнему углу; в режиме hide UI еле видна, процентов на
+   10–15, при ховере видна полностью, и чтобы можно было классно вернуть»).
+   Мельче прежней: в обычном режиме она соседствует с панелями и не должна с ними
+   спорить, а в скрытом её задача — не мешать сцене, оставаясь находимой. */
+#uiBtn{flex:none;height:26px;padding:0 10px;border-radius:var(--r-full);
   border:1px solid var(--line);background:var(--panel);color:var(--ink);
   font-family:var(--grotesk);font-size:var(--fz-s);letter-spacing:.06em;
-  cursor:pointer;display:flex;align-items:center;justify-content:center}
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:opacity var(--dur-pop) var(--ease-out)}
 #uiBtn[aria-pressed="true"]{background:var(--ink);color:var(--panel);border-color:var(--ink)}
 body.noui #panel,body.noui #rightcol{display:none}
 body.noui #stage{left:0;right:0}
-body.noui #uiBtn{opacity:.18}
+/* 12% — «еле видна»: достаточно, чтобы знать, что она там, и мало, чтобы не
+   тянуть на себя взгляд с проекции. Наведение и фокус возвращают её целиком,
+   поэтому вернуть интерфейс — одно движение, а не поиск вслепую.
+   Зона наведения — весь угол (#corner с его padding:16px), а не сама кнопка:
+   целиться в 26px мышью в темноте неудобно, а в угол экрана промахнуться нельзя. */
+body.noui #uiBtn{opacity:.12}
 @media (hover:hover) and (pointer:fine){ body.noui #corner:hover #uiBtn{opacity:1} }
 body.noui #corner:focus-within #uiBtn{opacity:1}
 body.blackout #stage{visibility:hidden}
@@ -712,9 +745,10 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
          toward each other — a property of the thing, not a mapping onto it. The right
          column keeps what genuinely arrives from outside: rhythm, sound, camera, mappings.
          Behaviour and Manner presets go with them — they are whole force sets. -->
-    <fieldset id="gLogo"><legend>Mark</legend>
-      <div class="row"><label title="Bodies are pushed out of the mark, so streams part around it">Logo as void</label><span data-mnt="logoAvoid"></span></div>
-    </fieldset>
+    <!-- Филдсет Mark с ручкой «Logo as void» снят (Роб, 2026-07-20: «это не нужный
+         параметр»). Сама сила осталась в движке (state.logoAvoid, avoidLogo) и стоит
+         в нуле: марка как ПУСТОТА — приём, который может понадобиться сцене, но
+         как постоянная ручка на панели он себя не оправдал. -->
 
 
     <!-- Панель Moves снята (Роб, 2026-07-20, скриншотом: «удали эту панель»).
@@ -985,7 +1019,12 @@ const state = {
      mirror itself, which is what stops it reading as a frozen doily. */
   kaleido:{ sectors:0, roll:0, rate:0, mix:1 },
   stops:[ {c:'#2436a7',p:0}, {c:'#fdbe0c',p:0.5}, {c:'#ce1c22',p:1} ],
-  formation:{ text:'BRYK', font:'', on:false }
+  /* Шрифт слова по умолчанию (Роб, 2026-07-20). Имя стоит здесь, а файл кладётся
+     в assets/fonts — см. @font-face наверху. Если файла нет и семейства нет в
+     системе, `seedFonts` просто не покажет его в списке, а `buildFormation`
+     возьмёт следующий: имя в дефолте ничего не ломает, оно лишь говорит, чем
+     слово ХОЧЕТ быть набрано. */
+  formation:{ text:'BRYK', font:'Druk Text Wide', on:false }
 };
 
 /* ── forces belong to the layer (Rob A3.1, 2026-07-19) ───────────────────────────
@@ -1009,7 +1048,13 @@ const state = {
      collide    — kept, because «обтекать друг друга» IS the standby (A3.3 avoid by default)
      follow 2.2 — softer than 3.4: arrives without snapping
      damp 0.93  — a touch more inertia, so movement carries instead of stopping dead */
-const DEF_PHYS=()=>({ on:1, dim3:0, follow:2.2, collide:0.5, radius:0.13,
+/* `collide` 0.5 → 0.04 (Роб, 2026-07-20, скриншотом: «поставь такой авойд по
+   умолчанию»). Причина не в самом числе: 2026-07-20 личное пространство стало
+   считаться от собственного калибра тела (правка «ячеек»), и у крупных доминант
+   радиус вырос в разы — прежние 0.5 при выросшем радиусе расталкивают поле
+   заметно сильнее, чем расталкивали до неё. Это компенсация, а не новый вкус:
+   сила осталась на месте, изменилось плечо, на котором она работает. */
+const DEF_PHYS=()=>({ on:1, dim3:0, follow:2.2, collide:0.04, radius:0.13,
                       swirl:0, gravity:0, attract:0, flock:0, damp:0.93,
                       /* the lava controls (Rob, 2026-07-19: «добавь настройки вот этого
                          lava flow»). The drift had exactly one texture because the field's
@@ -2621,7 +2666,16 @@ PRESETS.push(P_('word','bryk · Motion Primer:195-230','formation','Word · form
    {key:'jitter',label:'jitter',min:0,max:0.12,step:0.002,def:0.02},
    {key:'fit',label:'fit to grid',min:0,max:1,step:0.01,def:1},
    {key:'mode',label:'fill / frame',min:0,max:1,step:1,def:0}],
-  ['scale','jitter','fit','mode'], {},
+  ['scale','jitter','fit','mode'],
+  /* Стартовая поза текстового режима — снята с настроенного кадра Роба
+     (2026-07-20, скриншот). Слово живёт по своим правилам, и общие дефолты поля
+     ему не подходят: буква читается не тем же калибром, что вспышка.
+       921 тело и калибр 8.5 — слово набирается МЕЛКИМ зерном: крупные тела
+         съедают контрформы, и «BRYK» превращается в четыре пятна;
+       avoid 0 — расталкивание ломает форму буквы, ему тут нечего делать;
+       камера: зум 0.55 и лёгкий наклон, чтобы слово влезало целиком и не
+         читалось фронтально-плоско, плюс медленный обратный автоспин. */
+  { count:921 },
   (i,N,t,P,ctx)=>{ const pts=buildFormation(N,P.mode>0.5,ctx&&ctx.vx); if(!pts.length)return {x:0,y:0,z:0};
     const p=pts[Math.min(pts.length-1,Math.floor(i*pts.length/Math.max(1,N)))];
     return { x:p[0]*P.scale+Math.sin(t*2+i)*P.jitter,
@@ -2669,6 +2723,12 @@ const PRESETS_ALL=PRESETS.slice();
      Стендбай не пострадал (он ставит камеру сам), а вот второй Pulse burst, добавленный
      рукой, приезжал плоским рядом с объёмным первым. Сид теперь свой и явный, поэтому
      от имени группы больше не зависит. */
+  /* стартовая поза текстового режима (Роб, скриншот 2026-07-20) */
+  const word=byId.get('word');
+  if(word){ word.lookSeed={ size:8.5, varSize:0.7, varTilt:1 };
+            word.physSeed={ swirl:0, collide:0, follow:2.2 };
+            word.camSeed={ persp:0, zoom:0.55, tilt:-0.12, spin:-0.04, sway:0 }; }
+
   const core=byId.get(FOCUS_CORE);
   if(core){ core.group='core'; core.camSeed={ persp:0.72, spin:0.03, tilt:0.12, zoom:1 }; }
 
@@ -2958,7 +3018,7 @@ function makeLayer(prog,variant){
     /* свой стек векторных искажений, до трёх слотов (Роб, 4:52) */
     distort:[],
     /* its own forces (A3.1) — a behaviour dropped on this card cannot reach a stranger */
-    phys:DEF_PHYS(), cam:Object.assign(DEF_CAM(), camSeed||{}),
+    phys:Object.assign(DEF_PHYS(), P.physSeed||{}), cam:Object.assign(DEF_CAM(), camSeed||{}),
     /* ── arriving and leaving ────────────────────────────────────────────────
        Rob, 2026-07-19: «нам нужно, чтобы одни играли одну роль, потом появлялись
        другие и строились в свою, а те старые незаметно съебывались — либо
@@ -5930,8 +5990,9 @@ seedFonts(FALLBACK_FONTS.filter(f=>document.fonts.check('12px "'+f+'"')));
    mechanism the rack uses to show a driven parameter. */
 /* macroLive снят вместе с макро: он подсвечивал ползунки, ставшие устаревшими
    во время протяжки фейдера. Множителю это не нужно — он ничего не устаревляет. */
-mount('logoAvoid',{min:0,max:2,step:0.01,value:state.logoAvoid,label:'Logo as void',
-  onInput:v=>state.logoAvoid=v});
+/* монтаж logoAvoid снят вместе с его рядом: контрол без слота в разметке — это
+   призрак (он строится, попадает в SCRUBS, синхронизируется — и нигде не виден).
+   Гейт «console clean at boot» поймал его сразу, за что ему спасибо. */
 mount('logoScale',{min:0.5,max:8,step:0.05,value:state.logoScale,label:'Logo size',
   onInput:v=>{ state.logoScale=v; LOGO.key=''; }});
 $('#fFonts').addEventListener('click',async()=>{
@@ -6771,7 +6832,11 @@ buildRamp(); buildStops(); rebuildPool(); rebuildTextures();
      what gives every other force something to act on.
      flock 0.46 clumps (nnCv 0.73 → 1.05 as it rises); 0.12 is Motion Primer's own `Free`
      cohesion. flowScale 0.5 measured as fine boiling — 0.18 is the lava. */
-  Object.assign(L.phys,{ on:1, dim3:0, follow:1.0, collide:0.30, radius:0.22,
+  /* collide 0.30 → 0.04 вместе с дефолтом слоя (Роб, 2026-07-20). Стендбай задаёт
+     физику явно и поэтому дефолт НЕ наследует — оставь его здесь прежним, и
+     стартовая сцена разошлась бы с любым слоем, добавленным руками: одна и та же
+     ручка означала бы разное до и после первого клика. */
+  Object.assign(L.phys,{ on:1, dim3:0, follow:1.0, collide:0.04, radius:0.22,
                          swirl:0.85, gravity:0.04, attract:0.01, flock:0.12, damp:0.95,
                          flowScale:0.18, flowSpeed:0.22, vary:0.45 });
   Object.assign(L.params,{ spread:1.5, dance:0.5, amplitude:1, frequency:1, twist:1, lanes:7 });
