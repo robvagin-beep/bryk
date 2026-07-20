@@ -1054,7 +1054,11 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   ok('a rack row on auto spin turns the scene', view.idle < 0.01 && view.driven > 0.1,
      'idle ' + view.idle.toFixed(3) + ' → driven ' + view.driven.toFixed(3) + ' rad');
 
-  /* ── ВЕКТОРНЫЕ ИСКАЖЕНИЯ (Роб, видео 4:52) ───────────────────────────────────
+  /* ── ВЕКТОРНЫЕ ИСКАЖЕНИЯ · СПЯТ В ДВИЖКЕ (Роб снял панель 2026-07-20) ─────────
+     Панели нет, математика есть. Гейт остаётся именно поэтому: он говорит, что
+     способность цела и её можно вернуть, а не что оператор ею пользуется. Без
+     этой оговорки зелёная строка «каждое поле гнёт картинку» читалась бы как
+     «в интерфейсе работает искажение», чего сейчас нет.
      Перенос математики из Synthex. Гейт спрашивает три вещи, и каждая ловит свой
      способ соврать: поле обязано ГНУТЬ КАРТИНКУ (а не просто добавить карточку),
      стек обязан складываться (а не применять только первый слот), и — главное —
@@ -1190,6 +1194,40 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
     return r;
   });
   for (const [n, p, e] of hoverR) ok(n, p, e);
+
+  /* ── AUTO TILT · маятник, а не кувырок (Роб, 2026-07-20) ─────────────────────
+     «Добавь ещё значение в space, как auto spin, так же auto tilt.»
+     Поворот копится свободно — полный оборот у сцены естественен. Наклон живёт в
+     ±1 и означает, с какой стороны мы на сцену смотрим: копи его так же, и сцена
+     будет раз за разом уходить через макушку. Гейт держит оба требования сразу —
+     наклон обязан ХОДИТЬ и обязан НЕ ВЫЛЕЗАТЬ за предел. */
+  const swayR = await page.evaluate(async () => {
+    const r = []; const put = (n, c, e) => r.push([n, !!c, e == null ? '' : String(e)]);
+    const s = ms => new Promise(f => setTimeout(f, ms));
+    const B2 = window.__bryk;
+    const L = B2.layers()[0] || B2.addLayer('pat-burst'); await s(400);
+    L.matrix.length = 0; B2.bases().clear();
+    L.cam.spin = 0; L.cam.tilt = 0.9; L.cam.sway = 0.4; L.cam.swayDir = 1;
+    const seen = [];
+    for (let i = 0; i < 34; i++) { seen.push(L.cam.tilt); await s(90); }
+    const lo = Math.min(...seen), hi = Math.max(...seen);
+    put('auto tilt водит наклон', hi - lo > 0.15,
+        lo.toFixed(2) + ' … ' + hi.toFixed(2));
+    put('...и разворачивается у предела, а не кувыркается',
+        lo >= -1.0001 && hi <= 1.0001, 'край ' + lo.toFixed(3) + '/' + hi.toFixed(3));
+    put('...ход реально меняет знак', seen.some((v, i) =>
+        i > 1 && (v - seen[i-1]) * (seen[i-1] - seen[i-2]) < 0));
+    put('ряд Auto tilt есть в Space', !!document.querySelector('[data-mnt="sway"] .scrub'));
+    L.cam.sway = 0; L.cam.tilt = 0;
+
+    /* и диапазон наклона тел — там, где его найдут (Роб: «вывести более явно») */
+    const labels = [...document.querySelectorAll('#focusBody .row label')].map(x => x.textContent);
+    const idx = labels.findIndex(t => /tilt range/i.test(t));
+    put('«tilt range» стоит среди ОСНОВНЫХ ручек, не в свёрнутом',
+        idx >= 0 && idx < 6, idx < 0 ? 'не найден' : ('позиция ' + idx + ' из ' + labels.length));
+    return r;
+  });
+  for (const [n, p, e] of swayR) ok(n, p, e);
 
   /* ── Motion Pad (A8.3 · Н3) ───────────────────────────────────────────────────
      Пад ломался ДВАЖДЫ и одинаково: кто-то ужимал его по высоте, бокс переставал

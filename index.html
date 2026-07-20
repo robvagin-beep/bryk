@@ -538,6 +538,7 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
       <div class="row"><label>Zoom</label><span data-mnt="zoom"></span></div>
       <div class="row"><label>Tilt</label><span data-mnt="tilt"></span></div>
       <div class="row"><label title="Degrees per second the whole scene turns. Drivable from the rack as cam.spin">Auto spin</label><span data-mnt="spin"></span></div>
+      <div class="row"><label title="How fast the scene rocks through its tilt. Swings between the limits instead of tumbling over">Auto tilt</label><span data-mnt="sway"></span></div>
       <p class="note">Drag the stage to orbit, wheel to zoom, double-click to reset.</p>
     </fieldset>
 
@@ -568,13 +569,19 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
       <p class="note" id="assetNote">No assets — primitives only.</p>
     </fieldset>
 
-    <!-- Векторные искажения (Роб, видео 4:52). Место — ВНИЗУ ЛЕВОЙ колонки, как в
-         Synthex («слева-снизу» в его словах): это правка ГЕОМЕТРИИ слоя, а не
-         мастеринг кадра, поэтому живёт с тем, что описывает слой, а не с
-         пост-эффектами справа. Сначала я поставил её справа — мимо: там мастеринг. -->
-    <fieldset id="gDist"><legend>Distortion · Vector</legend>
-      <div id="distStack"></div>
-    </fieldset>
+    <!-- Панель Distortion · Vector снята (Роб, 2026-07-20: «убери вкладку
+         distortion vector, он вообще ничего не делает»).
+         Механически он работал — нажатие кнопки создавало слот и картинка менялась
+         (силуэт 160446 → 136227 на замере руками). Но с кресла оператора «работает
+         измеримо» и «работает» — разные вещи: на дефолтных amount 0.35 / scale 1.6
+         liquid даёт мелкое зерно поверх и без того движущегося поля, и эффект
+         неотличим от собственной жизни сцены. Контрол, чей дефолт незаметен, и
+         есть контрол, который ничего не делает.
+         Математика (DISTORT_FIELDS, compileDistortion, applyDistortion) оставлена
+         в движке нетронутой — тем же приёмом, что диета пресетов: убран ВЫБОР, не
+         способность. Вернуть = вернуть филдсет и вызов renderDistortion, но с
+         дефолтами, которые видно с первого клика. -->
+
 
 
     <!-- Program extras: controls that cannot be generated from a param declaration
@@ -1018,7 +1025,11 @@ const physFallback=DEF_PHYS();
    `state.cam` survives as an accessor onto the focused layer, because the Space panel, the
    stage drag, the wheel and the rack all address it by that name — they now speak to «the
    layer you are looking at». */
-const DEF_CAM=()=>({ persp:0, zoom:1, tilt:0, spin:0, yaw:0 });
+/* `sway` — авто-наклон (Роб, 2026-07-20: «добавь ещё значение в space, как auto
+   spin, так же auto tilt»). Отдельное поле рядом со spin, а не режим наклона:
+   spin копит yaw, и наклон должен копиться так же, иначе это разные механики под
+   похожими именами. `swayDir` — направление хода, см. интегратор. */
+const DEF_CAM=()=>({ persp:0, zoom:1, tilt:0, spin:0, yaw:0, sway:0, swayDir:1 });
 const camFallback=DEF_CAM();
 Object.defineProperty(state,'cam',{
   enumerable:true, configurable:true,
@@ -2828,7 +2839,7 @@ const LOOK_PARAMS=[
      addLayer): первому отделяться не от чего, а вот третий без границы теряется. */
   {key:'backing', label:'слой · подложка', min:0, max:1, step:0.01, def:0, hard:1},   /* a toggle. Two states are a strobe, not a modulation */
   {key:'face',    label:'face heading',   min:0,  max:1,   step:0.01, def:0},
-  {key:'varTilt', label:'tilt variation', min:0,  max:1,   step:0.01, def:1,  hard:1},
+  {key:'varTilt', label:'tilt range',     min:0,  max:1,   step:0.01, def:1,  hard:1},
   /* ── which of these is worth putting a beat on ────────────────────────────────
      Rob, on the mapping picker: «вариации бессмысленные». The list was everything
      `paramsOf` returns, in declaration order, so a knob that re-deals the whole crowd sat
@@ -3234,7 +3245,8 @@ const CAM_PARAMS = [
   { key:'cam.zoom',  f:'zoom',  label:'zoom',        min:0.4,max:2.4, step:0.01 },
   { key:'cam.tilt',  f:'tilt',  label:'tilt',        min:-1, max:1,   step:0.01 },
   { key:'cam.yaw',   f:'yaw',   label:'yaw',         min:-3.2,max:3.2,step:0.01, mod:'slow' },
-  { key:'cam.spin',  f:'spin',  label:'auto spin',   min:-0.5,max:0.5,step:0.005 }
+  { key:'cam.spin',  f:'spin',  label:'auto spin',   min:-0.5,max:0.5,step:0.005 },
+  { key:'cam.sway',  f:'sway',  label:'auto tilt',   min:0,   max:0.5, step:0.005 }
 ];
 const PHYS_PARAMS = [
   /* spring to the layout target. k = 1−exp(−dt·follow); at 10 that is 0.15/frame, already
@@ -3406,7 +3418,7 @@ const SCRUB_FOR = { 'size':'size','cam.persp':'persp','cam.zoom':'zoom','cam.til
   'satDrift':'satDrift',
   'phys.follow':'follow','phys.damp':'damp','phys.collide':'collide','phys.radius':'pradius',
   'phys.swirl':'swirl','phys.attract':'attract','phys.gravity':'gravity','phys.flock':'flock',
-  'logoAvoid':'logoAvoid','cam.spin':'spin' };
+  'logoAvoid':'logoAvoid','cam.spin':'spin','cam.sway':'sway' };
 /* Any edit OUTSIDE the matrix must rewrite the base, or the drive overwrites the
    user's hand on the very next frame (the classic EQJ trap). */
 function rebase(key,v){ /* bases are keyed layer::path — clear every match for this path */
@@ -4449,6 +4461,7 @@ const MAP_GROUPS=[
     ['cam.persp', 'перспектива'],
     ['cam.zoom',  'зум'],
     ['cam.spin',  'автоспин'],
+    ['cam.sway',  'авто-наклон'],
     ['cam.tilt',  'наклон'],
     ['cam.yaw',   'поворот']]],
   ['SWIRL · вихрь и снос', [
@@ -4568,7 +4581,7 @@ function syncAllScrubs(){
     /* the view is per layer now, so these four read the FOCUSED layer's — without this the
        Space panel kept showing the numbers of whichever layer was focused when the app
        booted, while the drag moved a different one */
-    persp:state.cam.persp, zoom:state.cam.zoom, tilt:state.cam.tilt, spin:state.cam.spin,
+    persp:state.cam.persp, zoom:state.cam.zoom, tilt:state.cam.tilt, spin:state.cam.spin, sway:state.cam.sway,
     /* the macro faders are panel pose: a scene recall must move them to where they sat */
     mSpeed:state.motion.speed, mChar:state.motion.y, mChaos:state.motion.chaos,
     kSectors:state.kaleido.sectors, kRoll:state.kaleido.roll, kRate:state.kaleido.rate,
@@ -4623,7 +4636,8 @@ for(const [slot,key,cfg] of [
   ['persp','cam.persp',{min:0,max:1.2,step:0.01,label:'Perspective'}],
   ['zoom', 'cam.zoom', {min:0.4,max:2.4,step:0.01,label:'Zoom'}],
   ['tilt', 'cam.tilt', {min:-1,max:1,step:0.01,label:'Tilt'}],
-  ['spin', 'cam.spin', {min:-0.5,max:0.5,step:0.005,label:'Auto spin'}]])
+  ['spin', 'cam.spin', {min:-0.5,max:0.5,step:0.005,label:'Auto spin'}],
+  ['sway', 'cam.sway', {min:0,max:0.5,step:0.005,label:'Auto tilt'}]])
   mount(slot,{...cfg, value:state.cam[key.slice(4)], allowExtend:true,
     onInput:v=>{ const L=activeLayer(); if(L) setLayerDriven(L,key,v); }});
 mount('bgL',{min:0.05,max:0.4,step:0.005,value:state.bgL,label:'Background lightness',
@@ -4951,8 +4965,6 @@ function renderDistortion(){
     add.setAttribute('aria-expanded',pick.hidden?'false':'true'); });
   wrap.append(add,pick); host.appendChild(wrap);
 }
-renderDistortion();
-
 /* ── scenes · rack ── */
 /* Кнопки приёмов, селектор Quantise и тумблер Auto-randomise жили в снятой панели.
    Их слушатели удалены здесь же: querySelector по исчезнувшему узлу — это null и
@@ -5004,7 +5016,7 @@ const DESC={
   'stroke':'Draw bodies as outlines instead of fills',
   'face':'0 = billboard facing you, 1 = each body turns into its own heading',
   'varSize':'0 = every body the same calibre, 1 = full spread',
-  'varTilt':'0 = all at one angle, 1 = every body its own tilt',
+  'varTilt':'How far bodies are allowed to differ in tilt. 0 = the whole field at one angle, 1 = every body its own. The angles themselves are seeded — RE-DEAL rolls them again',
 
   /* ── forces ────────────────────────────────────────────────────────── */
   'behSel':'Motion Primer preset — a whole force set at once, overwrites the sliders below',
@@ -5388,7 +5400,6 @@ function renderLayers(){
   renderFocus();
   /* стек искажений принадлежит СЛОЮ, поэтому едет за фокусом вместе с карточкой:
      панель, показывающая чужие слоты, врёт ровно так же, как показывающая чужие ручки */
-  if(typeof renderDistortion==='function') renderDistortion();
 }
 
 /* ── the focused layer's settings, one section, below the stack ──────────────────
@@ -5540,7 +5551,15 @@ function renderFocus(){
      What stays: the four words (density · scale · spacing · size) and the four forces you
      actually reach for mid-set. Everything else is preparation — set once, then forget —
      and lives one click away. The rows are identical either way; only the fold moves. */
-  const PRIMARY_LOOK=['size','varSize'];
+  /* Роб, 2026-07-20: «добавь в pulse burst в общих настройках, насколько мы
+     допускаем диапазон наклона объекта — некоторые объекты слишком сильно
+     привязаны к исходным своим положениям… непонятно, что на это влияет, надо
+     вывести более явно».
+     Ручка была — `varTilt`, — но лежала в свёрнутой секции между `radius` и
+     `tint` под именем «tilt variation», то есть ровно там и так, чтобы её никто
+     не нашёл. Разброс наклонов — свойство того же регистра, что калибр тела:
+     чем поле отличается от самого себя. Поэтому встаёт рядом с ними. */
+  const PRIMARY_LOOK=['size','varSize','varTilt'];
   const PRIMARY_MOTION=['phys.swirl','phys.collide','phys.attract','phys.follow'];
   const rest=[];
   const restCap=t=>rest.push({cap:t});
@@ -5601,7 +5620,7 @@ function renderFocus(){
 
   /* ── the fold ── */
   restCap('marks');
-  restRows(['angles','radius','stroke','varTilt','tint'].map(byKey));
+  restRows(['angles','radius','stroke','tint'].map(byKey));
   restCap('web · flow');
   restRows(['links','linkDist','linkMax','streak','smear'].map(byKey));
   restCap('lava · detail');
@@ -6445,6 +6464,15 @@ function frame(){
      отдельно». `setLayerDriven`, not a raw +=, because yaw is modulatable and a bare
      assignment is undone by restoreMatrix at the foot of the frame. */
   for(const L of layers) if(L.cam && L.cam.spin) setLayerDriven(L,'cam.yaw', L.cam.yaw + L.cam.spin*dt);
+  /* Авто-наклон ходит МАЯТНИКОМ, а не наматывается как поворот. Наклон живёт в
+     ±1 и означает, с какой стороны мы смотрим на сцену; накопление уводило бы её
+     через макушку раз за разом — это уже не «оживить», а кувырок. У края ход
+     разворачивается, поэтому сцена медленно качается и всегда остаётся читаемой. */
+  for(const L of layers){ const C=L.cam; if(!C||!C.sway) continue;
+    if(C.swayDir==null) C.swayDir=1;
+    let nt=C.tilt + C.sway*C.swayDir*dt;
+    if(nt>1){ nt=1; C.swayDir=-1; } else if(nt<-1){ nt=-1; C.swayDir=1; }
+    setLayerDriven(L,'cam.tilt',nt); }
 
   /* A preset with its own `step` integrates ITSELF — that is what a Motion Primer
      behaviour is. Its bodies still go through the shared blend afterwards, but their
