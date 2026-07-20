@@ -296,6 +296,26 @@ kbd{font:inherit;background:var(--tint);border:1px solid var(--line);border-radi
 .mcn.nw{left:5px;top:5px}.mcn.ne{right:5px;top:5px}
 .mcn.sw{left:5px;bottom:5px}.mcn.se{right:5px;bottom:5px}
 
+/* ═══ Distortion · Vector — карточки слотов (перенос грамматики Synthex, A2) ═══
+   Карточка = пилюля эффекта + ✕ + его ручки; «＋» внизу раскрывает список.
+   Роб про эту грамматику: «карточки, не вариатив» — активный слот виден сразу и
+   тягается без выбора из выпадашки. */
+.dcard{border:1px solid var(--line);border-radius:var(--r-mid);padding:var(--sp-2);
+  margin:var(--sp-2) 0;background:var(--tint-card)}
+.dcard .dchd{display:flex;align-items:center;justify-content:space-between;
+  gap:var(--sp-1);margin-bottom:var(--sp-1)}
+.dcard .dcname{display:inline-flex;align-items:center;min-width:0;height:20px;
+  padding:0 var(--sp-2);background:var(--ink);color:var(--paper);border-radius:var(--r-full);
+  font-size:var(--fz-m);letter-spacing:.04em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dcard .dcx{flex:none;width:20px;height:20px;padding:0;border:1px solid transparent;
+  border-radius:var(--r-ctl);background:var(--tint);color:var(--muted);font:inherit;
+  font-size:var(--fz-m);line-height:1;cursor:pointer}
+@media(hover:hover) and (pointer:fine){ .dcard .dcx:hover{background:var(--tint-hi);color:var(--ink)} }
+.dcard .dcx:active{transform:scale(.97)}
+.dcard .row{margin:var(--sp-1) 0}
+.dcpick{margin-top:var(--sp-1)}
+.dcpick button{font-size:var(--fz-s)}
+
 /* ═══ layer stack — EQJ .lrow grammar ═══ */
 #addLayerBar{margin-bottom:var(--sp-2)}
 #addLayerBar select{width:100%}
@@ -547,6 +567,15 @@ legend svg{margin-right:6px;vertical-align:-2px;flex:none}
       <input type="file" id="fileIn" accept="image/*" multiple hidden>
       <p class="note" id="assetNote">No assets — primitives only.</p>
     </fieldset>
+
+    <!-- Векторные искажения (Роб, видео 4:52). Место — ВНИЗУ ЛЕВОЙ колонки, как в
+         Synthex («слева-снизу» в его словах): это правка ГЕОМЕТРИИ слоя, а не
+         мастеринг кадра, поэтому живёт с тем, что описывает слой, а не с
+         пост-эффектами справа. Сначала я поставил её справа — мимо: там мастеринг. -->
+    <fieldset id="gDist"><legend>Distortion · Vector</legend>
+      <div id="distStack"></div>
+    </fieldset>
+
 
     <!-- Program extras: controls that cannot be generated from a param declaration
          (a text field, a font picker). They live here once, keep their wiring, and are
@@ -2915,6 +2944,8 @@ function makeLayer(prog,variant){
        outright, so its controls do exactly what they say and two layers cannot contradict
        each other. Compositing moves to where EQJ always had it: opacity and blend. */
     bodies:[], count:seedCount, opacity:1, blend:'source-over', backing:0,
+    /* свой стек векторных искажений, до трёх слотов (Роб, 4:52) */
+    distort:[],
     /* its own forces (A3.1) — a behaviour dropped on this card cannot reach a stranger */
     phys:DEF_PHYS(), cam:Object.assign(DEF_CAM(), camSeed||{}),
     /* ── arriving and leaving ────────────────────────────────────────────────
@@ -3642,6 +3673,122 @@ const VMAX_PER_SEC=6;
 const GRID=new Map();
 function cellKey(x,y,c){ return ((x/c)|0)+','+((y/c)|0); }
 function cellKey3(b,c){ return ((b.x/c)|0)+','+((b.y/c)|0)+','+((b.z/c)|0); }
+/* ══════════════════════════════════════════════════════════════════════════
+   ВЕКТОРНЫЕ ИСКАЖЕНИЯ — перенос из Synthex Engine (Роб, видео 4:52)
+
+   «Внизу надо сделать наши векторные искажения — liquify, noise, всякие такие
+   штуки, так чтобы то, что быстро рендерится, и что мы можем присвоить по
+   принципу того, что мы сделали в Synthex Engine в пятницу… сугубо те шейдеры,
+   но не шейдеры, как типа эффекты, которые сугубо к векторным элементам.»
+
+   «Не шейдеры» — существенная оговорка: в Synthex есть ДВЕ системы, и просят
+   именно математическую (`Distortion · Vector`, левая панель снизу), а не
+   WebGL-стек. Здесь чистый JS, ноль зависимостей, и потому он и «быстро
+   рендерится»: поле считается по точке, а не по пикселю.
+
+   Математика перенесена ДОСЛОВНО (Synthex Engine — v1.html :2045-2128), включая
+   калибровочные константы: amountQ = amount·0.25 — общая граница смещения,
+   2.08/2.02 в liquid нормируют аналитическую производную потенциала. Свои числа
+   здесь заводить нельзя, иначе два движка разъедутся.
+
+   Отличие переноса: в Synthex поле гнёт ВЕРШИНЫ кривых, здесь — ПОЛОЖЕНИЯ ТЕЛ.
+   У BRYK тело это точка с формой, а не полилиния, и поле по 520 точкам стоит
+   доли миллисекунды против subdivision каждой фигуры. Поэтому `rough` и `zigzag`
+   не переносятся вовсе: они смещают вдоль НОРМАЛИ ПУТИ, которой у точки нет, и
+   подделывать её значило бы получить другой эффект под тем же именем.
+
+   Мир BRYK примерно [-1.6..1.6] — то же порядковое пространство, что unit-space
+   Synthex, поэтому калибровка амплитуд переносится без пересчёта.
+   ══════════════════════════════════════════════════════════════════════════ */
+const dFract=x=>x-Math.floor(x);
+const dSmooth=(a,b,x)=>{ x=Math.max(0,Math.min(1,(x-a)/(b-a))); return x*x*(3-2*x); };
+/* скалярный потенциал: его вихрь (curl) бездивергентен, поэтому поток «дышит»,
+   не разрывая композицию и не стягивая её в сток */
+function dPotential(x,y,t,s){ return Math.sin(x*s+t*0.6)*Math.cos(y*s*1.3-t*0.4)
+  +0.6*Math.sin(y*s*0.7-t*0.5)*Math.cos(x*s*1.1+t*0.3)+0.4*Math.sin((x+y)*s*0.9+t*0.2); }
+function dCurl(x,y,t,scale,e=0.02){
+  const dPdy=(dPotential(x,y+e,t,scale)-dPotential(x,y-e,t,scale))/(2*e);
+  const dPdx=(dPotential(x+e,y,t,scale)-dPotential(x-e,y,t,scale))/(2*e);
+  return {x:dPdy,y:-dPdx}; }
+
+const DISTORT_FIELDS={
+  warp:(o,x,y,sl)=>{ o.x=x+Math.sin((x+sl.timeX)*sl.scale*3)*Math.cos((y-sl.timeY)*sl.scale*3)*sl.amountQ;
+    o.y=y+Math.sin(y*sl.scale*4+sl.time)*sl.amountQ; },
+  /* прямые выборки потенциала вместо curl: две раскоррелированные оси дают
+     семенной нерегулярный шум, не платя четырьмя конечными разностями */
+  turbulence:(o,x,y,sl)=>{ o.x=x+dPotential(x+sl.seedX,y-sl.seedY,sl.time,sl.scale)*sl.amountH;
+    o.y=y+dPotential(y-sl.seedY2,x+sl.seedX2,sl.timeB,sl.scaleY)*sl.amountH; },
+  /* «liquify». Сетка 32×32 на кадр вместо точного curl по каждой точке: 1024
+     выборки против 520·4, и билинейная интерполяция между ними */
+  liquid:(o,x,y,sl)=>{ const g=sl.grid,n=g.n;
+    const ux=clamp((x-g.minX)*g.invX,0,n-1.000001),uy=clamp((y-g.minY)*g.invY,0,n-1.000001);
+    const x0=ux|0,y0=uy|0,x1=Math.min(n-1,x0+1),y1=Math.min(n-1,y0+1),fx=ux-x0,fy=uy-y0;
+    const a=(y0*n+x0)*2,b=(y0*n+x1)*2,c=(y1*n+x0)*2,d=(y1*n+x1)*2,f=g.field;
+    const tX=f[a]+(f[b]-f[a])*fx,bX=f[c]+(f[d]-f[c])*fx;
+    const tY=f[a+1]+(f[b+1]-f[a+1])*fx,bY=f[c+1]+(f[d+1]-f[c+1])*fx;
+    o.x=x+(tX+(bX-tX)*fy)*sl.liquidX; o.y=y+(tY+(bY-tY)*fy)*sl.liquidY; },
+  twirl:(o,x,y,sl)=>{ const dx=x-sl.centerX,dy=y-sl.centerY,r=Math.hypot(dx,dy);
+    const a=sl.amountTau*Math.exp(-r*sl.scale),co=Math.cos(a),si=Math.sin(a);
+    o.x=sl.centerX+dx*co-dy*si; o.y=sl.centerY+dx*si+dy*co; },
+  pinch:(o,x,y,sl)=>{ const dx=x-sl.centerX,dy=y-sl.centerY,r=Math.hypot(dx,dy);
+    const f=1-sl.amount*Math.exp(-r*sl.scale);
+    o.x=sl.centerX+dx*f; o.y=sl.centerY+dy*f; },
+  ripple:(o,x,y,sl)=>{ const dx=x-sl.centerX,dy=y-sl.centerY,r=Math.hypot(dx,dy)||1e-9;
+    const k=Math.sin(r*sl.scale*Math.PI*2-sl.time)*sl.amountQ*0.6;
+    o.x=x+dx/r*k; o.y=y+dy/r*k; },
+  wave:(o,x,y,sl)=>{ const along=x*sl.waveCos+y*sl.waveSin;
+    const k=Math.sin(along*sl.scale*Math.PI*2+sl.time)*sl.amountQ;
+    o.x=x-sl.waveSin*k; o.y=y+sl.waveCos*k; },
+  lens:(o,x,y,sl)=>{ const dx=x-sl.centerX,dy=y-sl.centerY,r=Math.hypot(dx,dy)||1e-9;
+    const R=Math.max(0.2,sl.scale),g=1-dSmooth(0,R,r),k=sl.amountQ*g*(r/R),q=sl.amountQ;
+    o.x=x+Math.max(-q,Math.min(q,dx/r*k*R)); o.y=y+Math.max(-q,Math.min(q,dy/r*k*R)); },
+  bend:(o,x,y,sl)=>{ const k=sl.amountQ*((x*x)*sl.scale-0.5),q=sl.amountQ;
+    o.x=x; o.y=y+Math.max(-q,Math.min(q,k)); }
+};
+const DIST_EFFECTS=[['warp','Warp'],['turbulence','Turb'],['liquid','Liquid'],
+  ['twirl','Twirl'],['pinch','Pinch'],['ripple','Ripple'],['wave','Wave'],
+  ['lens','Lens'],['bend','Bend']];
+const DIST_SLOT_CAP=3;    /* бюджет, а не предел компилятора: стек считается весь */
+
+const DLIQ_N=32;
+function buildLiquidGrid(sl,bb){ const n=DLIQ_N;
+  const spanX=Math.max(0.001,bb.maxX-bb.minX), spanY=Math.max(0.001,bb.maxY-bb.minY);
+  const dx=spanX/(n-1), dy=spanY/(n-1), field=new Float32Array(n*n*2);
+  for(let gy=0;gy<n;gy++) for(let gx=0;gx<n;gx++){
+    const v=dCurl(bb.minX+gx*dx, bb.minY+gy*dy, sl.time, sl.scale), at=(gy*n+gx)*2;
+    field[at]=v.x; field[at+1]=v.y; }
+  sl.grid={n,field,minX:bb.minX,minY:bb.minY,invX:1/dx,invY:1/dy}; }
+
+/* Компиляция раз в кадр: вся тригонометрия от констант поднимается сюда, чтобы
+   внутренний цикл по телам не ветвился и ничего не пересчитывал. */
+function compileDistortion(slots,time,seed0,bb){ const plan=[];
+  for(const sl of slots||[]){
+    if(!sl||sl.on===0||!DISTORT_FIELDS[sl.id]) continue;
+    const amount=Math.max(0,+sl.amount||0); if(amount===0) continue;
+    const scale=Math.max(0.0001,+sl.scale||1.6);
+    const seed=((+sl.seed||seed0||1)%997);
+    const spd=(sl.speed==null?1:+sl.speed), ts=time*spd;
+    const c={ id:sl.id, field:DISTORT_FIELDS[sl.id], amountQ:amount*0.25, amountH:amount*0.125,
+      scale, scaleY:scale*1.07, time:ts, timeB:ts+11.7, timeX:ts*0.4, timeY:ts*0.3,
+      seedX:seed*0.019, seedY:seed*0.013, seedX2:seed*0.011, seedY2:seed*0.017 };
+    if(sl.id==='twirl'||sl.id==='pinch'||sl.id==='ripple'||sl.id==='lens'){
+      const ce=sl.center||{}; c.centerX=+ce.x||0; c.centerY=+ce.y||0; }
+    if(sl.id==='twirl'){ c.amountTau=amount*TAU*(1+0.35*Math.sin(ts*1.1)); }
+    if(sl.id==='pinch'){ c.amount=amount*(0.75+0.25*Math.sin(ts*1.3)); }
+    if(sl.id==='wave'){ const a=(+sl.angle||0)*Math.PI/180; c.waveCos=Math.cos(a); c.waveSin=Math.sin(a); }
+    if(sl.id==='liquid'){ c.liquidX=c.amountQ/(2.08*scale); c.liquidY=c.amountQ/(2.02*scale);
+      buildLiquidGrid(c, bb||{minX:-2,minY:-2,maxX:2,maxY:2}); }
+    plan.push(c); }
+  return plan; }
+
+/* Свёртка: слот n читает выход слота n−1. `out` переиспользуется, ноль аллокаций
+   на тело. Z не трогается ни одним полем — восстанавливается один раз в конце. */
+const DOUT={x:0,y:0};
+function applyDistortion(x,y,plan){ let px=x,py=y;
+  for(const sl of plan){ sl.field(DOUT,px,py,sl);
+    if(Number.isFinite(DOUT.x)&&Number.isFinite(DOUT.y)){ px=DOUT.x; py=DOUT.y; } }
+  DOUT.x=px; DOUT.y=py; return DOUT; }
+
 function curlAt(x,y,t,scale){
   /* ψ = sin(a)·cos(b); curl = (∂ψ/∂y, −∂ψ/∂x) — divergence-free by construction,
      so bodies swirl instead of piling into sinks.
@@ -3704,14 +3851,30 @@ function resolveContacts(act,dt){
     parts.push({ L, r:contactRadius(L), push:L.phys.collide, d3:L.phys.dim3>0.5 });
   }
   if(!parts.length) return;
-  /* one cell size for the shared grid, or bodies of different layers would be bucketed
-     on different lattices and never meet */
-  let rMax=0; for(const p of parts) rMax=Math.max(rMax,p.r);
+  const B=[];
+  /* 🔴 «Когда полностью выключаем хаос, он начинает рассыпаться в ячейки» (Роб, 4:22).
+     Личное пространство было ОДНО НА СЛОЙ: и тело в 250px, и крошка в 20px claim'или
+     одинаковый радиус. Крупные поэтому свободно проникали друг в друга и сливались
+     в единый силуэт — те самые «ячейки», особенно заметные при хаосе в нуле, когда
+     ничто не растаскивает застывшую кляксу.
+     Иерархия размеров (несколько крупных доминант + рой мелких, A3.3) без этого
+     читается не как иерархия ОБЪЕКТОВ, а как пятно: доминанты — единственное, что в
+     кадре крупное, и именно они сливались друг с другом.
+     Радиус берётся от собственного калибра тела; тело среднего размера сохраняет
+     прежнее поведение — это уточнение, а не перетюн. */
+  for(const p of parts){ const LK=p.L.look||{};
+    for(const b of p.L.bodies){
+      const own=(b.pd&&b.pd.size!=null) ? sizeMult(b.pd.size, LK.varSize==null?0:LK.varSize) : 1;
+      b.__r=p.r*clamp(own,0.45,2.6); b.__push=p.push; B.push(b); } }
+  /* Ячейка сетки — по САМОМУ КРУПНОМУ телу, и считается ПОСЛЕ раздачи радиусов:
+     бакет мельче радиуса доминанты означает, что две доминанты попадут в разные
+     ячейки и никогда не проверятся на контакт — ровно те пары, ради которых всё.
+     Одна ячейка на все слои, иначе тела разных слоёв лягут на разные решётки. */
+  let rMax=0; for(const b of B) if(b.__r>rMax) rMax=b.__r;
+  if(!rMax) for(const p of parts) rMax=Math.max(rMax,p.r);
   const c=Math.max(0.02,rMax*2);
   const D3=parts.some(p=>p.d3);
   GRID.clear();
-  const B=[];
-  for(const p of parts) for(const b of p.L.bodies){ b.__r=p.r; b.__push=p.push; B.push(b); }
   for(let i=0;i<B.length;i++){
     const k=D3 ? cellKey3(B[i],c) : cellKey(B[i].x,B[i].y,c);
     let arr=GRID.get(k); if(!arr){ arr=[]; GRID.set(k,arr); } arr.push(i);
@@ -4720,6 +4883,76 @@ renderShelf();
    focus moves. Two fixed selects in the right column could only ever address whoever
    happened to be focused, without saying so. */
 
+/* ── Distortion · Vector · панель (перенос грамматики Synthex A2, Роб 4:52) ─────
+   Слоты — карточки, а не выпадашка: активный эффект виден сразу и тягается без
+   выбора. Порядок карточек = порядок применения = порядок в массиве.
+   Стек принадлежит СЛОЮ, поэтому панель перестраивается при смене фокуса — как
+   и карточка слоя, по той же причине: это свойство слоя, а не сцены. */
+const DIST_DEF={ amount:0.35, scale:1.6, speed:1 };
+function newDistSlot(id,L){
+  const sl={ id, on:1, amount:DIST_DEF.amount, scale:DIST_DEF.scale, speed:DIST_DEF.speed };
+  if(id==='twirl'||id==='pinch'||id==='ripple'||id==='lens') sl.center={x:0,y:0};
+  if(id==='turbulence') sl.seed=(L&&L.seed)||1;
+  if(id==='wave') sl.angle=0;
+  return sl; }
+function distLabel(id){ const hit=DIST_EFFECTS.find(e=>e[0]===id); return hit?hit[1]:id; }
+
+function renderDistortion(){
+  const host=$('#distStack'); if(!host) return;
+  host.innerHTML='';
+  const L=activeLayer();
+  if(!L){ const n=document.createElement('div'); n.className='plateHint';
+    n.textContent='no layer'; host.appendChild(n); return; }
+  if(!Array.isArray(L.distort)) L.distort=[];
+
+  L.distort.forEach((sl,idx)=>{
+    const card=document.createElement('div'); card.className='dcard';
+    const hd=document.createElement('div'); hd.className='dchd';
+    hd.dataset.desc='One ordered vector-distortion slot — the stack runs top to bottom';
+    const nm=document.createElement('span'); nm.className='dcname';
+    nm.textContent=distLabel(sl.id); nm.title=distLabel(sl.id); hd.appendChild(nm);
+    const x=document.createElement('button'); x.type='button'; x.className='dcx';
+    x.textContent='✕'; x.setAttribute('aria-label','Remove '+distLabel(sl.id));
+    x.addEventListener('click',()=>{ L.distort.splice(idx,1); renderDistortion(); });
+    hd.appendChild(x); card.appendChild(hd);
+
+    const mk=(key,label,min,max,step)=>{
+      const row=document.createElement('div'); row.className='row';
+      const lb=document.createElement('label'); lb.textContent=label;
+      const slot=document.createElement('span'); row.append(lb,slot); card.appendChild(row);
+      const sc=mkScrub({min,max,step,value:sl[key]==null?0:sl[key],allowExtend:false,
+        k:'dist.'+sl.id+'.'+key, label:distLabel(sl.id)+' '+label,
+        onInput:v=>{ sl[key]=v; }});
+      slot.appendChild(sc.el); };
+    mk('amount','Amount',0,1,0.01);
+    mk('scale','Scale',0.4,4,0.01);
+    /* у lens и bend поле статично по донору — мёртвую ручку не показываем */
+    if(sl.id!=='lens'&&sl.id!=='bend') mk('speed','Speed',0,2,0.01);
+    if(sl.id==='wave') mk('angle','Angle',0,180,1);
+    host.appendChild(card);
+  });
+
+  const wrap=document.createElement('div');
+  const add=document.createElement('button'); add.type='button'; add.className='btn wide';
+  add.innerHTML='<span aria-hidden="true">＋</span> Distortion';
+  add.dataset.desc='Add a vector-distortion slot — bends the geometry, not the pixels';
+  const pick=document.createElement('div'); pick.className='seg wrap dcpick'; pick.hidden=true;
+  pick.setAttribute('role','group'); pick.setAttribute('aria-label','Distortion effect');
+  const atCap=L.distort.length>=DIST_SLOT_CAP;
+  if(atCap){ add.disabled=true; add.title=DIST_SLOT_CAP+' slots max'; }
+  for(const [id,short] of DIST_EFFECTS){
+    const b=document.createElement('button'); b.type='button'; b.className='btn';
+    b.textContent=short;
+    b.addEventListener('click',()=>{ if(L.distort.length>=DIST_SLOT_CAP) return;
+      L.distort.push(newDistSlot(id,L)); renderDistortion();
+      setStatus('distortion · '+short,'ok'); });
+    pick.appendChild(b); }
+  add.addEventListener('click',()=>{ pick.hidden=!pick.hidden;
+    add.setAttribute('aria-expanded',pick.hidden?'false':'true'); });
+  wrap.append(add,pick); host.appendChild(wrap);
+}
+renderDistortion();
+
 /* ── scenes · rack ── */
 /* Кнопки приёмов, селектор Quantise и тумблер Auto-randomise жили в снятой панели.
    Их слушатели удалены здесь же: querySelector по исчезнувшему узлу — это null и
@@ -5153,6 +5386,9 @@ function renderLayers(){
   });
   const rl=$('#rackLayer'); if(rl) rl.textContent=activeLayer()?('▸ '+activeLayer().label):'— no layer';
   renderFocus();
+  /* стек искажений принадлежит СЛОЮ, поэтому едет за фокусом вместе с карточкой:
+     панель, показывающая чужие слоты, врёт ровно так же, как показывающая чужие ручки */
+  if(typeof renderDistortion==='function') renderDistortion();
 }
 
 /* ── the focused layer's settings, one section, below the stack ──────────────────
@@ -6329,6 +6565,13 @@ function frame(){
     const LLIFE=L.life?MEASE(L.life.k):1, CASCADE=0.45;
 
     const sizeMul = P.sizeScale ? P.sizeScale(N,L.params) : 1;
+    /* Стек искажений компилируется ОДИН раз на слой в кадре. Границы для liquid —
+       по кадру мира, а не по облаку тел: тела в нём и живут, а bbox по ним прыгал
+       бы каждый кадр вместе с дыханием поля, и сетка ползла бы сама по себе. */
+    const DPLAN = (L.distort && L.distort.length)
+      ? compileDistortion(L.distort, (L.clock?L.clock.scene:t), L.seed,
+          { minX:-vxw*1.2, minY:-vyw*1.2, maxX:vxw*1.2, maxY:vyw*1.2 })
+      : null;
     const draws=[];
     for(let i=0;i<N;i++){
       const b=arr[i];
@@ -6376,7 +6619,12 @@ function frame(){
       }
       if(state.logoAvoid>0.001) avoidLogo(b,dt,state.logoAvoid);
       if(tg.skip) continue;
-      const P2=project({x:b.x,y:b.y,z:b.z},LCAM);
+      /* Искажение гнёт ТОЛЬКО то, что рисуется: b.x/b.y остаются нетронутыми,
+         поэтому физика, столкновения и цели считаются по неискажённому миру.
+         Иначе поле кормило бы само себя через пружину и разгонялось. */
+      let dxp=b.x, dyp=b.y;
+      if(DPLAN && DPLAN.length){ const q=applyDistortion(b.x,b.y,DPLAN); dxp=q.x; dyp=q.y; }
+      const P2=project({x:dxp,y:dyp,z:b.z},LCAM);
       if(P2.x<-200||P2.x>W+200||P2.y<-200||P2.y>H+200) continue;
       /* CASCADE from distance, not from index. A stagger keyed on `i` reads as a `for`
          loop; keyed on how far a body sits from the centre it reads as a wave crossing

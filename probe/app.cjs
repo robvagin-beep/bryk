@@ -1054,6 +1054,66 @@ const ok = (n, pass, extra) => R.push({ n, pass: !!pass, extra: extra == null ? 
   ok('a rack row on auto spin turns the scene', view.idle < 0.01 && view.driven > 0.1,
      'idle ' + view.idle.toFixed(3) + ' → driven ' + view.driven.toFixed(3) + ' rad');
 
+  /* ── ВЕКТОРНЫЕ ИСКАЖЕНИЯ (Роб, видео 4:52) ───────────────────────────────────
+     Перенос математики из Synthex. Гейт спрашивает три вещи, и каждая ловит свой
+     способ соврать: поле обязано ГНУТЬ КАРТИНКУ (а не просто добавить карточку),
+     стек обязан складываться (а не применять только первый слот), и — главное —
+     искажение НЕ ДОЛЖНО трогать физику: оно гнёт то, что рисуется, а координаты
+     тела остаются неискажёнными. Иначе поле кормит само себя через пружину. */
+  const distR = await page.evaluate(async () => {
+    const r = []; const put = (n, c, e) => r.push([n, !!c, e == null ? '' : String(e)]);
+    const s = ms => new Promise(f => setTimeout(f, ms));
+    const B2 = window.__bryk;
+    B2.layers().slice().forEach(x => B2.removeLayer(x.id));
+    const L = B2.addLayer('pat-burst'); L.matrix.length = 0;
+    B2.bases().clear(); B2.state.cam.spin = 0; B2.state.motion.chaos = 0;
+    await s(900);
+
+    const lit0 = B2.silhouette();
+    const dead = [];
+    /* У `lens` (и только у него) `scale` — это РАДИУС действия, а не частота поля:
+       за его пределом смещение равно нулю по построению. На 1.6 он честно не
+       доставал до большинства тел, и гейт объявлял мёртвым живое поле. */
+    for (const id of ['warp','turbulence','liquid','twirl','pinch','ripple','wave','lens','bend']) {
+      const scale = id === 'lens' ? 3.4 : 1.6;
+      L.distort = [{ id, on:1, amount:0.8, scale, speed:1, center:{x:0,y:0}, seed:11, angle:30 }];
+      await s(600);
+      if (Math.abs(B2.silhouette() - lit0) < 1500) dead.push(id);
+    }
+    put('каждое поле гнёт картинку, ни одного мёртвого', dead.length === 0,
+        dead.length ? ('не двигают: ' + dead.join(', ')) : '9 полей');
+
+    /* Физика неприкосновенна: тела стоят там же, искажена только отрисовка.
+       Сцену для этого надо ОСТАНОВИТЬ — она дышит сама, и два снимка через
+       секунду разойдутся без всякого искажения. Первая версия мерила именно это
+       и обвиняла искажение в чужом движении. */
+    L.distort = [];
+    L.params.dance = 0; L.phys.follow = 14; L.phys.swirl = 0;
+    L.phys.gravity = 0; L.phys.flock = 0; L.phys.collide = 0;
+    await s(1600);
+    const pos0 = L.bodies.slice(0, 120).map(b => [b.x, b.y]);
+    L.distort = [{ id:'liquid', on:1, amount:0.9, scale:0.95, speed:0 }];
+    await s(900);
+    const pos1 = L.bodies.slice(0, 120).map(b => [b.x, b.y]);
+    let drift = 0;
+    for (let i = 0; i < Math.min(pos0.length, pos1.length); i++)
+      drift = Math.max(drift, Math.abs(pos0[i][0]-pos1[i][0]) + Math.abs(pos0[i][1]-pos1[i][1]));
+    put('искажение не трогает физику — гнётся отрисовка, не тела',
+        drift < 0.05, 'худший снос тела ' + drift.toFixed(4));
+
+    /* стек складывается, а не применяет только первый слот */
+    L.distort = [{ id:'liquid', on:1, amount:0.5, scale:0.95, speed:1 }];
+    await s(700); const one = B2.silhouette();
+    L.distort = [{ id:'liquid', on:1, amount:0.5, scale:0.95, speed:1 },
+                 { id:'twirl',  on:1, amount:0.4, scale:0.95, speed:1, center:{x:0,y:0} }];
+    await s(700); const two = B2.silhouette();
+    put('второй слот стека складывается с первым', Math.abs(two - one) > 1500,
+        one + ' → ' + two);
+    L.distort = [];
+    return r;
+  });
+  for (const [n, p, e] of distR) ok(n, p, e);
+
   /* ── ЗАВИСИМАЯ РУЧКА БУДИТ ХОЗЯИНА (Роб, видео 1:06) ─────────────────────────
      «Вот это вот fold, fold, fold — непонятно, что оно даёт. Я не прошу переназвать,
      я прошу дать по-другому, чтобы было заметно и ощутимо.»
